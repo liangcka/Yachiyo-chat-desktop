@@ -20,6 +20,7 @@ export interface MenuDrawerProps {
   onSkills: () => void;
   onCompress: () => void;
   onUserMemory: () => void;
+  onWorkspace?: () => void;
 }
 
 /** 侧边栏抽屉组装层：布局、弹层基础设施与各功能分区。 */
@@ -36,6 +37,7 @@ export function MenuDrawer({
   onSkills,
   onCompress,
   onUserMemory,
+  onWorkspace,
   open,
 }: MenuDrawerProps) {
   // 解构消费 usePanel 结果（与 HistoryPanel 一致）：避免编译器把成员访问视为渲染期读 ref
@@ -73,6 +75,7 @@ export function MenuDrawer({
           onNewChat={onNewChat}
           onSkills={onSkills}
           onUserMemory={onUserMemory}
+          onWorkspace={onWorkspace}
         />
         <LanguageSection copy={copy} locale={locale} onLocale={onLocale} />
         <DangerFooter copy={copy} onClearData={onClearData} onClose={onClose} onSignOut={onSignOut} />

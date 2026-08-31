@@ -1,7 +1,8 @@
 import { Copy, RotateCcw, RotateCw } from "lucide-react";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, Locale } from "../domain/chat";
 import { copyFor } from "../i18n/messages";
+import { ToolCard } from "./tools/ToolCard";
 
 export interface MessageBubbleProps {
   locale: Locale;
@@ -13,6 +14,82 @@ export interface MessageBubbleProps {
   onRegenerate?: () => void;
   onToast?: (message: string) => void;
   onImageLoad?: () => void;
+}
+
+interface ParsedContentChunk {
+  type: "text" | "tool_call";
+  content: string;
+  toolName?: string;
+  args?: Record<string, unknown>;
+  output?: string;
+}
+
+function parseMessageToolChunks(text: string): ParsedContentChunk[] {
+  const chunks: ParsedContentChunk[] = [];
+  const toolCallRegex = /```(?:tool_call|tool)\s*\n([\s\S]*?)\n```/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = toolCallRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      const textChunk = text.slice(lastIndex, match.index).trim();
+      if (textChunk) {
+        chunks.push({ type: "text", content: textChunk });
+      }
+    }
+    const jsonStr = match[1].trim();
+    try {
+      const parsed = JSON.parse(jsonStr) as {
+        name?: string;
+        tool?: string;
+        arguments?: Record<string, unknown>;
+        args?: Record<string, unknown>;
+        output?: string;
+      };
+      const toolName = parsed.name || parsed.tool || "tool";
+      const args = parsed.arguments || parsed.args;
+      const output = parsed.output;
+
+      // If the preceding chunk is a tool_call for the same tool without output, update it instead of creating a duplicate
+      const lastChunk = chunks[chunks.length - 1];
+      if (
+        lastChunk !== undefined &&
+        lastChunk.type === "tool_call" &&
+        lastChunk.toolName === toolName &&
+        lastChunk.output === undefined &&
+        output !== undefined
+      ) {
+        lastChunk.output = output;
+        if (args !== undefined) {
+          lastChunk.args = args;
+        }
+      } else {
+        chunks.push({
+          type: "tool_call",
+          content: jsonStr,
+          toolName,
+          args,
+          output,
+        });
+      }
+    } catch {
+      chunks.push({ type: "text", content: match[0] });
+    }
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    const trailing = text.slice(lastIndex).trim();
+    if (trailing) {
+      chunks.push({ type: "text", content: trailing });
+    }
+  }
+
+  if (chunks.length === 0 && text.trim().length > 0) {
+    chunks.push({ type: "text", content: text });
+  }
+
+  return chunks;
 }
 
 function messageLabel(role: ChatMessage["role"], locale: Locale): string {
@@ -47,6 +124,7 @@ export const MessageBubble = memo(function MessageBubble({
   const hideCitations = showSources === false && message.sources !== undefined && message.sources.length > 0;
   const strippedText = hideCitations ? stripCitationMarkers(message.text) : message.text;
   const displayText = strippedText.trim().length > 0 ? strippedText : message.text;
+  const parsedChunks = useMemo(() => parseMessageToolChunks(displayText), [displayText]);
 
   const hasText = displayText.trim().length > 0;
   const hasImage = message.imageId !== undefined;
@@ -168,6 +246,11 @@ export const MessageBubble = memo(function MessageBubble({
       aria-label={messageLabel(message.role, locale)}
       className={`message-bubble message-bubble--${message.role}${isTyping ? " message-bubble--typing" : ""}${menuOpen ? " message-bubble--menu-open" : ""}`}
       data-status={message.status}
+      onContextMenu={hasMenuOptions ? handleContextMenu : undefined}
+      onPointerCancel={handlePointerUp}
+      onPointerDown={hasMenuOptions ? handlePointerDown : undefined}
+      onPointerMove={hasMenuOptions ? handlePointerMove : undefined}
+      onPointerUp={handlePointerUp}
       onClick={(e) => {
         if (ignoreNextClickRef.current) {
           e.preventDefault();
@@ -175,11 +258,6 @@ export const MessageBubble = memo(function MessageBubble({
           ignoreNextClickRef.current = false;
         }
       }}
-      onContextMenu={hasMenuOptions ? handleContextMenu : undefined}
-      onPointerCancel={handlePointerUp}
-      onPointerDown={hasMenuOptions ? handlePointerDown : undefined}
-      onPointerMove={hasMenuOptions ? handlePointerMove : undefined}
-      onPointerUp={handlePointerUp}
     >
       {hasImage ? (
         imageUrl !== undefined ? (
@@ -196,7 +274,19 @@ export const MessageBubble = memo(function MessageBubble({
         </span>
       ) : hasText ? (
         <>
-          <p>{displayText}</p>
+          {parsedChunks.map((chunk, idx) => {
+            if (chunk.type === "tool_call" && chunk.toolName) {
+              return (
+                <ToolCard
+                  key={idx}
+                  toolName={chunk.toolName}
+                  args={chunk.args}
+                  output={chunk.output}
+                />
+              );
+            }
+            return <p key={idx}>{chunk.content}</p>;
+          })}
           {message.truncated === true ? (
             <span className="message-bubble__truncated">{copyFor(locale).truncated}</span>
           ) : null}

@@ -1,0 +1,143 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ChatMessage } from "../domain/chat";
+
+export interface ContextMeterProps {
+  messages: ChatMessage[];
+  contextLimit?: number; // default e.g. 128000
+}
+
+const RADIUS = 5.5;
+const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+
+function formatTokens(num: number): string {
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
+  if (num >= 1_000) return `${Math.round(num / 1_000)}k`;
+  return `${num}`;
+}
+
+export function ContextMeter({ messages, contextLimit = 128_000 }: ContextMeterProps) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLSpanElement | null>(null);
+
+  // 估算 Token 用量（中文 ~1.5 字符/token，英文代码 ~3.5 字符/token，平均约 2.2 字符/token）
+  const breakdown = useMemo(() => {
+    const systemTokens = 1200; // 角色提示词与系统设定基线
+    const toolsTokens = 600; // 联网检索及工具 schema 基线
+    let messageChars = 0;
+    for (const msg of messages) {
+      messageChars += msg.text.length;
+    }
+    const messageTokens = Math.ceil(messageChars / 2.2);
+    const usedTokens = systemTokens + toolsTokens + messageTokens;
+    const percent = Math.min(100, Math.max(1, Math.round((usedTokens / contextLimit) * 100)));
+    return {
+      systemTokens,
+      toolsTokens,
+      messageTokens,
+      usedTokens,
+      percent,
+      contextWindow: contextLimit,
+    };
+  }, [messages, contextLimit]);
+
+  // 点击外部或按 Esc 关闭弹出层
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.target instanceof Node && rootRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const percent = breakdown.percent;
+  const strokeDash = (CIRCUMFERENCE * percent) / 100;
+
+  return (
+    <span ref={rootRef} className="context-meter-root">
+      <button
+        type="button"
+        className="context-meter-trigger"
+        aria-label={`上下文已用 ${percent}%`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={`上下文已用 ${percent}% (~${formatTokens(breakdown.usedTokens)} / ${formatTokens(breakdown.contextWindow)})`}
+        onClick={() => setOpen(!open)}
+      >
+        <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true">
+          <circle className="context-meter-track" cx="7" cy="7" r={RADIUS} />
+          <circle
+            className="context-meter-fill"
+            cx="7"
+            cy="7"
+            r={RADIUS}
+            strokeDasharray={`${strokeDash} ${CIRCUMFERENCE}`}
+            transform="rotate(-90 7 7)"
+          />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="context-meter-panel" role="dialog" aria-label="上下文用量详情">
+          <div className="context-meter-panel__header">
+            <span className="context-meter-panel__title">上下文已用</span>
+            <span className="context-meter-panel__percent">{percent}%</span>
+            <span className="context-meter-panel__figures">
+              {`~${formatTokens(breakdown.usedTokens)} / ${formatTokens(breakdown.contextWindow)}`}
+            </span>
+          </div>
+
+          <div className="context-meter-panel__bar">
+            <div
+              className="context-meter-panel__segment context-meter-panel__segment--system"
+              style={{ width: `${(breakdown.systemTokens / breakdown.usedTokens) * percent}%` }}
+              title={`系统设定: ~${formatTokens(breakdown.systemTokens)}`}
+            />
+            <div
+              className="context-meter-panel__segment context-meter-panel__segment--tools"
+              style={{ width: `${(breakdown.toolsTokens / breakdown.usedTokens) * percent}%` }}
+              title={`工具与技能: ~${formatTokens(breakdown.toolsTokens)}`}
+            />
+            <div
+              className="context-meter-panel__segment context-meter-panel__segment--messages"
+              style={{ width: `${(breakdown.messageTokens / breakdown.usedTokens) * percent}%` }}
+              title={`对话消息: ~${formatTokens(breakdown.messageTokens)}`}
+            />
+          </div>
+
+          <div className="context-meter-panel__rows">
+            <div className="context-meter-panel__row">
+              <span className="context-meter-panel__label">
+                <span className="context-meter-panel__swatch context-meter-panel__swatch--system" />
+                系统提示词
+              </span>
+              <span className="context-meter-panel__val">~{formatTokens(breakdown.systemTokens)}</span>
+            </div>
+            <div className="context-meter-panel__row">
+              <span className="context-meter-panel__label">
+                <span className="context-meter-panel__swatch context-meter-panel__swatch--tools" />
+                工具与插件
+              </span>
+              <span className="context-meter-panel__val">~{formatTokens(breakdown.toolsTokens)}</span>
+            </div>
+            <div className="context-meter-panel__row">
+              <span className="context-meter-panel__label">
+                <span className="context-meter-panel__swatch context-meter-panel__swatch--messages" />
+                对话历史
+              </span>
+              <span className="context-meter-panel__val">~{formatTokens(breakdown.messageTokens)}</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </span>
+  );
+}

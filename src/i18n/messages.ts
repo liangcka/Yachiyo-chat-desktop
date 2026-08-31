@@ -45,6 +45,7 @@ export interface UiCopy {
   readonly offlineReady: string;
   readonly firstGreeting: string;
   readonly removeImage: string;
+  readonly attachImage: string;
   readonly imageProcessing: string;
   readonly imageInvalid: string;
   readonly imageTooLarge: string;
@@ -107,6 +108,13 @@ export interface UiCopy {
   readonly webSearchSmart: string;
   readonly webSearchSmartDescription: string;
   readonly sourcesLabel: string;
+  readonly workspaceEntry: string;
+  readonly workspaceTitle: string;
+  readonly workspaceDescription: string;
+  readonly themeLabel: string;
+  readonly themeLight: string;
+  readonly themeDark: string;
+  readonly themeSystem: string;
 }
 
 const chinese = Object.freeze({
@@ -154,6 +162,7 @@ const chinese = Object.freeze({
   offlineReady: "应用已可离线打开。",
   firstGreeting: "彩叶~今天也辛苦啦！（笑着朝你挥了挥手）",
   removeImage: "移除图片",
+  attachImage: "添加图片",
   imageProcessing: "正在处理图片…",
   imageInvalid: "请选择 JPEG、PNG 或 WebP 图片。",
   imageTooLarge: "图片太大，请换一张试试。",
@@ -217,6 +226,13 @@ const chinese = Object.freeze({
   webSearchSmart: "智能搜索",
   webSearchSmartDescription: "同时检索国际市场近30天结果，提升时效信息的准确性",
   sourcesLabel: "参考来源",
+  workspaceEntry: "工作区 & Agent",
+  workspaceTitle: "工作区 & Agent 终端",
+  workspaceDescription: "配置本地 Agent 工具的运行目录，支持安全文件读写与终端命令执行。",
+  themeLabel: "外观",
+  themeLight: "浅色",
+  themeDark: "深色",
+  themeSystem: "跟随系统",
 } satisfies UiCopy);
 
 const japanese = Object.freeze({
@@ -264,6 +280,7 @@ const japanese = Object.freeze({
   offlineReady: "オフラインでも開けるようになりました。",
   firstGreeting: "彩葉~今日もお疲れさま！（笑顔で手を振る）",
   removeImage: "画像を外す",
+  attachImage: "画像を添付",
   imageProcessing: "画像を処理中…",
   imageInvalid: "JPEG、PNG、WebP の画像を選んでください。",
   imageTooLarge: "画像が大きすぎます。別の画像を試してください。",
@@ -328,6 +345,13 @@ const japanese = Object.freeze({
   webSearchSmart: "スマート検索",
   webSearchSmartDescription: "国際市場の直近30日間の結果も同時に検索し、最新情報の正確性を高めます",
   sourcesLabel: "参考ソース",
+  workspaceEntry: "ワークスペース & Agent",
+  workspaceTitle: "ワークスペース & Agent ターミナル",
+  workspaceDescription: "ローカルAgentツールの実行ディレクトリを設定し、安全なファイル読み書きとターミナルコマンド実行をサポートします。",
+  themeLabel: "外観",
+  themeLight: "ライト",
+  themeDark: "ダーク",
+  themeSystem: "システム設定",
 } satisfies UiCopy);
 
 const dictionaries: Readonly<Record<Locale, UiCopy>> = Object.freeze({

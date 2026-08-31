@@ -16,6 +16,7 @@ export default tseslint.config(
       "functions/runtime-types.d.ts",
       "node_modules",
       "playwright-report",
+      "src-tauri/target",
       "test-results",
     ],
   },

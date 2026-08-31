@@ -1,6 +1,7 @@
-import { Send, Square, X } from "lucide-react";
+import { ImagePlus, Send, Square, X } from "lucide-react";
 import {
   useRef,
+  type ChangeEvent,
   type ClipboardEvent,
   type DragEvent,
   type FormEvent,
@@ -51,6 +52,7 @@ export function Composer({
   value,
 }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const streaming = phase === "streaming";
   const unavailable = disabled || phase === "loading" || phase === "offline" || phase === "compressing";
   const canSend = value.trim().length > 0 || pendingImageDataUrl !== undefined;
@@ -148,6 +150,22 @@ export function Composer({
     }
   };
 
+  // 图片不可用时点击附件入口直接提示，不再打开系统文件选择器
+  const handleAttachClick = () => {
+    if (imageDisabled) {
+      onImageDisabled?.();
+      return;
+    }
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    // 复位 value 使再次选择同一文件仍触发 change
+    event.currentTarget.value = "";
+    if (file) void handleImageFile(file);
+  };
+
   return (
     <form
       className="composer"
@@ -165,48 +183,63 @@ export function Composer({
             onClick={onRemoveImage}
             type="button"
           >
-            <X aria-hidden="true" size={17} />
+            <X aria-hidden="true" size={15} />
           </button>
         </div>
       )}
-      <label className="composer__input-wrap">
-        <textarea
-          ref={textareaRef}
-          aria-label={copy.inputHint}
-          autoCapitalize="sentences"
-          autoCorrect="on"
+      <textarea
+        ref={textareaRef}
+        aria-label={copy.inputHint}
+        autoCapitalize="sentences"
+        autoCorrect="on"
+        disabled={unavailable || streaming}
+        enterKeyHint="send"
+        inputMode="text"
+        maxLength={4000}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        onFocus={handleFocus}
+        onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        placeholder={phase === "compressing" ? copy.compressingContext : copy.inputHint}
+        rows={1}
+        spellCheck={false}
+        value={value}
+      />
+      <div className="composer__actions">
+        <button
+          aria-label={copy.attachImage}
+          className="composer__attach"
           disabled={unavailable || streaming}
-          enterKeyHint="send"
-          inputMode="text"
-          maxLength={4000}
-          onChange={(event) => onChange(event.currentTarget.value)}
-          onFocus={handleFocus}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          placeholder={phase === "compressing" ? copy.compressingContext : copy.inputHint}
-          rows={1}
-          spellCheck={false}
-          value={value}
-        />
-      </label>
-      <button
-        aria-label={streaming ? copy.stop : copy.send}
-        className={`composer__action${streaming ? " composer__action--stop" : ""}`}
-        disabled={!streaming && (unavailable || !canSend)}
-        type="submit"
-      >
-        {streaming ? (
-          <>
+          onClick={handleAttachClick}
+          title={copy.attachImage}
+          type="button"
+        >
+          <ImagePlus aria-hidden="true" size={18} />
+        </button>
+        <button
+          aria-label={streaming ? copy.stop : copy.send}
+          className={`composer__action${streaming ? " composer__action--stop" : ""}`}
+          disabled={!streaming && (unavailable || !canSend)}
+          title={streaming ? copy.stop : copy.send}
+          type="submit"
+        >
+          {streaming ? (
             <Square aria-hidden="true" fill="currentColor" size={15} />
-            <span>{copy.stop}</span>
-          </>
-        ) : (
-          <>
-            <Send aria-hidden="true" size={18} />
-            <span>{copy.send}</span>
-          </>
-        )}
-      </button>
+          ) : (
+            <Send aria-hidden="true" size={17} />
+          )}
+        </button>
+      </div>
+      <input
+        accept="image/*"
+        aria-hidden="true"
+        className="visually-hidden"
+        onChange={handleFileChange}
+        ref={fileInputRef}
+        style={{ display: "none" }}
+        tabIndex={-1}
+        type="file"
+      />
     </form>
   );
 }

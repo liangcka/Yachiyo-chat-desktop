@@ -1,4 +1,4 @@
-import { Archive, Brain, Cpu, History, MessageSquarePlus, Sparkles } from "lucide-react";
+import { Archive, Brain, Cpu, FolderCode, History, MessageSquarePlus, Sparkles } from "lucide-react";
 import type { UiCopy } from "../../i18n/messages";
 
 export interface DrawerNavProps {
@@ -10,6 +10,7 @@ export interface DrawerNavProps {
   onNewChat: () => Promise<void>;
   onSkills: () => void;
   onUserMemory: () => void;
+  onWorkspace?: () => void;
 }
 
 /** 抽屉导航入口：关闭抽屉的动作统一在此处理，回调只负责打开目标面板。 */
@@ -22,6 +23,7 @@ export function DrawerNav({
   onNewChat,
   onSkills,
   onUserMemory,
+  onWorkspace,
 }: DrawerNavProps) {
   const closeThen = (action: () => void) => () => {
     onClose();
@@ -54,6 +56,12 @@ export function DrawerNav({
         <Sparkles aria-hidden="true" size={21} />
         <span>{copy.skillsEntry}</span>
       </button>
+      {onWorkspace ? (
+        <button onClick={closeThen(onWorkspace)} type="button">
+          <FolderCode aria-hidden="true" size={21} />
+          <span>{copy.workspaceEntry}</span>
+        </button>
+      ) : null}
     </nav>
   );
 }

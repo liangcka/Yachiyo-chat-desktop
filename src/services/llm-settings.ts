@@ -9,6 +9,9 @@ import {
   isValidApiKey,
 } from "../domain/llm";
 
+import { isDesktopApp } from "./app-platform";
+import { apiFetch } from "./api-origins";
+
 const ACTIVE_PROVIDER_KEY = "activeProvider" as const;
 
 /**
@@ -32,6 +35,9 @@ export class LlmSettingsService {
   }
 
   async clear(provider: ProviderId): Promise<void> {
+    if (isDesktopApp()) {
+      void apiFetch(`/api/keys/${provider}`, { method: "DELETE" }).catch(() => undefined);
+    }
     const active = await this.getActiveProvider();
     await this.db.transaction("rw", this.db.llmSettings, this.db.settings, async () => {
       await this.db.llmSettings.delete(provider);
@@ -93,11 +99,19 @@ export class LlmSettingsService {
     model: string,
     options: { activate?: boolean } = {},
   ): Promise<LlmSettingsRecord> {
+    const trimmedKey = apiKey.trim();
+    if (isDesktopApp()) {
+      void apiFetch("/api/keys", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider, key: trimmedKey }),
+      }).catch(() => undefined);
+    }
     const meta = getProviderMeta(provider);
     const validModel = meta.models.includes(model) ? model : meta.defaultModel;
     const record: LlmSettingsRecord = {
       provider,
-      apiKey: apiKey.trim(),
+      apiKey: trimmedKey,
       model: validModel,
       updatedAt: Date.now(),
     };
