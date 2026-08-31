@@ -17,7 +17,7 @@ function readStoredTheme(): Theme {
   } catch {
     // SSR 或隐私模式下 localStorage 不可用，静默降级
   }
-  return "dark";
+  return "system";
 }
 
 function writeStoredTheme(theme: Theme): void {
@@ -88,7 +88,7 @@ function getSnapshot(): ThemeSnapshot {
 }
 
 function getServerSnapshot(): ThemeSnapshot {
-  return { theme: "dark", resolved: "dark" };
+  return { theme: "system", resolved: "light" };
 }
 
 // ── Hook ───────────────────────────────────────────────────────

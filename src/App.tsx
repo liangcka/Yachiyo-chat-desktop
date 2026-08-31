@@ -684,7 +684,7 @@ export function App({ services }: AppProps) {
       aria-label="Yachiyo Chat"
     >
       <div className={`chat-stage ${isDesktop ? "chat-stage--desktop" : ""}`}>
-        {resolvedTheme === "dark" && <StarfieldCanvas />}
+        {!isDesktop && resolvedTheme === "dark" && <StarfieldCanvas />}
         {authentication === "checking" ? (
           <div aria-label={copy.verifying} className="chat-loading" role="status">
             <span />
