@@ -128,9 +128,9 @@ describe("DesktopLayout", () => {
     await user.click(settingsBtn);
 
     expect(screen.getByRole("dialog", { name: "设置中心" })).toBeInTheDocument();
-    expect(screen.getByText("配置智能体执行、排队消息发送以及权限。")).toBeInTheDocument();
-    expect(screen.getByText("排队消息")).toBeInTheDocument();
-    expect(screen.getByText("安全预设")).toBeInTheDocument();
+    expect(screen.getByText("速览当前客户端运行状态、活跃模型与快捷操作。")).toBeInTheDocument();
+    expect(screen.getByText("当前活跃大模型")).toBeInTheDocument();
+    expect(screen.getByText("本地持久化存储")).toBeInTheDocument();
 
     // 关闭设置
     const closeBtn = screen.getByRole("button", { name: "关闭设置" });

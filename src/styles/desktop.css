@@ -2280,8 +2280,9 @@
 .settings-modal__nav-item {
   display: flex;
   align-items: center;
+  gap: 8px;
   width: 100%;
-  padding: 6px 12px;
+  padding: 7px 12px;
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -2292,6 +2293,12 @@
   cursor: pointer;
   transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out),
               color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.settings-modal__nav-icon {
+  flex-shrink: 0;
+  color: inherit;
+  opacity: 0.85;
 }
 
 .settings-modal__nav-item:hover {
@@ -2305,8 +2312,9 @@
   font-weight: 550;
 }
 
-.settings-modal__nav-item--subtle {
-  color: var(--dsw-alias-label-tertiary);
+.settings-modal__nav-item--active .settings-modal__nav-icon {
+  color: var(--accent-brand);
+  opacity: 1;
 }
 
 .settings-modal__nav-item-text {
@@ -2315,41 +2323,29 @@
   text-overflow: ellipsis;
 }
 
-.settings-modal__nav-link-btn {
-  padding: 4px 12px;
-  border: none;
-  background: transparent;
-  color: var(--accent-brand);
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.settings-modal__nav-link-btn:hover {
-  text-decoration: underline;
-}
-
 .settings-modal__sidebar-footer {
   margin-top: auto;
   padding-top: 10px;
   border-top: 1px solid var(--dsw-alias-border-l1);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
 }
 
 .settings-modal__footer-btn {
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 5px 12px;
+  padding: 6px 12px;
   border: none;
   border-radius: 6px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
-  font-size: 12.5px;
+  font-size: 12px;
   text-align: left;
   cursor: pointer;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out),
+              color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
 }
 
 .settings-modal__footer-btn:hover {
@@ -2357,55 +2353,25 @@
   color: var(--dsw-alias-label-primary);
 }
 
-.settings-modal__footer-btn--active {
-  background: var(--dsw-alias-interactive-bg-active);
-  color: var(--dsw-alias-label-primary);
-  font-weight: 550;
-}
-
-.settings-modal__user-card {
+.settings-modal__app-badge {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  margin-top: 6px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
   border-radius: 8px;
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-.settings-modal__user-avatar {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--dsw-alias-interactive-bg-active);
-  color: var(--dsw-alias-label-primary);
-  flex-shrink: 0;
-}
-
-.settings-modal__user-info {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
-}
-
-.settings-modal__user-name {
-  font-size: 12px;
+.settings-modal__app-title {
+  font-size: 11.5px;
   font-weight: 600;
   color: var(--dsw-alias-label-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.settings-modal__user-email {
+.settings-modal__app-version {
   font-size: 10.5px;
-  color: var(--dsw-alias-label-caption);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--dsw-alias-label-tertiary);
+  font-family: var(--ds-font-family-code);
 }
 
 /* ─── 右侧内容区域 ─────────────────────────────── */
