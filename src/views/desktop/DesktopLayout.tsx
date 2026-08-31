@@ -4,7 +4,7 @@ import { useTheme } from "../../app/use-theme";
 import type { SharedViewProps } from "../layout-types";
 import { DesktopChatArea } from "./DesktopChatArea";
 import { DesktopRightPane } from "./DesktopRightPane";
-import { DesktopSidebar, type DesktopRightTab } from "./DesktopSidebar";
+import { DesktopSidebar, type DesktopRightTab } from "./sidebar";
 import { SettingsModal, type SettingsTabKey } from "../../components/settings/SettingsModal";
 
 /* ── 列宽约束与持久化 Key ─────────────────────────────── */
