@@ -10,18 +10,34 @@
 - **绝不主动修改移动端原生与构建配置**：除用户明确在当前指令中要求修改移动端外，**严禁修改** `android/` 目录下的任何原生代码、清单、Gradle 脚本，以及顶层 `capacitor.config.ts`。
 - **专注 Web / Desktop (PC) 与云函数**：所有功能迭代、UI 自适应、性能优化与测试验证均以 PC 浏览器（Web PWA）、桌面端（Tauri）与 Cloudflare Pages Functions 架构为主。
 
-### 1.2 交互与文档语言
+### 1.2 四大工程行为准则 (Four Core Principles)
+1. **Think Before Coding（编码前思考）**：
+   - 动手前明确陈述假设；
+   - 需求存在歧义时必须先主动澄清再执行，严禁盲目猜测；
+   - 提前识别边缘情况（Edge Cases）与潜在副作用。
+2. **Simplicity First（简洁优先）**：
+   - 严防过度工程（Over-engineering）、多余的中间抽象与无人使用的辅助函数；
+   - 始终选择直接解决问题、易于理解且可维护的最小干净解法。
+3. **Surgical Changes（精准外科手术式修改）**：
+   - 仅触碰与当前任务直接相关的最小文件集合；
+   - 严格保留既有代码约定、缩进格式与工程风格；
+   - 未经用户明确指示，严禁夹带无关的重构或格式化。
+4. **Goal-Driven Execution（目标驱动闭环验证）**：
+   - 做出变更后，必须自主运行针对性的验证命令（构建/测试/Lint）；
+   - 自主迭代排查并修复错误，直至所有门禁检查完全通过。
+
+### 1.3 交互与文档语言
 - **全程使用中文**：所有的思考推演、代码注释、提交说明、架构设计与用户交互均以**中文**进行。
 
-### 1.3 决策与假设原则
-- **不确定必须提问，严禁凭空假设**：当遇到需求歧义、破坏性变更或底层选型分歧时，必须主动向用户确认。
+### 1.4 决策、DRY 与环境整洁
 - **DRY 原则优先**：开发新功能前必须先检索项目中既有的实现与工具函数，严禁重复造轮子。
 - **临时文件即时清理**：任何临时任务规划（如临时生成的 markdown、排查日志脚本等）在任务完成前必须彻底删除，不得残留于仓库。
 
 ---
 
-## 2. 仓库架构与目录划分
+## 2. 仓库架构与关键运行要求 (Architecture & Gotchas)
 
+### 2.1 目录划分
 ```text
 src/              前端核心源码（React 19 + TypeScript + Vite + Dexie）
   app/            应用级控制器、状态 Reducer 与生命周期 hooks
@@ -41,6 +57,14 @@ android/          [受保护隔离区] 移动端 Capacitor Android 原生工程�
   notes/          Agent Notes 决策记录与 RFC 架构（proposed / implemented / rejected / archived）
   skills/         智能体技能库（代码审查、预检查、代码精简、文风规范等）
 ```
+
+### 2.2 核心架构关键陷阱：【启动时必须要带后端】
+- **禁止仅起无后端纯静态 Vite 进行接口调试**：
+  本项目的前端业务深度依赖 Cloudflare Pages Functions 提供的边缘中间件（如 `/api/chat` 流式对话、`/api/session` 会话鉴权、KV 频控、联网搜索管道等）。若仅启动前端 `vite`（`npm run dev`），所有接口调用将直接 404 或连接失败。
+- **正确的启动与联调方式**：
+  - **本地 Mock 联调（推荐）**：`npm run dev:mock`（内置本地 Pages Functions 与 KV 模拟，默认访问码 `yachiyo-local-access`）。
+  - **本地完整 Pages 联调**：`npm run dev:pages`。
+  - **桌面端联调**：`npm run desktop:dev` (`npm run tauri:dev`)。
 
 ---
 
@@ -77,11 +101,18 @@ android/          [受保护隔离区] 移动端 Capacitor Android 原生工程�
 
 在提交或声称变更完成前，必须依据变更影响范围运行最小但完备的验证命令：
 
+### 5.1 常用构建与验证命令
+- **前端与云函数构建**：`npm run build`（自动前置执行 `npm run sync:prompt` 与 `npm run typecheck`）
+- **桌面端构建**：`cargo build --manifest-path src-tauri/Cargo.toml` 或 `npm run desktop:build`
+- **全量测试套件**：`npm test`（串行运行 `test:unit` + `test:functions` + `test:desktop`）
+
+### 5.2 影响范围与对应门禁
+
 | 变更范围 | 必须运行的验证命令 |
 |---|---|
 | 前端组件与业务逻辑 | `npm run test:unit` |
 | 服务端 Functions / 搜索 / API | `npm run test:functions` |
-| 桌面端 Tauri / Rust | `npm run test:desktop` |
+| 桌面端 Tauri / Rust | `npm run test:desktop` (或 `cargo test --manifest-path src-tauri/Cargo.toml`) |
 | 类型定义与接口变更 | `npm run typecheck`（覆盖三份 tsconfig） |
 | 代码格式与静态规范 | `npm run lint` |
 | 渲染/虚拟列表性能与长列表 | `npm run test:perf` |

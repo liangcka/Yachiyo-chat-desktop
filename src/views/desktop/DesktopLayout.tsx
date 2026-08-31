@@ -5,6 +5,7 @@ import type { SharedViewProps } from "../layout-types";
 import { DesktopChatArea } from "./DesktopChatArea";
 import { DesktopRightPane } from "./DesktopRightPane";
 import { DesktopSidebar, type DesktopRightTab } from "./DesktopSidebar";
+import { SettingsModal, type SettingsTabKey } from "../../components/settings/SettingsModal";
 
 /* ── 列宽约束与持久化 Key ─────────────────────────────── */
 
@@ -55,6 +56,8 @@ export function DesktopLayout(props: SharedViewProps) {
   const [activeRightTab, setActiveRightTab] = useState<DesktopRightTab>("none");
   /** 用户手动折叠偏好：窄视口的强制折叠只作用于显示层，不写入该状态 */
   const [userSidebarCollapsed, setUserSidebarCollapsed] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTabKey>("general");
   const { resolved, setTheme } = useTheme();
 
   // 列宽状态：初始化从 localStorage 恢复
@@ -83,7 +86,12 @@ export function DesktopLayout(props: SharedViewProps) {
   const narrowViewport = viewportWidth < NARROW_VIEWPORT;
   const sidebarCollapsed = narrowViewport || userSidebarCollapsed;
 
-  // 桌面端全局快捷键支持 (Ctrl/Cmd+N 新建, Ctrl/Cmd+B 开关工作区, Ctrl/Cmd+[ 折叠侧边栏, Esc 关闭侧面板)
+  const handleOpenSettings = useCallback((tab: SettingsTabKey = "general") => {
+    setSettingsTab(tab);
+    setSettingsOpen(true);
+  }, []);
+
+  // 桌面端全局快捷键支持 (Ctrl/Cmd+N 新建, Ctrl/Cmd+B 开关工作区, Ctrl/Cmd+[ 折叠侧边栏, Ctrl/Cmd+, 打开设置, Esc 关闭侧面板/设置)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isModifier = e.ctrlKey || e.metaKey;
@@ -109,9 +117,22 @@ export function DesktopLayout(props: SharedViewProps) {
         return;
       }
 
-      if (e.key === "Escape" && activeRightTab !== "none") {
+      if (isModifier && (e.key === "," || e.key === "，")) {
         e.preventDefault();
-        setActiveRightTab("none");
+        handleOpenSettings("general");
+        return;
+      }
+
+      if (e.key === "Escape") {
+        if (settingsOpen) {
+          e.preventDefault();
+          setSettingsOpen(false);
+          return;
+        }
+        if (activeRightTab !== "none") {
+          e.preventDefault();
+          setActiveRightTab("none");
+        }
       }
     };
 
@@ -119,7 +140,7 @@ export function DesktopLayout(props: SharedViewProps) {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [activeRightTab, props]);
+  }, [activeRightTab, handleOpenSettings, props, settingsOpen]);
 
   /* ── 拖拽回调 ─────────────────────────────────────── */
 
@@ -156,6 +177,20 @@ export function DesktopLayout(props: SharedViewProps) {
     setTheme(resolved === "dark" ? "light" : "dark");
   }, [resolved, setTheme]);
 
+  const handleCompress = useCallback(async () => {
+    if (props.controller.messages.length <= 1 && !props.controller.activeConversation?.summary) {
+      props.showToast(props.copy.noNeedToCompress, "info");
+      return;
+    }
+    const success = await props.controller.compressConversation(true);
+    if (success) {
+      props.showToast(props.copy.compressSuccess, "info");
+      await props.refreshHistory();
+    } else if (props.controller.errorCode) {
+      props.showToast(props.copy.compressFailed, "error");
+    }
+  }, [props]);
+
   /* ── 渲染 ─────────────────────────────────────────── */
 
   const hasRightPane = activeRightTab !== "none";
@@ -181,24 +216,15 @@ export function DesktopLayout(props: SharedViewProps) {
           collapsed={sidebarCollapsed}
           conversations={props.conversations}
           copy={props.copy}
+          llmActiveProvider={props.llmActiveProvider}
+          llmEntries={props.llmEntries}
           locale={props.controller.locale}
           onClearData={props.onClearData}
-          onCompress={async () => {
-            if (props.controller.messages.length <= 1 && !props.controller.activeConversation?.summary) {
-              props.showToast(props.copy.noNeedToCompress, "info");
-              return;
-            }
-            const success = await props.controller.compressConversation(true);
-            if (success) {
-              props.showToast(props.copy.compressSuccess, "info");
-              await props.refreshHistory();
-            } else if (props.controller.errorCode) {
-              props.showToast(props.copy.compressFailed, "error");
-            }
-          }}
+          onCompress={handleCompress}
           onDeleteConversation={props.onDelete}
           onLocale={props.onLocale}
           onNewChat={props.onNewChat}
+          onOpenSettings={handleOpenSettings}
           onRenameConversation={props.onRename}
           onSelectConversation={props.controller.selectConversation}
           onSelectRightTab={setActiveRightTab}
@@ -222,6 +248,9 @@ export function DesktopLayout(props: SharedViewProps) {
         <DesktopChatArea
           {...props}
           activeRightTab={activeRightTab}
+          onOpenSettings={handleOpenSettings}
+          onRenameConversation={props.onRename}
+          onSelectRightTab={setActiveRightTab}
           onToggleSidebar={() => setUserSidebarCollapsed((current) => !current)}
           onToggleWorkspace={() =>
             setActiveRightTab((current) => (current === "workspace" ? "none" : "workspace"))
@@ -244,11 +273,25 @@ export function DesktopLayout(props: SharedViewProps) {
           <DesktopRightPane
             activeTab={activeRightTab}
             onClose={() => setActiveRightTab("none")}
+            onCompress={handleCompress}
             onSelectTab={setActiveRightTab}
+            onToggleTheme={handleToggleTheme}
+            resolvedTheme={resolved}
             shared={props}
           />
         </div>
       ) : null}
+
+      {/* 现代化双栏设置中心 Modal */}
+      <SettingsModal
+        open={settingsOpen}
+        initialTab={settingsTab}
+        onClose={() => setSettingsOpen(false)}
+        onCompress={handleCompress}
+        onToggleTheme={handleToggleTheme}
+        resolvedTheme={resolved}
+        shared={props}
+      />
 
       {/* shell 级浮层层：全局弹层 / toast 的挂载槽位，默认不拦截交互 */}
       <div className="desktop-shell__overlay" />

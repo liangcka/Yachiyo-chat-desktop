@@ -1,28 +1,27 @@
 import {
-  Archive,
-  Brain,
   Check,
+  ChevronDown,
+  ChevronRight,
   Cpu,
   FolderCode,
-  Globe,
-  LogOut,
   MessageSquare,
-  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
   Plus,
-  Sparkles,
-  Sun,
+  Settings,
   Trash2,
+  User,
   X,
 } from "lucide-react";
 import type { FormEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Conversation, Locale } from "../../domain/chat";
+import { PROVIDER_METADATA, type ProviderId } from "../../domain/llm";
 import type { UiCopy } from "../../i18n/messages";
+import type { SettingsTabKey } from "../../components/settings/SettingsModal";
 
-export type DesktopRightTab = "workspace" | "llm" | "skills" | "memory" | "none";
+export type DesktopRightTab = "workspace" | "llm" | "skills" | "memory" | "settings" | "none";
 
 export interface DesktopSidebarProps {
   activeConversationId?: string;
@@ -30,45 +29,84 @@ export interface DesktopSidebarProps {
   collapsed?: boolean;
   conversations: Conversation[];
   copy: UiCopy;
+  llmActiveProvider?: ProviderId;
+  llmEntries?: readonly { provider: ProviderId; apiKey: string; model: string }[];
   locale: Locale;
-  onClearData: () => Promise<void>;
-  onCompress: () => void;
+  onClearData?: () => Promise<void>;
+  onCompress?: () => void;
   onDeleteConversation: (id: string) => Promise<void>;
-  onLocale: (locale: Locale) => Promise<void>;
+  onLocale?: (locale: Locale) => Promise<void>;
   onNewChat: () => Promise<void>;
+  onOpenSettings?: (tab?: SettingsTabKey) => void;
   onRenameConversation: (id: string, title: string) => Promise<void>;
   onSelectConversation: (id: string) => Promise<void>;
   onSelectRightTab: (tab: DesktopRightTab) => void;
-  onSignOut: () => Promise<void>;
+  onSignOut?: () => Promise<void>;
   onToggleCollapse?: () => void;
   onToggleTheme?: () => void;
   resolvedTheme?: "light" | "dark";
 }
 
-/** 展开态操作行（图标 + 文字） */
-interface SidebarRowProps {
-  icon: ReactNode;
+type TimeGroupKey = "today" | "yesterday" | "previous7Days" | "older";
+
+interface ConversationGroup {
+  key: TimeGroupKey;
   label: string;
-  title: string;
-  active?: boolean;
-  danger?: boolean;
-  onClick: () => void;
+  items: Conversation[];
 }
 
-function SidebarRow({ icon, label, title, active = false, danger = false, onClick }: SidebarRowProps) {
-  const classes = [
-    "desktop-sidebar__row",
-    active ? "desktop-sidebar__row--active" : "",
-    danger ? "desktop-sidebar__row--danger" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  return (
-    <button type="button" className={classes} title={title} onClick={onClick}>
-      <span className="desktop-sidebar__row-icon">{icon}</span>
-      <span className="desktop-sidebar__row-label">{label}</span>
-    </button>
-  );
+function groupConversationsByDate(
+  conversations: Conversation[],
+  locale: Locale = "zh-CN",
+): ConversationGroup[] {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterdayStart = todayStart - 86400000;
+  const sevenDaysAgoStart = todayStart - 6 * 86400000;
+
+  const groups: Record<TimeGroupKey, Conversation[]> = {
+    today: [],
+    yesterday: [],
+    previous7Days: [],
+    older: [],
+  };
+
+  for (const conv of conversations) {
+    const timestamp = conv.updatedAt || conv.createdAt || 0;
+    if (timestamp >= todayStart) {
+      groups.today.push(conv);
+    } else if (timestamp >= yesterdayStart) {
+      groups.yesterday.push(conv);
+    } else if (timestamp >= sevenDaysAgoStart) {
+      groups.previous7Days.push(conv);
+    } else {
+      groups.older.push(conv);
+    }
+  }
+
+  const labels: Record<Locale, Record<TimeGroupKey, string>> = {
+    "zh-CN": {
+      today: "今天",
+      yesterday: "昨天",
+      previous7Days: "前 7 天",
+      older: "更早",
+    },
+    "ja-JP": {
+      today: "今日",
+      yesterday: "昨日",
+      previous7Days: "過去7日間",
+      older: "それ以前",
+    },
+  };
+
+  const groupKeys: TimeGroupKey[] = ["today", "yesterday", "previous7Days", "older"];
+  return groupKeys
+    .map((key) => ({
+      key,
+      label: labels[locale]?.[key] ?? labels["zh-CN"][key],
+      items: groups[key],
+    }))
+    .filter((g) => g.items.length > 0);
 }
 
 /** 56px rail 折叠态图标按钮 */
@@ -105,26 +143,25 @@ export function DesktopSidebar({
   collapsed = false,
   conversations,
   copy,
+  llmActiveProvider,
+  llmEntries = [],
   locale,
-  onClearData,
-  onCompress,
   onDeleteConversation,
-  onLocale,
   onNewChat,
+  onOpenSettings,
   onRenameConversation,
   onSelectConversation,
   onSelectRightTab,
-  onSignOut,
   onToggleCollapse,
-  onToggleTheme,
-  resolvedTheme = "dark",
 }: DesktopSidebarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // 滚动条停留逻辑：鼠标离开侧边栏 2 秒后再隐去滚动条，与 deepseek-harness 一致
+  // 手风琴折叠状态：记录被用户折叠的分组 key
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<TimeGroupKey>>(new Set());
+
+  // 滚动条停留逻辑：鼠标离开侧边栏 2 秒后再隐去滚动条
   const [pointerInside, setPointerInside] = useState(false);
   const lingerTimer = useRef<number | undefined>(undefined);
 
@@ -169,17 +206,57 @@ export function DesktopSidebar({
     setEditingId(null);
   };
 
+  const toggleGroupCollapse = (key: TimeGroupKey) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
   const toggleRightTab = (tab: DesktopRightTab) => {
     onSelectRightTab(activeRightTab === tab ? "none" : tab);
   };
 
-  const localeSwapTitle = locale === "zh-CN" ? "切换为日本語" : "切换为中文";
+  const handleOpenGeneralSettings = () => {
+    if (onOpenSettings) {
+      onOpenSettings("general");
+    } else {
+      toggleRightTab("settings");
+    }
+  };
 
-  /* ── 56px rail 折叠态（严格对齐 deepseek-harness 侧栏收起形态） ── */
+  const handleOpenModelSettings = () => {
+    if (onOpenSettings) {
+      onOpenSettings("models");
+    } else {
+      toggleRightTab("llm");
+    }
+  };
+
+  // 计算当前活跃模型展示名称
+  const activeModelDisplay = useMemo(() => {
+    if (!llmActiveProvider) return "未选择模型";
+    const entry = llmEntries.find((e) => e.provider === llmActiveProvider);
+    const meta = PROVIDER_METADATA[llmActiveProvider];
+    return entry?.model || meta?.label || llmActiveProvider;
+  }, [llmActiveProvider, llmEntries]);
+
+  // 时间分组数据
+  const groupedConversations = useMemo(
+    () => groupConversationsByDate(conversations, locale),
+    [conversations, locale],
+  );
+
+  /* ── 56px rail 折叠态（紧凑导航形态） ── */
   if (collapsed) {
     return (
       <aside className="desktop-sidebar desktop-sidebar--rail" aria-label="紧凑导航栏">
-        {/* 顶部：展开侧边栏图标 */}
+        {/* 顶部：展开侧边栏图标 + 新建对话 */}
         <div className="desktop-sidebar__rail-top">
           <button
             type="button"
@@ -191,7 +268,6 @@ export function DesktopSidebar({
             <PanelLeftOpen size={18} />
           </button>
 
-          {/* 新建对话 (36x36 按钮) */}
           <RailButton
             icon={<Plus size={18} />}
             label="新建会话 (Ctrl+N)"
@@ -200,7 +276,7 @@ export function DesktopSidebar({
           />
         </div>
 
-        {/* 中部：工作区与功能入口 */}
+        {/* 中部：工作区 */}
         <div className="desktop-sidebar__rail-tools">
           <RailButton
             icon={<FolderCode size={17} />}
@@ -208,57 +284,28 @@ export function DesktopSidebar({
             active={activeRightTab === "workspace"}
             onClick={() => toggleRightTab("workspace")}
           />
-          <RailButton
-            icon={<Cpu size={17} />}
-            label={copy.llmSettingsEntry}
-            active={activeRightTab === "llm"}
-            onClick={() => toggleRightTab("llm")}
-          />
-          <RailButton
-            icon={<Sparkles size={17} />}
-            label={copy.skillsEntry}
-            active={activeRightTab === "skills"}
-            onClick={() => toggleRightTab("skills")}
-          />
-          <RailButton
-            icon={<Brain size={17} />}
-            label={copy.userMemoryEntry}
-            active={activeRightTab === "memory"}
-            onClick={() => toggleRightTab("memory")}
-          />
         </div>
 
-        {/* 底部：主题、语言、压缩与登出 */}
+        {/* 底部：模型状态与设置 */}
         <div className="desktop-sidebar__rail-bottom">
-          {onToggleTheme ? (
-            <RailButton
-              icon={resolvedTheme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-              label={resolvedTheme === "dark" ? copy.themeLight : copy.themeDark}
-              onClick={onToggleTheme}
-            />
-          ) : null}
           <RailButton
-            icon={<Archive size={16} />}
-            label={copy.compressContext}
-            onClick={onCompress}
+            icon={<Cpu size={17} />}
+            label={`模型: ${activeModelDisplay}`}
+            active={activeRightTab === "llm"}
+            onClick={handleOpenModelSettings}
           />
           <RailButton
-            icon={<Globe size={16} />}
-            label={localeSwapTitle}
-            onClick={() => void onLocale(locale === "zh-CN" ? "ja-JP" : "zh-CN")}
-          />
-          <RailButton
-            icon={<LogOut size={16} />}
-            label={copy.signOut}
-            danger
-            onClick={() => void onSignOut()}
+            icon={<Settings size={17} />}
+            label="设置"
+            active={activeRightTab === "settings" || activeRightTab === "skills" || activeRightTab === "memory"}
+            onClick={handleOpenGeneralSettings}
           />
         </div>
       </aside>
     );
   }
 
-  /* ── 展开态：Wordmark 品牌 → 38px New Session → 会话列表 → 底部设置 ── */
+  /* ── 展开态：Wordmark 品牌 → 醒目“+ 新建对话” → 手风琴时间分组历史 → 底部收纳设置 ── */
   return (
     <aside
       className={`desktop-sidebar ${!pointerInside ? "desktop-sidebar--quiet-bars" : ""}`}
@@ -271,7 +318,7 @@ export function DesktopSidebar({
         armLinger();
       }}
     >
-      {/* 品牌行（Wordmark + 折叠按钮） */}
+      {/* 1. 品牌行（Wordmark + 折叠按钮） */}
       <div className="desktop-sidebar__brand-row">
         <button
           type="button"
@@ -294,19 +341,19 @@ export function DesktopSidebar({
         ) : null}
       </div>
 
-      {/* 新建会话按钮（38px 高度，12px 圆角，deepseek-harness 经典样式） */}
+      {/* 2. 醒目的“+ 新建对话”大按钮 */}
       <button
         type="button"
         className="desktop-sidebar__new-btn"
         onClick={() => void onNewChat()}
-        title="新建会话 (Ctrl+N)"
+        title="新建对话 (Ctrl+N)"
       >
         <Plus size={16} />
         <span className="desktop-sidebar__new-btn-label">{copy.newChat}</span>
         <kbd className="desktop-sidebar__kbd">^N</kbd>
       </button>
 
-      {/* 会话历史列表 */}
+      {/* 3. 中部历史对话列表（手风琴时间折叠，分配最大垂直高度） */}
       <div className="desktop-sidebar__history">
         <div className="desktop-sidebar__history-head">
           <span className="desktop-sidebar__history-title">{copy.history}</span>
@@ -317,83 +364,109 @@ export function DesktopSidebar({
           {conversations.length === 0 ? (
             <p className="desktop-sidebar__history-empty">{copy.noHistory}</p>
           ) : (
-            conversations.map((conv) => {
-              const isActive = conv.id === activeConversationId;
-              const isEditing = editingId === conv.id;
+            groupedConversations.map((group) => {
+              const isCollapsed = collapsedGroups.has(group.key);
               return (
-                <div
-                  key={conv.id}
-                  role="listitem"
-                  className={`desktop-sidebar__history-item ${
-                    isActive ? "desktop-sidebar__history-item--active" : ""
-                  }`}
-                >
-                  {isEditing ? (
-                    <form
-                      onSubmit={(e) => void handleSaveRename(e)}
-                      className="desktop-sidebar__rename-form"
-                    >
-                      <input
-                        ref={inputRef}
-                        type="text"
-                        value={editingTitle}
-                        onChange={(e) => setEditingTitle(e.target.value)}
-                        onBlur={() => setEditingId(null)}
-                        className="desktop-sidebar__rename-input"
-                      />
-                      <button
-                        type="submit"
-                        className="desktop-sidebar__history-action"
-                        title={copy.confirm}
-                      >
-                        <Check size={14} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleCancelRename}
-                        className="desktop-sidebar__history-action"
-                        title={copy.cancel}
-                      >
-                        <X size={14} />
-                      </button>
-                    </form>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        className="desktop-sidebar__history-main"
-                        onClick={() => void onSelectConversation(conv.id)}
-                      >
-                        <MessageSquare size={14} className="desktop-sidebar__history-icon" />
-                        <span className="desktop-sidebar__history-title" title={conv.title}>
-                          {conv.title || copy.newChat}
-                        </span>
-                      </button>
-                      <div className="desktop-sidebar__history-actions">
-                        <button
-                          type="button"
-                          className="desktop-sidebar__history-action"
-                          onClick={(e) => startRename(conv, e)}
-                          title={copy.rename}
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          className="desktop-sidebar__history-action desktop-sidebar__history-action--danger"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (window.confirm(copy.deleteConfirm)) {
-                              void onDeleteConversation(conv.id);
-                            }
-                          }}
-                          title={copy.delete}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </>
-                  )}
+                <div key={group.key} className="desktop-sidebar__group">
+                  {/* 手风琴分组头部 */}
+                  <button
+                    type="button"
+                    className="desktop-sidebar__group-header"
+                    onClick={() => toggleGroupCollapse(group.key)}
+                    title={`${isCollapsed ? "展开" : "折叠"} ${group.label}`}
+                  >
+                    <span className="desktop-sidebar__group-chevron">
+                      {isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                    </span>
+                    <span className="desktop-sidebar__group-label">{group.label}</span>
+                    <span className="desktop-sidebar__group-badge">{group.items.length}</span>
+                  </button>
+
+                  {/* 分组列表项 */}
+                  {!isCollapsed ? (
+                    <div className="desktop-sidebar__group-items">
+                      {group.items.map((conv) => {
+                        const isActive = conv.id === activeConversationId;
+                        const isEditing = editingId === conv.id;
+                        return (
+                          <div
+                            key={conv.id}
+                            role="listitem"
+                            className={`desktop-sidebar__history-item ${
+                              isActive ? "desktop-sidebar__history-item--active" : ""
+                            }`}
+                          >
+                            {isEditing ? (
+                              <form
+                                onSubmit={(e) => void handleSaveRename(e)}
+                                className="desktop-sidebar__rename-form"
+                              >
+                                <input
+                                  ref={inputRef}
+                                  type="text"
+                                  value={editingTitle}
+                                  onChange={(e) => setEditingTitle(e.target.value)}
+                                  onBlur={() => setEditingId(null)}
+                                  className="desktop-sidebar__rename-input"
+                                />
+                                <button
+                                  type="submit"
+                                  className="desktop-sidebar__history-action"
+                                  title={copy.confirm}
+                                >
+                                  <Check size={14} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleCancelRename}
+                                  className="desktop-sidebar__history-action"
+                                  title={copy.cancel}
+                                >
+                                  <X size={14} />
+                                </button>
+                              </form>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  className="desktop-sidebar__history-main"
+                                  onClick={() => void onSelectConversation(conv.id)}
+                                >
+                                  <MessageSquare size={14} className="desktop-sidebar__history-icon" />
+                                  <span className="desktop-sidebar__history-title" title={conv.title}>
+                                    {conv.title || copy.newChat}
+                                  </span>
+                                </button>
+                                <div className="desktop-sidebar__history-actions">
+                                  <button
+                                    type="button"
+                                    className="desktop-sidebar__history-action"
+                                    onClick={(e) => startRename(conv, e)}
+                                    title={copy.rename}
+                                  >
+                                    <Pencil size={13} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="desktop-sidebar__history-action desktop-sidebar__history-action--danger"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (window.confirm(copy.deleteConfirm)) {
+                                        void onDeleteConversation(conv.id);
+                                      }
+                                    }}
+                                    title={copy.delete}
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </div>
               );
             })
@@ -401,103 +474,40 @@ export function DesktopSidebar({
         </div>
       </div>
 
-      {/* 底部操作区域 */}
+      {/* 4. 底部低频/系统操作收纳（仅保留模型状态与设置两大入口） */}
       <div className="desktop-sidebar__foot">
-        <div className="desktop-sidebar__foot-group">
-          <SidebarRow
-            icon={<FolderCode size={16} />}
-            label={copy.workspaceEntry}
-            title={copy.workspaceEntry}
-            active={activeRightTab === "workspace"}
-            onClick={() => toggleRightTab("workspace")}
-          />
-          <SidebarRow
-            icon={<Cpu size={16} />}
-            label={copy.llmSettingsEntry}
-            title={copy.llmSettingsEntry}
-            active={activeRightTab === "llm"}
-            onClick={() => toggleRightTab("llm")}
-          />
-          <SidebarRow
-            icon={<Sparkles size={16} />}
-            label={copy.skillsEntry}
-            title={copy.skillsEntry}
-            active={activeRightTab === "skills"}
-            onClick={() => toggleRightTab("skills")}
-          />
-          <SidebarRow
-            icon={<Brain size={16} />}
-            label={copy.userMemoryEntry}
-            title={copy.userMemoryEntry}
-            active={activeRightTab === "memory"}
-            onClick={() => toggleRightTab("memory")}
-          />
-        </div>
+        {/* 个人中心 / 模型状态入口 */}
+        <button
+          type="button"
+          className="desktop-sidebar__foot-btn"
+          onClick={handleOpenModelSettings}
+          title={`当前模型: ${activeModelDisplay}，点击配置`}
+        >
+          <div className="desktop-sidebar__status-avatar">
+            <User size={15} />
+            <span className="desktop-sidebar__status-dot" />
+          </div>
+          <div className="desktop-sidebar__status-info">
+            <span className="desktop-sidebar__status-model">{activeModelDisplay}</span>
+            <span className="desktop-sidebar__status-label">模型就绪</span>
+          </div>
+        </button>
 
-        <div className="desktop-sidebar__foot-sep" />
-
-        <div className="desktop-sidebar__foot-group">
-          {onToggleTheme ? (
-            <SidebarRow
-              icon={resolvedTheme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-              label={
-                locale === "ja-JP"
-                  ? (resolvedTheme === "dark" ? "ライトモードに切替" : "ダークモードに切替")
-                  : (resolvedTheme === "dark" ? "切换为浅色主题" : "切换为深色主题")
-              }
-              title={copy.themeLabel}
-              onClick={onToggleTheme}
-            />
-          ) : null}
-          <SidebarRow
-            icon={<Globe size={16} />}
-            label={locale === "zh-CN" ? "日本語" : "中文"}
-            title={localeSwapTitle}
-            onClick={() => void onLocale(locale === "zh-CN" ? "ja-JP" : "zh-CN")}
-          />
-          <SidebarRow
-            icon={<Archive size={16} />}
-            label={copy.compressContext}
-            title={copy.compressContext}
-            onClick={onCompress}
-          />
-          {showClearConfirm ? (
-            <div className="desktop-sidebar__confirm">
-              <span>清空本地数据？</span>
-              <button
-                type="button"
-                className="desktop-sidebar__confirm-btn desktop-sidebar__confirm-btn--danger"
-                onClick={() => {
-                  setShowClearConfirm(false);
-                  void onClearData();
-                }}
-              >
-                {copy.confirm}
-              </button>
-              <button
-                type="button"
-                className="desktop-sidebar__confirm-btn"
-                onClick={() => setShowClearConfirm(false)}
-              >
-                {copy.cancel}
-              </button>
-            </div>
-          ) : (
-            <SidebarRow
-              icon={<Trash2 size={15} />}
-              label={copy.clearData}
-              title={copy.clearData}
-              onClick={() => setShowClearConfirm(true)}
-            />
-          )}
-          <SidebarRow
-            icon={<LogOut size={15} />}
-            label={copy.signOut}
-            title={copy.signOut}
-            danger
-            onClick={() => void onSignOut()}
-          />
-        </div>
+        {/* 综合设置入口 */}
+        <button
+          type="button"
+          className="desktop-sidebar__foot-btn"
+          onClick={handleOpenGeneralSettings}
+          title="系统设置与偏好"
+        >
+          <div className="desktop-sidebar__status-avatar">
+            <Settings size={15} />
+          </div>
+          <div className="desktop-sidebar__status-info">
+            <span className="desktop-sidebar__status-model">设置</span>
+            <span className="desktop-sidebar__status-label">常规 / 模型 / 权限 / 外观</span>
+          </div>
+        </button>
       </div>
     </aside>
   );

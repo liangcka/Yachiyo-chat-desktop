@@ -1,17 +1,22 @@
 import {
   ArrowUp,
+  Camera,
+  Check,
   FolderCode,
   Globe,
   PanelLeft,
   PanelLeftOpen,
+  Pencil,
   Plus,
+  Settings,
   Sparkles,
   Square,
   Terminal,
   WifiOff,
+  X,
 } from "lucide-react";
-import type { KeyboardEvent } from "react";
-import { useEffect, useRef } from "react";
+import type { FormEvent, KeyboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ContextMeter } from "../../components/ContextMeter";
 import { ConversationView } from "../../components/ConversationView";
 import { ModelSelect } from "../../components/desktop/ModelSelect";
@@ -19,9 +24,13 @@ import { CaptureButton } from "../../features/capture/CaptureButton";
 import { isRetryableChatErrorCode } from "../../services/chat-client";
 import { controllerErrorMessage, imageErrorMessage, type SharedViewProps } from "../layout-types";
 import type { DesktopRightTab } from "./DesktopSidebar";
+import type { SettingsTabKey } from "../../components/settings/SettingsModal";
 
 export interface DesktopChatAreaProps extends SharedViewProps {
   activeRightTab: DesktopRightTab;
+  onOpenSettings?: (tab?: SettingsTabKey) => void;
+  onRenameConversation?: (id: string, title: string) => Promise<void>;
+  onSelectRightTab?: (tab: DesktopRightTab) => void;
   onToggleSidebar?: () => void;
   onToggleWorkspace: () => void;
   resolvedTheme?: "light" | "dark";
@@ -40,8 +49,10 @@ export function DesktopChatArea({
   llmEntries,
   onImage,
   onLlmActivate,
+  onOpenSettings,
   onRecall,
   onRegenerate,
+  onRenameConversation,
   onSend,
   onToggleSidebar,
   onToggleWorkspace,
@@ -59,7 +70,20 @@ export function DesktopChatArea({
   const isOffline = !isOnline || controller.phase === "offline";
   const isBlank = controller.messages.length === 0 && !controller.activeConversation?.summary;
 
+  // 顶栏标题即地编辑状态
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editingTitleDraft, setEditingTitleDraft] = useState("");
+  const titleInputRef = useRef<HTMLInputElement>(null);
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isEditingTitle) {
+      titleInputRef.current?.focus();
+      titleInputRef.current?.select();
+    }
+  }, [isEditingTitle]);
 
   // 自动调整输入框高度
   useEffect(() => {
@@ -83,9 +107,42 @@ export function DesktopChatArea({
     }
   };
 
+  const handleStartEditTitle = () => {
+    if (!controller.activeConversation) return;
+    setEditingTitleDraft(currentTitle);
+    setIsEditingTitle(true);
+  };
+
+  const handleSaveTitle = async (e?: FormEvent) => {
+    if (e) e.preventDefault();
+    if (!controller.activeConversation || !editingTitleDraft.trim()) {
+      setIsEditingTitle(false);
+      return;
+    }
+    if (onRenameConversation) {
+      await onRenameConversation(controller.activeConversation.id, editingTitleDraft.trim());
+    }
+    setIsEditingTitle(false);
+  };
+
+  const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const processed = await processImage(file);
+      onImage(processed);
+    } catch {
+      showToast(copy.imageInvalid, "error");
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
   return (
     <main className="desktop-main-chat" aria-label="核心对话工作台">
-      {/* 顶栏：侧栏开关 | 会话标题 | 状态徽章 | 截图 / 工作区 */}
+      {/* 顶栏：侧栏开关 | 会话标题（支持即地编辑） | 状态徽章 | 截图 / 工作区 / 设置 */}
       <header className="desktop-chat-header">
         <div className="desktop-chat-header__lead">
           {onToggleSidebar ? (
@@ -100,9 +157,54 @@ export function DesktopChatArea({
             </button>
           ) : null}
 
-          <h2 className="desktop-chat-header__title" title={currentTitle}>
-            {currentTitle}
-          </h2>
+          {/* 会话标题（支持点击即地编辑重命名） */}
+          {isEditingTitle ? (
+            <form onSubmit={(e) => void handleSaveTitle(e)} className="desktop-chat-header__rename-form">
+              <input
+                ref={titleInputRef}
+                type="text"
+                value={editingTitleDraft}
+                onChange={(e) => setEditingTitleDraft(e.target.value)}
+                onBlur={() => void handleSaveTitle()}
+                className="desktop-chat-header__rename-input"
+                aria-label="重命名当前会话"
+              />
+              <button type="submit" className="desktop-chat-header__rename-btn" title={copy.confirm}>
+                <Check size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsEditingTitle(false)}
+                className="desktop-chat-header__rename-btn"
+                title={copy.cancel}
+              >
+                <X size={14} />
+              </button>
+            </form>
+          ) : (
+            <div className="desktop-chat-header__title-wrapper">
+              <button
+                type="button"
+                className="desktop-chat-header__title-btn"
+                title={`${currentTitle} (点击重命名)`}
+                onClick={handleStartEditTitle}
+              >
+                <h2 className="desktop-chat-header__title">{currentTitle}</h2>
+              </button>
+              {controller.activeConversation ? (
+                <button
+                  type="button"
+                  className="desktop-chat-header__title-edit-btn"
+                  onClick={handleStartEditTitle}
+                  title="重命名会话"
+                  aria-label="重命名会话"
+                >
+                  <Pencil size={12} />
+                </button>
+              ) : null}
+            </div>
+          )}
+
           <div className="desktop-chat-header__badges">
             {isOffline ? (
               <span className="desktop-status-pill desktop-status-pill--offline">
@@ -138,14 +240,26 @@ export function DesktopChatArea({
 
           <button
             type="button"
-            className={`desktop-chat-header__btn ${activeRightTab !== "none" ? "desktop-chat-header__btn--active" : ""}`}
+            className={`desktop-chat-header__btn ${activeRightTab === "workspace" ? "desktop-chat-header__btn--active" : ""}`}
             onClick={onToggleWorkspace}
-            title={activeRightTab !== "none" ? "收起右侧工作台 (Ctrl+B)" : "展开右侧工作台 (Ctrl+B)"}
+            title={activeRightTab === "workspace" ? "收起右侧工作台 (Ctrl+B)" : "打开 IDE / 工作台 (Ctrl+B)"}
           >
             <FolderCode size={15} />
             <span>工作区</span>
             <kbd className="desktop-chat-header__kbd">^B</kbd>
           </button>
+
+          {onOpenSettings ? (
+            <button
+              type="button"
+              className="desktop-chat-header__icon-btn"
+              onClick={() => onOpenSettings("general")}
+              title="设置与偏好 (Ctrl+,)"
+              aria-label="设置与偏好"
+            >
+              <Settings size={17} />
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -167,7 +281,7 @@ export function DesktopChatArea({
                 : "全能智能体工作台：代码开发、角色日常、视觉识图与联网检索助理。"}
             </p>
 
-            {/* 探索提示卡片 */}
+            {/* 4 个等宽轻量化快捷引导卡片 */}
             <div className="desktop-hero__cards">
               <button
                 type="button"
@@ -210,6 +324,20 @@ export function DesktopChatArea({
                   <span className="desktop-hero-card__desc">多渠道级联容灾检索最新外部资讯</span>
                 </div>
               </button>
+
+              <button
+                type="button"
+                className="desktop-hero-card"
+                onClick={() => handleHeroPrompt("八千代，请向我介绍一下你支持哪些视觉与图片分析功能？")}
+              >
+                <div className="desktop-hero-card__icon">
+                  <Camera size={17} />
+                </div>
+                <div className="desktop-hero-card__content">
+                  <strong className="desktop-hero-card__title">视觉与图片分析</strong>
+                  <span className="desktop-hero-card__desc">多模态图像识别、代码抓取与解析</span>
+                </div>
+              </button>
             </div>
           </div>
         ) : (
@@ -229,9 +357,22 @@ export function DesktopChatArea({
         )}
       </div>
 
-      {/* 底部 22px 浮动胶囊 Composer（严格对齐 deepseek-harness InputBar） */}
+      {/* 底部锚定输入交互区 */}
       <div className="desktop-composer-dock">
         <div className="desktop-composer-dock__inner">
+          {/* 上下文标签 (Context Chip) 放置在输入框左上角外部 */}
+          <div className="desktop-composer-context-row">
+            <button
+              type="button"
+              className="desktop-context-chip"
+              onClick={onToggleWorkspace}
+              title="当前工作区：Yachiyo-chat-desktop (点击切换/查看)"
+            >
+              <FolderCode size={13} />
+              <span>Yachiyo-chat-desktop</span>
+            </button>
+          </div>
+
           {isOffline ? <p className="status-banner">{copy.offline}</p> : null}
           {controller.phase === "error" &&
           controller.errorCode !== "DAILY_QUOTA_EXCEEDED" &&
@@ -246,8 +387,17 @@ export function DesktopChatArea({
             </div>
           ) : null}
 
-          {/* 浮动卡片 */}
+          {/* 输入框主卡片 */}
           <div className="dsh-composer-card">
+            {/* 隐藏的图片上传 input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={handleFileInputChange}
+            />
+
             {/* 图片附件预览轨道 */}
             {pendingImageDataUrl ? (
               <div className="dsh-composer-card__attachment">
@@ -284,20 +434,33 @@ export function DesktopChatArea({
             {/* 底部工具行：左侧功能 + 右侧模型选择 / ContextMeter / 34px 发送按钮 */}
             <div className="dsh-composer-card__toolbar">
               <div className="dsh-composer-card__tools-left">
+                {/* 附件/图片上传与指令唤起按钮 */}
                 <button
                   type="button"
                   className="dsh-composer-card__add-btn"
-                  title="添加工具 / 指令"
-                  aria-label="添加指令"
+                  title="上传图片 / 附件"
+                  aria-label="上传图片"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isOffline || isStreaming || isCompressing}
+                >
+                  <Plus size={15} />
+                </button>
+
+                <button
+                  type="button"
+                  className="dsh-composer-card__slash-btn"
+                  title="输入 / 查看快捷指令"
+                  aria-label="快捷指令"
                   onClick={() => {
                     if (composerValue.startsWith("/")) {
                       setComposerValue("");
                     } else {
                       setComposerValue("/" + composerValue);
                     }
+                    textareaRef.current?.focus();
                   }}
                 >
-                  <Plus size={14} />
+                  <span>/</span>
                 </button>
 
                 {webSearchSettings.enabled ? (
@@ -309,14 +472,20 @@ export function DesktopChatArea({
               </div>
 
               <div className="dsh-composer-card__tools-right">
-                {/* 模型选择器 */}
+                {/* 模型选择器紧挨着发送按钮 */}
                 <ModelSelect
                   activeProvider={llmActiveProvider}
                   entries={llmEntries}
                   onSelect={(provider) => {
                     void onLlmActivate(provider);
                   }}
-                  onOpenSettings={onToggleWorkspace}
+                  onOpenSettings={() => {
+                    if (onOpenSettings) {
+                      onOpenSettings("models");
+                    } else {
+                      onToggleWorkspace();
+                    }
+                  }}
                   disabled={isOffline || isStreaming}
                 />
 

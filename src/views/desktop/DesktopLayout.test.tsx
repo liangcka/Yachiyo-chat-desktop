@@ -11,20 +11,21 @@ import { DesktopLayout } from "./DesktopLayout";
 describe("DesktopLayout", () => {
   const copy = copyFor("zh-CN");
 
+  const now = Date.now();
   const mockConversations: Conversation[] = [
     {
       id: "conv-1",
       title: "第一次对话",
       locale: "zh-CN",
-      createdAt: 1756512000000,
-      updatedAt: 1756512000000,
+      createdAt: now,
+      updatedAt: now,
     },
     {
       id: "conv-2",
       title: "第二次探索",
       locale: "zh-CN",
-      createdAt: 1756515600000,
-      updatedAt: 1756515600000,
+      createdAt: now - 86400000 * 10,
+      updatedAt: now - 86400000 * 10,
     },
   ];
 
@@ -99,6 +100,9 @@ describe("DesktopLayout", () => {
     expect(screen.getByRole("main", { name: "核心对话工作台" })).toBeInTheDocument();
     expect(screen.getAllByText("第一次对话").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("第二次探索")).toBeInTheDocument();
+    // 验证手风琴时间分组渲染
+    expect(screen.getByText("今天")).toBeInTheDocument();
+    expect(screen.getByText("更早")).toBeInTheDocument();
   });
 
   it("calls onNewChat when clicking new chat button", async () => {
@@ -112,25 +116,53 @@ describe("DesktopLayout", () => {
     expect(props.onNewChat).toHaveBeenCalledTimes(1);
   });
 
-  it("switches right pane when clicking tools in sidebar", async () => {
+  it("opens SettingsModal when clicking bottom settings and model status in sidebar", async () => {
     const user = userEvent.setup();
     const props = createMockProps();
     render(<DesktopLayout {...props} />);
 
-    expect(screen.queryByRole("complementary", { name: "桌面多功能工具面板" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "设置中心" })).not.toBeInTheDocument();
 
-    const workspaceBtn = screen.getByTitle(copy.workspaceEntry);
-    await user.click(workspaceBtn);
+    // 点击侧边栏底部的设置入口
+    const settingsBtn = screen.getByTitle("系统设置与偏好");
+    await user.click(settingsBtn);
 
-    expect(screen.getByRole("complementary", { name: "桌面多功能工具面板" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "设置中心" })).toBeInTheDocument();
+    expect(screen.getByText("配置智能体执行、排队消息发送以及权限。")).toBeInTheDocument();
+    expect(screen.getByText("排队消息")).toBeInTheDocument();
+    expect(screen.getByText("安全预设")).toBeInTheDocument();
 
-    const llmBtn = screen.getByTitle(copy.llmSettingsEntry);
-    await user.click(llmBtn);
+    // 关闭设置
+    const closeBtn = screen.getByRole("button", { name: "关闭设置" });
+    await user.click(closeBtn);
+    expect(screen.queryByRole("dialog", { name: "设置中心" })).not.toBeInTheDocument();
 
-    expect(screen.getByRole("complementary", { name: "桌面多功能工具面板" })).toBeInTheDocument();
+    // 点击侧边栏底部的模型状态入口
+    const modelBtn = screen.getByTitle(/当前模型/i);
+    await user.click(modelBtn);
+
+    expect(screen.getByRole("dialog", { name: "设置中心" })).toBeInTheDocument();
+    expect(screen.getByText(/配置各 LLM Provider 厂商 API Key/i)).toBeInTheDocument();
   });
 
-  it("handles desktop keyboard shortcuts Ctrl+N, Ctrl+B, and Ctrl+[", async () => {
+  it("supports inline rename from top header", async () => {
+    const user = userEvent.setup();
+    const props = createMockProps();
+    render(<DesktopLayout {...props} />);
+
+    const editBtn = screen.getByTitle("重命名会话");
+    await user.click(editBtn);
+
+    const input = screen.getByLabelText("重命名当前会话");
+    expect(input).toBeInTheDocument();
+
+    await user.clear(input);
+    await user.type(input, "重命名后的标题{Enter}");
+
+    expect(props.onRename).toHaveBeenCalledWith("conv-1", "重命名后的标题");
+  });
+
+  it("handles desktop keyboard shortcuts Ctrl+N, Ctrl+B, Ctrl+,, and Ctrl+[", async () => {
     const user = userEvent.setup();
     const props = createMockProps();
     render(<DesktopLayout {...props} />);
@@ -143,6 +175,13 @@ describe("DesktopLayout", () => {
 
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("complementary", { name: "桌面多功能工具面板" })).not.toBeInTheDocument();
+
+    // 快捷键打开设置中心 Ctrl+,
+    await user.keyboard("{Control>},{/Control}");
+    expect(screen.getByRole("dialog", { name: "设置中心" })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "设置中心" })).not.toBeInTheDocument();
 
     // 折叠侧边栏为 Rail 模式
     fireEvent.keyDown(window, { ctrlKey: true, key: "[" });
@@ -170,13 +209,16 @@ describe("DesktopLayout", () => {
     expect(screen.getByRole("complementary", { name: "桌面导航与历史会话" })).toBeInTheDocument();
   });
 
-  it("renders DSH Hero welcome cards in blank conversation and sends prompt on card click", async () => {
+  it("renders 4 Hero welcome cards in blank conversation and sends prompt on card click", async () => {
     const user = userEvent.setup();
     const props = createMockProps();
     render(<DesktopLayout {...props} />);
 
     expect(screen.getByRole("region", { name: "欢迎体验" })).toBeInTheDocument();
     expect(screen.getByText("查看工作区代码")).toBeInTheDocument();
+    expect(screen.getByText("日常陪伴与闲聊")).toBeInTheDocument();
+    expect(screen.getByText("联网探索与研究")).toBeInTheDocument();
+    expect(screen.getByText("视觉与图片分析")).toBeInTheDocument();
 
     const workspaceCard = screen.getByText("查看工作区代码").closest("button");
     expect(workspaceCard).not.toBeNull();
@@ -186,5 +228,17 @@ describe("DesktopLayout", () => {
         expect.stringContaining("八千代，请帮我查看当前工作区根目录下有哪些文件和文件夹"),
       );
     }
+  });
+
+  it("opens workspace pane when clicking context chip above composer", async () => {
+    const user = userEvent.setup();
+    const props = createMockProps();
+    render(<DesktopLayout {...props} />);
+
+    const contextChip = screen.getByTitle(/当前工作区：Yachiyo-chat-desktop/i);
+    expect(contextChip).toBeInTheDocument();
+
+    await user.click(contextChip);
+    expect(screen.getByRole("complementary", { name: "桌面多功能工具面板" })).toBeInTheDocument();
   });
 });
