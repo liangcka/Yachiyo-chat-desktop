@@ -140,6 +140,173 @@ export function DesktopChatArea({
     }
   };
 
+  const composerNode = (
+    <div className="desktop-composer-dock__inner">
+      {/* 上下文标签 (Context Chip) 放置在输入框左上角外部 */}
+      <div className="desktop-composer-context-row">
+        <button
+          type="button"
+          className="desktop-context-chip"
+          onClick={onToggleWorkspace}
+          title="当前工作区：Yachiyo-chat-desktop (点击切换/查看)"
+        >
+          <FolderCode size={13} />
+          <span>Yachiyo-chat-desktop</span>
+        </button>
+      </div>
+
+      {isOffline ? <p className="status-banner">{copy.offline}</p> : null}
+      {controller.phase === "error" &&
+      controller.errorCode !== "DAILY_QUOTA_EXCEEDED" &&
+      controller.errorCode !== "SESSION_REQUIRED" ? (
+        <div className="status-banner status-banner--error">
+          <span>{controllerErrorMessage(controller.errorCode ?? "", copy)}</span>
+          {isRetryableChatErrorCode(controller.errorCode) ? (
+            <button onClick={() => void controller.retry()} type="button">
+              {copy.retry}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* 输入框主卡片 */}
+      <div className="dsh-composer-card">
+        {/* 隐藏的图片上传 input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={handleFileInputChange}
+        />
+
+        {/* 图片附件预览轨道 */}
+        {pendingImageDataUrl ? (
+          <div className="dsh-composer-card__attachment">
+            <img src={pendingImageDataUrl} alt="待发送图片" className="dsh-composer-card__attachment-img" />
+            <button
+              type="button"
+              className="dsh-composer-card__attachment-remove"
+              onClick={() => {
+                controller.setPendingImage(undefined);
+                setPendingImageDataUrl(undefined);
+              }}
+              title="移除图片"
+              aria-label="移除图片"
+            >
+              &times;
+            </button>
+          </div>
+        ) : null}
+
+        {/* 输入文本框 */}
+        <div className="dsh-composer-card__input-box">
+          <textarea
+            ref={textareaRef}
+            className="dsh-composer-card__textarea"
+            value={composerValue}
+            onChange={(e) => setComposerValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={isOffline ? copy.offline : isBlank ? "问点什么，或者输入 / 查看可用指令..." : "给八千代发送消息..."}
+            disabled={isOffline || isCompressing}
+            rows={1}
+          />
+        </div>
+
+        {/* 底部工具行：左侧功能 + 右侧模型选择 / ContextMeter / 34px 发送按钮 */}
+        <div className="dsh-composer-card__toolbar">
+          <div className="dsh-composer-card__tools-left">
+            {/* 附件/图片上传与指令唤起按钮 */}
+            <button
+              type="button"
+              className="dsh-composer-card__add-btn"
+              title="上传图片 / 附件"
+              aria-label="上传图片"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isOffline || isStreaming || isCompressing}
+            >
+              <Plus size={15} />
+            </button>
+
+            <button
+              type="button"
+              className="dsh-composer-card__slash-btn"
+              title="输入 / 查看快捷指令"
+              aria-label="快捷指令"
+              onClick={() => {
+                if (composerValue.startsWith("/")) {
+                  setComposerValue("");
+                } else {
+                  setComposerValue("/" + composerValue);
+                }
+                textareaRef.current?.focus();
+              }}
+            >
+              <span>/</span>
+            </button>
+
+            {webSearchSettings.enabled ? (
+              <span className="dsh-chip dsh-chip--active" title="联网搜索已启用">
+                <Globe size={12} />
+                <span>联网搜索</span>
+              </span>
+            ) : null}
+          </div>
+
+          <div className="dsh-composer-card__tools-right">
+            {/* 模型选择器紧挨着发送按钮 */}
+            <ModelSelect
+              activeProvider={llmActiveProvider}
+              entries={llmEntries}
+              onSelect={(provider) => {
+                void onLlmActivate(provider);
+              }}
+              onOpenSettings={() => {
+                if (onOpenSettings) {
+                  onOpenSettings("models");
+                } else {
+                  onToggleWorkspace();
+                }
+              }}
+              disabled={isOffline || isStreaming}
+            />
+
+            {/* 上下文用量指示器 */}
+            <ContextMeter messages={controller.messages} />
+
+            {/* 发送 / 停止 按钮（34px 纯蓝圆形） */}
+            {isStreaming ? (
+              <button
+                type="button"
+                className="dsh-composer-card__send-btn dsh-composer-card__send-btn--stop"
+                onClick={controller.stop}
+                title={copy.stop}
+                aria-label={copy.stop}
+              >
+                <Square size={14} fill="currentColor" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="dsh-composer-card__send-btn"
+                onClick={() => {
+                  if (composerValue.trim() || pendingImageDataUrl) {
+                    onSend(composerValue);
+                  }
+                }}
+                disabled={isOffline || isCompressing || (!composerValue.trim() && !pendingImageDataUrl)}
+                title="发送 (Enter)"
+                aria-label="发送消息"
+              >
+                <ArrowUp size={16} strokeWidth={2.5} />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <main className="desktop-main-chat" aria-label="核心对话工作台">
       {/* 顶栏：侧栏开关 | 会话标题（支持即地编辑） | 状态徽章 | 截图 / 工作区 / 设置 */}
@@ -281,6 +448,11 @@ export function DesktopChatArea({
                 : "全能智能体工作台：代码开发、角色日常、视觉识图与联网检索助理。"}
             </p>
 
+            {/* 新对话居中对话框输入区域 */}
+            <div className="desktop-hero__composer">
+              {composerNode}
+            </div>
+
             {/* 4 个等宽轻量化快捷引导卡片 */}
             <div className="desktop-hero__cards">
               <button
@@ -357,173 +529,12 @@ export function DesktopChatArea({
         )}
       </div>
 
-      {/* 底部锚定输入交互区 */}
-      <div className="desktop-composer-dock">
-        <div className="desktop-composer-dock__inner">
-          {/* 上下文标签 (Context Chip) 放置在输入框左上角外部 */}
-          <div className="desktop-composer-context-row">
-            <button
-              type="button"
-              className="desktop-context-chip"
-              onClick={onToggleWorkspace}
-              title="当前工作区：Yachiyo-chat-desktop (点击切换/查看)"
-            >
-              <FolderCode size={13} />
-              <span>Yachiyo-chat-desktop</span>
-            </button>
-          </div>
-
-          {isOffline ? <p className="status-banner">{copy.offline}</p> : null}
-          {controller.phase === "error" &&
-          controller.errorCode !== "DAILY_QUOTA_EXCEEDED" &&
-          controller.errorCode !== "SESSION_REQUIRED" ? (
-            <div className="status-banner status-banner--error">
-              <span>{controllerErrorMessage(controller.errorCode ?? "", copy)}</span>
-              {isRetryableChatErrorCode(controller.errorCode) ? (
-                <button onClick={() => void controller.retry()} type="button">
-                  {copy.retry}
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-
-          {/* 输入框主卡片 */}
-          <div className="dsh-composer-card">
-            {/* 隐藏的图片上传 input */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              style={{ display: "none" }}
-              onChange={handleFileInputChange}
-            />
-
-            {/* 图片附件预览轨道 */}
-            {pendingImageDataUrl ? (
-              <div className="dsh-composer-card__attachment">
-                <img src={pendingImageDataUrl} alt="待发送图片" className="dsh-composer-card__attachment-img" />
-                <button
-                  type="button"
-                  className="dsh-composer-card__attachment-remove"
-                  onClick={() => {
-                    controller.setPendingImage(undefined);
-                    setPendingImageDataUrl(undefined);
-                  }}
-                  title="移除图片"
-                  aria-label="移除图片"
-                >
-                  &times;
-                </button>
-              </div>
-            ) : null}
-
-            {/* 输入文本框 */}
-            <div className="dsh-composer-card__input-box">
-              <textarea
-                ref={textareaRef}
-                className="dsh-composer-card__textarea"
-                value={composerValue}
-                onChange={(e) => setComposerValue(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={isOffline ? copy.offline : isBlank ? "问点什么，或者输入 / 查看可用指令..." : "给八千代发送消息..."}
-                disabled={isOffline || isCompressing}
-                rows={1}
-              />
-            </div>
-
-            {/* 底部工具行：左侧功能 + 右侧模型选择 / ContextMeter / 34px 发送按钮 */}
-            <div className="dsh-composer-card__toolbar">
-              <div className="dsh-composer-card__tools-left">
-                {/* 附件/图片上传与指令唤起按钮 */}
-                <button
-                  type="button"
-                  className="dsh-composer-card__add-btn"
-                  title="上传图片 / 附件"
-                  aria-label="上传图片"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isOffline || isStreaming || isCompressing}
-                >
-                  <Plus size={15} />
-                </button>
-
-                <button
-                  type="button"
-                  className="dsh-composer-card__slash-btn"
-                  title="输入 / 查看快捷指令"
-                  aria-label="快捷指令"
-                  onClick={() => {
-                    if (composerValue.startsWith("/")) {
-                      setComposerValue("");
-                    } else {
-                      setComposerValue("/" + composerValue);
-                    }
-                    textareaRef.current?.focus();
-                  }}
-                >
-                  <span>/</span>
-                </button>
-
-                {webSearchSettings.enabled ? (
-                  <span className="dsh-chip dsh-chip--active" title="联网搜索已启用">
-                    <Globe size={12} />
-                    <span>联网搜索</span>
-                  </span>
-                ) : null}
-              </div>
-
-              <div className="dsh-composer-card__tools-right">
-                {/* 模型选择器紧挨着发送按钮 */}
-                <ModelSelect
-                  activeProvider={llmActiveProvider}
-                  entries={llmEntries}
-                  onSelect={(provider) => {
-                    void onLlmActivate(provider);
-                  }}
-                  onOpenSettings={() => {
-                    if (onOpenSettings) {
-                      onOpenSettings("models");
-                    } else {
-                      onToggleWorkspace();
-                    }
-                  }}
-                  disabled={isOffline || isStreaming}
-                />
-
-                {/* 上下文用量指示器 */}
-                <ContextMeter messages={controller.messages} />
-
-                {/* 发送 / 停止 按钮（34px 纯蓝圆形） */}
-                {isStreaming ? (
-                  <button
-                    type="button"
-                    className="dsh-composer-card__send-btn dsh-composer-card__send-btn--stop"
-                    onClick={controller.stop}
-                    title={copy.stop}
-                    aria-label={copy.stop}
-                  >
-                    <Square size={14} fill="currentColor" />
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="dsh-composer-card__send-btn"
-                    onClick={() => {
-                      if (composerValue.trim() || pendingImageDataUrl) {
-                        onSend(composerValue);
-                      }
-                    }}
-                    disabled={isOffline || isCompressing || (!composerValue.trim() && !pendingImageDataUrl)}
-                    title="发送 (Enter)"
-                    aria-label="发送消息"
-                  >
-                    <ArrowUp size={16} strokeWidth={2.5} />
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
+      {/* 底部锚定输入交互区（仅在有消息时渲染） */}
+      {!isBlank ? (
+        <div className="desktop-composer-dock">
+          {composerNode}
         </div>
-      </div>
+      ) : null}
     </main>
   );
 }

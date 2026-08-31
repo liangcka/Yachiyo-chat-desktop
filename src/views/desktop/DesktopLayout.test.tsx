@@ -241,4 +241,32 @@ describe("DesktopLayout", () => {
     await user.click(contextChip);
     expect(screen.getByRole("complementary", { name: "桌面多功能工具面板" })).toBeInTheDocument();
   });
+
+  it("renders composer centered inside hero in blank conversation and at bottom dock when messages exist", () => {
+    const blankProps = createMockProps();
+    const { container: blankContainer } = render(<DesktopLayout {...blankProps} />);
+
+    // 空白新对话：居中在 hero 区域内，底部无 dock
+    const heroComposer = blankContainer.querySelector(".desktop-hero__composer .dsh-composer-card");
+    expect(heroComposer).toBeInTheDocument();
+    expect(blankContainer.querySelector(".desktop-composer-dock")).not.toBeInTheDocument();
+
+    // 存在消息状态：hero 不存在，输入框位于底部 dock
+    const activeProps = createMockProps();
+    activeProps.controller.messages = [
+      {
+        id: "msg-1",
+        conversationId: "conv-1",
+        role: "user",
+        text: "你好八千代",
+        status: "complete",
+        createdAt: Date.now(),
+      },
+    ];
+    const { container: activeContainer } = render(<DesktopLayout {...activeProps} />);
+
+    expect(activeContainer.querySelector(".desktop-hero")).not.toBeInTheDocument();
+    const bottomComposer = activeContainer.querySelector(".desktop-composer-dock .dsh-composer-card");
+    expect(bottomComposer).toBeInTheDocument();
+  });
 });
