@@ -42,9 +42,10 @@ export function SidebarConversationItem({
     setEditing(true);
   };
 
-  const handleSaveRename = async (e: FormEvent) => {
-    e.preventDefault();
-    const trimmed = draftTitle.trim();
+  const handleSaveRename = async (e?: FormEvent | React.SyntheticEvent) => {
+    if (e) e.preventDefault();
+    const currentVal = inputRef.current ? inputRef.current.value : draftTitle;
+    const trimmed = currentVal.trim();
     if (!trimmed || trimmed === conversation.title) {
       setEditing(false);
       return;
@@ -82,12 +83,20 @@ export function SidebarConversationItem({
             onKeyDown={(e) => {
               if (e.key === "Escape") {
                 handleCancelRename();
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                void handleSaveRename(e);
               }
             }}
             className="desktop-sidebar__rename-input"
             aria-label={copy.rename}
           />
-          <button type="submit" className="desktop-sidebar__history-action" title={copy.confirm}>
+          <button
+            type="submit"
+            onClick={(e) => void handleSaveRename(e)}
+            className="desktop-sidebar__history-action"
+            title={copy.confirm}
+          >
             <Check size={14} />
           </button>
           <button

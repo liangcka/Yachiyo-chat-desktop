@@ -216,8 +216,6 @@ export function DesktopLayout(props: SharedViewProps) {
           collapsed={sidebarCollapsed}
           conversations={props.conversations}
           copy={props.copy}
-          llmActiveProvider={props.llmActiveProvider}
-          llmEntries={props.llmEntries}
           locale={props.controller.locale}
           onClearData={props.onClearData}
           onCompress={handleCompress}

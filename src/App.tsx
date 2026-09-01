@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useChatController, type ChatRepository, type StreamChatFunction } from "./app/use-chat-controller";
-import { useDeviceMode } from "./app/use-device-mode";
-import { useTheme } from "./app/use-theme";
 import { AccessGate } from "./components/AccessGate";
-import { StarfieldCanvas } from "./components/StarfieldCanvas";
 import { ToastRegion } from "./components/ToastRegion";
 import { ConversationRepository } from "./data/conversation-repository";
 import { YachiyoDatabase } from "./data/db";
@@ -30,10 +27,15 @@ import {
   defaultWebSearchSettings,
   type WebSearchSettings,
 } from "./services/web-search-settings";
+import {
+  Live2dSettingsService,
+  defaultLive2dSettings,
+  type Live2dSettings,
+} from "./services/live2d-settings";
+import { Live2dWidget } from "./features/live2d/Live2dWidget";
 import { SKILLS } from "./skills";
 import type { SharedViewProps } from "./views/layout-types";
 import { DesktopLayout } from "./views/desktop/DesktopLayout";
-import { MobileLayout } from "./views/mobile/MobileLayout";
 
 export interface AppRepository extends ChatRepository {
   renameConversation(id: string, title: string): Promise<void>;
@@ -55,6 +57,7 @@ export interface AppServices {
   llmSettings?: LlmSettingsService;
   skillSettings?: SkillSettingsService;
   webSearchSettings?: WebSearchSettingsService;
+  live2dSettings?: Live2dSettingsService;
 }
 
 export interface AppProps {
@@ -65,6 +68,7 @@ const productionDatabase = new YachiyoDatabase();
 const productionLlmService = new LlmSettingsService(productionDatabase);
 const productionSkillService = new SkillSettingsService(productionDatabase);
 const productionWebSearchService = new WebSearchSettingsService(productionDatabase);
+const productionLive2dService = new Live2dSettingsService(productionDatabase);
 const productionServices: AppServices = {
   processImage,
   repository: new ConversationRepository(productionDatabase),
@@ -73,6 +77,7 @@ const productionServices: AppServices = {
   llmSettings: productionLlmService,
   skillSettings: productionSkillService,
   webSearchSettings: productionWebSearchService,
+  live2dSettings: productionLive2dService,
 };
 
 interface ToastState {
@@ -105,10 +110,9 @@ export function App({ services }: AppProps) {
   const llmService = activeServices.llmSettings ?? productionLlmService;
   const skillService = activeServices.skillSettings ?? productionSkillService;
   const webSearchService = activeServices.webSearchSettings ?? productionWebSearchService;
+  const live2dService = activeServices.live2dSettings ?? productionLive2dService;
   const { isOnline } = useOnlineStatus();
   const pwa = usePwaUpdate();
-  const deviceMode = useDeviceMode();
-  const { resolved: resolvedTheme } = useTheme();
 
   const [authentication, setAuthentication] = useState<AuthenticationState>(() =>
     isDesktopApp() ? "authenticated" : navigator.onLine ? "checking" : "authenticated",
@@ -121,6 +125,7 @@ export function App({ services }: AppProps) {
   const [pendingImageDataUrl, setPendingImageDataUrl] = useState<string>();
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [webSearchSettings, setWebSearchSettings] = useState<WebSearchSettings>(defaultWebSearchSettings);
+  const [live2dSettings, setLive2dSettings] = useState<Live2dSettings>(defaultLive2dSettings);
   const [toast, setToast] = useState<ToastState>();
 
   const activeLlmConfig = useMemo<ActiveLlmConfig | undefined>(() => {
@@ -188,6 +193,14 @@ export function App({ services }: AppProps) {
     return webSearch;
   }, [webSearchService]);
 
+  const syncLive2dSettings = useCallback(async () => {
+    const live2d = await live2dService
+      .getLive2dSettings()
+      .catch(() => defaultLive2dSettings);
+    setLive2dSettings(live2d);
+    return live2d;
+  }, [live2dService]);
+
   useEffect(() => {
     if (isDesktopApp()) {
       let cancelled = false;
@@ -199,6 +212,7 @@ export function App({ services }: AppProps) {
             setLlmActiveProvider(llmSettings.active);
             setActiveSkillIds(await skillService.getActiveSkillIds().catch(() => []));
             await syncWebSearchSettings();
+            await syncLive2dSettings();
           }
         } catch {
           // ignore desktop initialization errors
@@ -234,6 +248,7 @@ export function App({ services }: AppProps) {
           setActiveSkillIds(await skillService.getActiveSkillIds().catch(() => []));
           if (!cancelled) {
             await syncWebSearchSettings();
+            await syncLive2dSettings();
           }
         }
         if (cancelled) return;
@@ -253,7 +268,7 @@ export function App({ services }: AppProps) {
       cancelled = true;
       abortController.abort();
     };
-  }, [activeServices, isOnline, readLlmSettings, skillService, syncWebSearchSettings]);
+  }, [activeServices, isOnline, readLlmSettings, skillService, syncLive2dSettings, syncWebSearchSettings]);
 
   useEffect(() => {
     const timeout = setTimeout(() => setControllerOnline(isOnline), 0);
@@ -335,6 +350,17 @@ export function App({ services }: AppProps) {
       });
     },
     [webSearchService],
+  );
+
+  const handleLive2dSettingsChange = useCallback(
+    (partial: Partial<Live2dSettings>) => {
+      setLive2dSettings((current) => {
+        const next = { ...current, ...partial };
+        void live2dService.set(next).catch(() => undefined);
+        return next;
+      });
+    },
+    [live2dService],
   );
 
   useEffect(() => {
@@ -541,6 +567,8 @@ export function App({ services }: AppProps) {
     await skillService.clear();
     setWebSearchSettings(defaultWebSearchSettings);
     await webSearchService.clear().catch(() => undefined);
+    setLive2dSettings(defaultLive2dSettings);
+    await live2dService.clear().catch(() => undefined);
     setLlmEntries([]);
     setLlmActiveProvider(undefined);
     await controller.newConversation();
@@ -631,11 +659,13 @@ export function App({ services }: AppProps) {
     copy,
     imageUrls,
     isOnline,
+    live2dSettings,
     llmActiveProvider,
     llmEntries,
     onClearData: handleClearData,
     onDelete: handleDelete,
     onImage: handleImage,
+    onLive2dSettingsChange: handleLive2dSettingsChange,
     onLlmActivate: handleLlmActivate,
     onLlmClear: handleLlmClear,
     onLlmSave: handleLlmSave,
@@ -667,24 +697,17 @@ export function App({ services }: AppProps) {
         <span />
       </div>
     ) : (
-      <div key={deviceMode} className={`layout-transition-view layout-transition-view--${deviceMode}`}>
-        {deviceMode === "desktop" ? (
-          <DesktopLayout {...sharedProps} />
-        ) : (
-          <MobileLayout {...sharedProps} />
-        )}
+      <div className="layout-transition-view layout-transition-view--desktop">
+        <DesktopLayout {...sharedProps} />
       </div>
     );
 
-  const isDesktop = deviceMode === "desktop";
-
   return (
     <main
-      className={`app-shell ${isDesktop ? "app-shell--desktop" : ""}`}
+      className="app-shell app-shell--desktop"
       aria-label="Yachiyo Chat"
     >
-      <div className={`chat-stage ${isDesktop ? "chat-stage--desktop" : ""}`}>
-        {!isDesktop && resolvedTheme === "dark" && <StarfieldCanvas />}
+      <div className="chat-stage chat-stage--desktop">
         {authentication === "checking" ? (
           <div aria-label={copy.verifying} className="chat-loading" role="status">
             <span />
@@ -712,6 +735,11 @@ export function App({ services }: AppProps) {
           announcementId={toast?.id}
           message={toast?.message}
           tone={toast?.tone}
+        />
+        <Live2dWidget
+          settings={live2dSettings}
+          onSettingsChange={handleLive2dSettingsChange}
+          chatPhase={controller.phase}
         />
       </div>
     </main>

@@ -31,7 +31,9 @@ class MemoryRepository implements AppRepository {
   }
 
   async listConversations(): Promise<Conversation[]> {
-    return [...this.conversations].sort((left, right) => right.updatedAt - left.updatedAt);
+    return this.conversations
+      .map((conversation) => ({ ...conversation }))
+      .sort((left, right) => right.updatedAt - left.updatedAt);
   }
 
   async getConversation(id: string): Promise<Conversation | undefined> {
@@ -179,8 +181,7 @@ describe("App flows", () => {
     await user.click(screen.getByRole("button", { name: "进入" }));
     expect(await screen.findByPlaceholderText("什么都可以告诉我")).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "菜单" }));
-    await user.click(screen.getByRole("button", { name: "日本語" }));
+    await user.click(screen.getByLabelText("切换语言"));
     await waitFor(() => expect(screen.getByPlaceholderText("何でも話してね")).toBeInTheDocument());
     expect(services.repository.locale).toBe("ja-JP");
     expect(document.documentElement.lang).toBe("ja-JP");
@@ -250,22 +251,15 @@ describe("App flows", () => {
       expect(stream.mock.calls[0]?.[0].webSearch).toBeUndefined();
       expect(screen.queryByLabelText("参考来源")).not.toBeInTheDocument();
 
-      // 菜单 → 技能 → 开启联网搜索
-      await user.click(screen.getByRole("button", { name: "菜单" }));
-      await user.click(screen.getByRole("button", { name: "技能" }));
-      await waitFor(() =>
-        expect(screen.queryByRole("button", { name: "新建对话" })).not.toBeInTheDocument(),
-      );
+      // 设置 → 联网检索 → 开启联网搜索
+      await user.click(screen.getByLabelText("设置"));
+      await user.click(screen.getByRole("tab", { name: "联网检索" }));
       await user.click(screen.getByRole("button", { name: "切换技能启用状态: 联网搜索" }));
-      await user.click(screen.getByRole("button", { name: "关闭菜单" }));
-      await waitFor(() =>
-        expect(
-          screen.queryByRole("button", { name: "切换技能启用状态: 联网搜索" }),
-        ).not.toBeInTheDocument(),
-      );
+      await user.click(screen.getByRole("button", { name: "关闭设置" }));
 
       // 开启后：请求携带 webSearch: true，回复下方渲染参考来源链接
-      await user.type(composer, "明天呢");
+      const activeComposer = await screen.findByPlaceholderText("什么都可以告诉我");
+      await user.type(activeComposer, "明天呢");
       await user.click(screen.getByRole("button", { name: "发送" }));
       await waitFor(() => expect(stream).toHaveBeenCalledTimes(2));
       expect(stream.mock.calls[1]?.[0].webSearch).toBe(true);
@@ -285,13 +279,10 @@ describe("App flows", () => {
       ).toEqual(sources);
 
       // 关闭"显示引用来源"后不再渲染来源列表
-      await user.click(screen.getByRole("button", { name: "菜单" }));
-      await user.click(screen.getByRole("button", { name: "技能" }));
-      await waitFor(() =>
-        expect(screen.queryByRole("button", { name: "新建对话" })).not.toBeInTheDocument(),
-      );
+      await user.click(screen.getByLabelText("设置"));
+      await user.click(screen.getByRole("tab", { name: "联网检索" }));
       await user.click(screen.getByRole("button", { name: "切换技能启用状态: 显示引用来源" }));
-      await user.click(screen.getByRole("button", { name: "关闭菜单" }));
+      await user.click(screen.getByRole("button", { name: "关闭设置" }));
       await waitFor(() => expect(screen.queryByLabelText("参考来源")).not.toBeInTheDocument());
 
       // 持久化的开关状态已更新
@@ -428,8 +419,9 @@ describe("App flows", () => {
     await user.click(screen.getByRole("button", { name: "发送" }));
     expect(await screen.findByText("还在慢慢写")).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "菜单" }));
-    await user.click(screen.getByRole("button", { name: "退出访问" }));
+    await user.click(screen.getByLabelText("设置"));
+    await user.click(screen.getByRole("tab", { name: "存储与维护" }));
+    await user.click(screen.getByRole("button", { name: /退出登录/i }));
 
     await waitFor(() => expect(services.session.signOut).toHaveBeenCalledOnce());
     expect(streamSignal?.aborted).toBe(true);
@@ -445,7 +437,8 @@ describe("App flows", () => {
     });
     const services = fakeServices({ stream });
     const { container } = render(<App services={services} />);
-    await screen.findByRole("button", { name: "拍摄" });
+    const captureButtons = await screen.findAllByRole("button", { name: "拍摄" });
+    expect(captureButtons.length).toBeGreaterThan(0);
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
     const file = new File(["jpeg"], "photo.jpg", { type: "image/jpeg" });
 
@@ -495,37 +488,33 @@ describe("App flows", () => {
 
   it("creates, renames, deletes, and clears local conversations behind confirmations", async () => {
     const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const services = fakeServices();
     render(<App services={services} />);
     await screen.findByPlaceholderText("什么都可以告诉我");
 
-    await user.click(screen.getByRole("button", { name: "菜单" }));
-    await user.click(screen.getByRole("button", { name: "新建对话" }));
+    await user.click(screen.getByTitle("新建对话 (Ctrl+N)"));
     await waitFor(() => expect(services.repository.conversations).toHaveLength(2));
 
-    await user.click(screen.getByRole("button", { name: "菜单" }));
-    await user.click(screen.getByRole("button", { name: "历史记录" }));
-    const history = screen.getByRole("dialog", { name: "历史记录" });
-    expect(within(history).getAllByRole("listitem")).toHaveLength(2);
-
-    const firstItem = within(history).getAllByRole("listitem")[0];
-    await user.click(within(firstItem).getByRole("button", { name: "重命名" }));
-    const renameInput = within(firstItem).getByRole("textbox");
+    const renameBtns = screen.getAllByTitle("重命名");
+    await user.click(renameBtns[0]);
+    const renameInput = screen.getByLabelText("重命名");
     await user.clear(renameInput);
-    await user.type(renameInput, "夏夜");
-    await user.click(within(firstItem).getByRole("button", { name: "确定" }));
-    expect(await within(history).findByText("夏夜")).toBeVisible();
+    await user.type(renameInput, "夏夜{Enter}");
+    expect((await screen.findAllByText("夏夜")).length).toBeGreaterThan(0);
 
-    await user.click(within(firstItem).getByRole("button", { name: "删除" }));
-    await user.click(within(firstItem).getByRole("button", { name: "确定" }));
+    const deleteBtns = screen.getAllByTitle("删除");
+    await user.click(deleteBtns[0]);
     await waitFor(() => expect(services.repository.conversations).toHaveLength(1));
 
-    await user.click(within(history).getByRole("button", { name: "关闭菜单" }));
-    await user.click(screen.getByRole("button", { name: "菜单" }));
-    await user.click(screen.getByRole("button", { name: "清除本地数据" }));
-    await user.click(screen.getByRole("button", { name: "确定" }));
+    await user.click(screen.getByLabelText("设置"));
+    await user.click(screen.getByRole("tab", { name: "存储与维护" }));
+    await user.click(screen.getByRole("button", { name: "清空数据" }));
+    await user.click(screen.getByRole("button", { name: "确认清空" }));
+    await user.click(screen.getByRole("button", { name: "关闭设置" }));
     await waitFor(() => expect(services.repository.conversations).toHaveLength(1));
     expect(services.repository.messages).toHaveLength(0);
+    confirmSpy.mockRestore();
   });
 
   it("shows quota feedback and returns to the gate on session expiry without deleting history", async () => {
@@ -541,8 +530,9 @@ describe("App flows", () => {
     await user.click(screen.getByRole("button", { name: "发送" }));
     expect(await screen.findByText("今天的对话次数已用完，请明天再来。")).toBeVisible();
 
-    await user.clear(composer);
-    await user.type(composer, "第二条");
+    const activeComposer = await screen.findByPlaceholderText("什么都可以告诉我");
+    await user.clear(activeComposer);
+    await user.type(activeComposer, "第二条");
     await user.click(screen.getByRole("button", { name: "发送" }));
     expect(await screen.findByLabelText("访问码")).toBeVisible();
     expect(repository.messages.some(({ text }) => text === "第一条")).toBe(true);
@@ -597,8 +587,7 @@ describe("App flows", () => {
       new Error("conversation limit reached"),
     );
 
-    await user.click(screen.getByRole("button", { name: "菜单" }));
-    await user.click(screen.getByRole("button", { name: "新建对话" }));
+    await user.click(screen.getByTitle("新建对话 (Ctrl+N)"));
 
     expect((await screen.findAllByText("本地最多保留 30 段对话，请先删除一段。")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
@@ -613,16 +602,23 @@ describe("App flows", () => {
     const services = fakeServices();
     render(<App services={services} />);
 
-    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
-    expect(composer).toBeDisabled();
-    expect(screen.getByRole("button", { name: "拍摄" })).toBeDisabled();
-    expect(screen.getByText("当前离线，可查看本地记录")).toBeVisible();
+    try {
+      const composer = await screen.findByPlaceholderText("当前离线，可查看本地记录");
+      expect(composer).toBeDisabled();
+      expect(screen.getAllByRole("button", { name: "拍摄" })[0]).toBeDisabled();
+      expect(screen.getAllByText("当前离线，可查看本地记录")[0]).toBeVisible();
 
-    act(() => {
-      online = true;
-      window.dispatchEvent(new Event("online"));
-    });
-    await waitFor(() => expect(composer).toBeEnabled());
+      act(() => {
+        online = true;
+        window.dispatchEvent(new Event("online"));
+      });
+      await waitFor(() => expect(screen.getByPlaceholderText("什么都可以告诉我")).toBeEnabled());
+    } finally {
+      Object.defineProperty(navigator, "onLine", {
+        configurable: true,
+        get: () => true,
+      });
+    }
   });
 
   it("recalls the latest user message and restores its text into the composer", async () => {
@@ -646,18 +642,18 @@ describe("App flows", () => {
     const recallBtn = screen.getByRole("menuitem", { name: "撤回" });
     await user.click(recallBtn);
 
-    const log = screen.getByRole("log");
     await waitFor(() => {
-      expect(within(log).queryByText("这是一条要撤回的消息")).not.toBeInTheDocument();
-      expect(within(log).queryByText("AI的回复")).not.toBeInTheDocument();
+      expect(screen.queryByRole("article", { name: "我的消息" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("article", { name: "八千代的回复" })).not.toBeInTheDocument();
     });
 
-    expect(composer).toHaveValue("这是一条要撤回的消息");
+    const activeComposer = await screen.findByPlaceholderText("什么都可以告诉我");
+    expect(activeComposer).toHaveValue("这是一条要撤回的消息");
     expect((await screen.findAllByText("已撤回最新一条消息")).length).toBeGreaterThan(0);
 
     // Send a second message right away without refreshing
-    await user.clear(composer);
-    await user.type(composer, "第二条消息");
+    await user.clear(activeComposer);
+    await user.type(activeComposer, "第二条消息");
     await user.click(screen.getByRole("button", { name: "发送" }));
 
     await screen.findByText("AI的回复");
@@ -682,8 +678,9 @@ describe("App flows", () => {
     await user.click(recallBtn2);
 
     await waitFor(() => {
-      expect(within(log).queryByText("第二条消息")).not.toBeInTheDocument();
+      expect(screen.queryByRole("article", { name: "我的消息" })).not.toBeInTheDocument();
     });
-    expect(composer).toHaveValue("第二条消息");
+    const finalComposer = await screen.findByPlaceholderText("什么都可以告诉我");
+    expect(finalComposer).toHaveValue("第二条消息");
   });
 });

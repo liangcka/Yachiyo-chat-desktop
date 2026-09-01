@@ -5,6 +5,7 @@ import type { useChatController } from "../../app/use-chat-controller";
 import type { Conversation } from "../../domain/chat";
 import { copyFor } from "../../i18n/messages";
 import { defaultWebSearchSettings } from "../../services/web-search-settings";
+import { defaultLive2dSettings } from "../../services/live2d-settings";
 import type { SharedViewProps } from "../layout-types";
 import { DesktopLayout } from "./DesktopLayout";
 
@@ -58,11 +59,13 @@ describe("DesktopLayout", () => {
     copy,
     imageUrls: new Map(),
     isOnline: true,
+    live2dSettings: defaultLive2dSettings,
     llmActiveProvider: undefined,
     llmEntries: [],
     onClearData: vi.fn(),
     onDelete: vi.fn(),
     onImage: vi.fn(),
+    onLive2dSettingsChange: vi.fn(),
     onLlmActivate: vi.fn(),
     onLlmClear: vi.fn(),
     onLlmSave: vi.fn(),
@@ -116,7 +119,7 @@ describe("DesktopLayout", () => {
     expect(props.onNewChat).toHaveBeenCalledTimes(1);
   });
 
-  it("opens SettingsModal when clicking bottom settings and model status in sidebar", async () => {
+  it("opens SettingsModal when clicking bottom settings in sidebar", async () => {
     const user = userEvent.setup();
     const props = createMockProps();
     render(<DesktopLayout {...props} />);
@@ -128,21 +131,19 @@ describe("DesktopLayout", () => {
     await user.click(settingsBtn);
 
     expect(screen.getByRole("dialog", { name: "设置中心" })).toBeInTheDocument();
-    expect(screen.getByText("速览当前客户端运行状态、活跃模型与快捷操作。")).toBeInTheDocument();
+    expect(screen.getByText(/配置智能体执行、排队消息发送以及权限/i)).toBeInTheDocument();
     expect(screen.getByText("当前活跃大模型")).toBeInTheDocument();
     expect(screen.getByText("本地持久化存储")).toBeInTheDocument();
+
+    // 切换到模型配置标签
+    const modelsTabBtn = screen.getByRole("tab", { name: /模型配置/i });
+    await user.click(modelsTabBtn);
+    expect(screen.getByText(/配置各 LLM Provider 厂商 API Key/i)).toBeInTheDocument();
 
     // 关闭设置
     const closeBtn = screen.getByRole("button", { name: "关闭设置" });
     await user.click(closeBtn);
     expect(screen.queryByRole("dialog", { name: "设置中心" })).not.toBeInTheDocument();
-
-    // 点击侧边栏底部的模型状态入口
-    const modelBtn = screen.getByTitle(/当前模型/i);
-    await user.click(modelBtn);
-
-    expect(screen.getByRole("dialog", { name: "设置中心" })).toBeInTheDocument();
-    expect(screen.getByText(/配置各 LLM Provider 厂商 API Key/i)).toBeInTheDocument();
   });
 
   it("supports inline rename from top header", async () => {

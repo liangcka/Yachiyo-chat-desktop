@@ -1,9 +1,8 @@
-import { Cpu, Globe, Moon, Settings, Sun } from "lucide-react";
+import { Globe, Moon, Settings, Sun } from "lucide-react";
 import type { Locale } from "../../../domain/chat";
 import type { SettingsTabKey } from "../../../components/settings/SettingsModal";
 
 interface SidebarFooterProps {
-  activeModelDisplay: string;
   locale?: Locale;
   onLocale?: (locale: Locale) => Promise<void>;
   onOpenSettings?: (tab?: SettingsTabKey) => void;
@@ -13,7 +12,6 @@ interface SidebarFooterProps {
 }
 
 export function SidebarFooter({
-  activeModelDisplay,
   locale = "zh-CN",
   onLocale,
   onOpenSettings,
@@ -21,14 +19,6 @@ export function SidebarFooter({
   onToggleTheme,
   resolvedTheme = "dark",
 }: SidebarFooterProps) {
-  const handleOpenModelSettings = () => {
-    if (onOpenSettings) {
-      onOpenSettings("models");
-    } else if (onToggleTab) {
-      onToggleTab("llm");
-    }
-  };
-
   const handleOpenGeneralSettings = () => {
     if (onOpenSettings) {
       onOpenSettings("general");
@@ -46,25 +36,7 @@ export function SidebarFooter({
 
   return (
     <div className="desktop-sidebar__footer-root">
-      {/* 1. 模型状态胶囊卡片 */}
-      <button
-        type="button"
-        className="desktop-sidebar__model-pill"
-        onClick={handleOpenModelSettings}
-        title={`当前模型: ${activeModelDisplay} (点击管理)`}
-      >
-        <div className="desktop-sidebar__model-indicator">
-          <span className="desktop-sidebar__model-indicator-pulse" />
-          <Cpu size={14} className="desktop-sidebar__model-icon" />
-        </div>
-        <div className="desktop-sidebar__model-meta">
-          <span className="desktop-sidebar__model-name">{activeModelDisplay}</span>
-          <span className="desktop-sidebar__model-status">模型就绪</span>
-        </div>
-        <span className="desktop-sidebar__model-badge">配置</span>
-      </button>
-
-      {/* 2. 底部快捷工具坞 (主题、语言、设置) */}
+      {/* 底部快捷工具坞 (主题、语言、设置) */}
       <div className="desktop-sidebar__footer-actions">
         {onToggleTheme ? (
           <button

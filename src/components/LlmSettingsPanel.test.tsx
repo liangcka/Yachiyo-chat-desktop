@@ -27,19 +27,6 @@ describe("LlmSettingsPanel", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("lists providers grouped by domestic and international", () => {
-    mount();
-    const options = within(screen.getByLabelText("厂商")).getAllByRole("option");
-    expect(options.map((option) => option.textContent)).toEqual([
-      "阶跃星辰 StepFun（Step Plan）",
-      "DeepSeek",
-      "智谱 GLM",
-      "OpenAI (GPT)",
-      "Anthropic (Claude)",
-      "Google (Gemini)",
-    ]);
-  });
-
   it("shows the default-service hint when no active provider is set", () => {
     mount();
     expect(screen.getByText("未配置，使用默认服务")).toBeInTheDocument();
@@ -50,54 +37,94 @@ describe("LlmSettingsPanel", () => {
     expect(screen.getByText("当前使用: Anthropic (Claude)")).toBeInTheDocument();
   });
 
-  it("disables save while the key is empty", () => {
+  it("renders the model management table with models and action controls", () => {
     mount();
-    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+    expect(screen.getByText("模型管理")).toBeInTheDocument();
+    expect(screen.getByText(/配置 API key 添加更多可用模型/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加模型" })).toBeInTheDocument();
+    expect(screen.getByText("DeepSeek-V4-Flash")).toBeInTheDocument();
+    expect(screen.getByText("阶跃星辰-3.7-flash")).toBeInTheDocument();
+    expect(screen.getByText("ox-alpha")).toBeInTheDocument();
   });
 
-  it("enables save and calls onSave with provider, key, and default model", async () => {
+  it("opens add model modal with custom model and provider vendors", async () => {
+    const user = userEvent.setup();
+    mount();
+
+    expect(screen.queryByRole("dialog", { name: "添加模型" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "添加模型" }));
+
+    expect(screen.getByRole("dialog", { name: "添加模型" })).toBeInTheDocument();
+    expect(screen.getByText("自定义模型")).toBeInTheDocument();
+    expect(screen.getByText("火山引擎")).toBeInTheDocument();
+    expect(screen.getByText("MiniMax CN")).toBeInTheDocument();
+    expect(screen.getByText("阿里云")).toBeInTheDocument();
+    expect(screen.getByText("硅基流动")).toBeInTheDocument();
+  });
+
+  it("opens vendor config modal and saves API key and model", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn(async () => undefined);
-    mount({ onSave });
+    const onActivate = vi.fn(async () => undefined);
+    mount({ onSave, onActivate });
 
-    await user.type(screen.getByPlaceholderText("API Key"), VALID_KEY);
-    expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "添加模型" }));
+    await user.click(screen.getByText("火山引擎"));
 
-    await user.click(screen.getByRole("button", { name: "保存" }));
-    expect(onSave).toHaveBeenCalledWith("stepfun", VALID_KEY, "step-3.7-flash");
+    expect(screen.getByRole("dialog", { name: "配置模型" })).toBeInTheDocument();
+    expect(screen.getByText("配置 火山引擎")).toBeInTheDocument();
+
+    const keyInput = screen.getByPlaceholderText("请输入服务商 API Key");
+    await user.type(keyInput, VALID_KEY);
+    await user.click(screen.getByRole("button", { name: "保存并启用" }));
+
+    expect(onSave).toHaveBeenCalledWith("openai", VALID_KEY, "doubao-pro-32k");
+    expect(onActivate).toHaveBeenCalledWith("openai");
   });
 
-  it("loads the existing entry when switching to a configured provider", async () => {
+  it("opens custom model config and saves custom model", async () => {
     const user = userEvent.setup();
-    mount({
-      entries: [{ provider: "openai", apiKey: VALID_KEY, model: "gpt-5.6-luna" }],
-    });
+    const onSave = vi.fn(async () => undefined);
+    const onActivate = vi.fn(async () => undefined);
+    mount({ onSave, onActivate });
 
-    await user.selectOptions(screen.getByLabelText("厂商"), "openai");
+    await user.click(screen.getByRole("button", { name: "添加模型" }));
+    await user.click(screen.getByText("自定义模型"));
 
-    expect((screen.getByPlaceholderText("API Key") as HTMLInputElement).value).toBe(VALID_KEY);
-    expect((screen.getByLabelText("模型") as HTMLSelectElement).value).toBe("gpt-5.6-luna");
+    expect(screen.getByRole("dialog", { name: "配置模型" })).toBeInTheDocument();
+    expect(screen.getByText(/配置自定义模型/i)).toBeInTheDocument();
+
+    const keyInput = screen.getByPlaceholderText("请输入服务商 API Key");
+    await user.type(keyInput, VALID_KEY);
+    await user.click(screen.getByRole("button", { name: "保存并启用" }));
+
+    expect(onSave).toHaveBeenCalledWith("openai", VALID_KEY, "ox-alpha");
+    expect(onActivate).toHaveBeenCalledWith("openai");
   });
 
-  it("hides the clear button until the selected provider has a stored config", () => {
-    const { rerender } = mount();
-    expect(screen.queryByRole("button", { name: "清除配置" })).not.toBeInTheDocument();
+  it("opens edit config modal from table row", async () => {
+    const user = userEvent.setup();
+    mount();
 
-    rerender(
-      <LlmSettingsPanel
-        copy={copy}
-        open
-        entries={[{ provider: "stepfun", apiKey: VALID_KEY, model: "step-3.7-flash" }]}
-        onClose={vi.fn()}
-        onSave={vi.fn(async () => undefined)}
-        onClear={vi.fn(async () => undefined)}
-        onActivate={vi.fn(async () => undefined)}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "清除配置" })).toBeInTheDocument();
+    const editBtn = screen.getByLabelText("编辑 DeepSeek-V4-Flash");
+    await user.click(editBtn);
+
+    expect(screen.getByRole("dialog", { name: "配置模型" })).toBeInTheDocument();
+    expect(screen.getByText("配置 DeepSeek")).toBeInTheDocument();
   });
 
-  it("calls onClear when clearing a configured provider", async () => {
+  it("toggles activate model via switch in table", async () => {
+    const user = userEvent.setup();
+    const onActivate = vi.fn(async () => undefined);
+    mount({ activeProvider: "openai", onActivate });
+
+    const toggleBtn = screen.getByLabelText("切换启用 DeepSeek-V4-Flash");
+    await user.click(toggleBtn);
+
+    expect(onActivate).toHaveBeenCalledWith("deepseek");
+  });
+
+  it("calls onClear when deleting a configured model from table", async () => {
     const user = userEvent.setup();
     const onClear = vi.fn(async () => undefined);
     mount({
@@ -105,52 +132,29 @@ describe("LlmSettingsPanel", () => {
       onClear,
     });
 
-    await user.click(screen.getByRole("button", { name: "清除配置" }));
+    const deleteBtn = screen.getByLabelText("删除 阶跃星辰-3.7-flash");
+    await user.click(deleteBtn);
+
     expect(onClear).toHaveBeenCalledWith("stepfun");
   });
 
-  it("reveals the activate button for a configured non-active provider", async () => {
-    const user = userEvent.setup();
-    const onActivate = vi.fn(async () => undefined);
-    mount({
-      activeProvider: "openai",
-      entries: [
-        { provider: "openai", apiKey: VALID_KEY, model: "gpt-5.6-luna" },
-        { provider: "claude", apiKey: VALID_KEY, model: "claude-3-5-haiku-latest" },
-      ],
-      onActivate,
-    });
-
-    expect(screen.queryByRole("button", { name: "设为当前" })).not.toBeInTheDocument();
-
-    await user.selectOptions(screen.getByLabelText("厂商"), "claude");
-    await user.click(screen.getByRole("button", { name: "设为当前" }));
-
-    expect(onActivate).toHaveBeenCalledWith("claude");
-  });
-
-  it("toggles API key visibility", async () => {
+  it("toggles API key visibility in modal", async () => {
     const user = userEvent.setup();
     mount();
 
-    const input = screen.getByPlaceholderText("API Key") as HTMLInputElement;
+    await user.click(screen.getByRole("button", { name: "添加模型" }));
+    const modal = screen.getByRole("dialog", { name: "添加模型" });
+    await user.click(within(modal).getByText("DeepSeek"));
+
+    const input = screen.getByPlaceholderText("请输入服务商 API Key") as HTMLInputElement;
     expect(input.type).toBe("password");
 
-    await user.click(screen.getByLabelText("显示"));
+    await user.click(screen.getByTitle("显示 API Key"));
     expect(input.type).toBe("text");
 
-    await user.click(screen.getByLabelText("隐藏"));
+    await user.click(screen.getByTitle("隐藏 API Key"));
     expect(input.type).toBe("password");
   });
-
-  it("warns when the selected provider does not support images", async () => {
-    const user = userEvent.setup();
-    mount();
-
-    expect(screen.queryByText("该厂商暂不支持图片输入")).not.toBeInTheDocument();
-
-    await user.selectOptions(screen.getByLabelText("厂商"), "deepseek");
-
-    expect(screen.getByText("该厂商暂不支持图片输入")).toBeInTheDocument();
-  });
 });
+
+

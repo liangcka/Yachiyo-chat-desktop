@@ -1,4 +1,4 @@
-import { Cpu, FolderCode, Moon, PanelLeftOpen, Plus, Settings, Sun } from "lucide-react";
+import { FolderCode, Moon, PanelLeftOpen, Plus, Settings, Sun } from "lucide-react";
 import type { ReactNode } from "react";
 import type { UiCopy } from "../../../i18n/messages";
 import type { SettingsTabKey } from "../../../components/settings/SettingsModal";
@@ -37,7 +37,6 @@ function RailButton({
 }
 
 interface SidebarRailProps {
-  activeModelDisplay: string;
   activeRightTab: DesktopRightTab;
   copy: UiCopy;
   onNewChat: () => Promise<void>;
@@ -49,7 +48,6 @@ interface SidebarRailProps {
 }
 
 export function SidebarRail({
-  activeModelDisplay,
   activeRightTab,
   copy,
   onNewChat,
@@ -68,14 +66,6 @@ export function SidebarRail({
       onOpenSettings("general");
     } else {
       toggleRightTab("settings");
-    }
-  };
-
-  const handleOpenModelSettings = () => {
-    if (onOpenSettings) {
-      onOpenSettings("models");
-    } else {
-      toggleRightTab("llm");
     }
   };
 
@@ -111,7 +101,7 @@ export function SidebarRail({
         />
       </div>
 
-      {/* 底部：主题切换、模型状态与设置 */}
+      {/* 底部：主题切换与设置 */}
       <div className="desktop-sidebar__rail-bottom">
         {onToggleTheme ? (
           <RailButton
@@ -120,12 +110,6 @@ export function SidebarRail({
             onClick={onToggleTheme}
           />
         ) : null}
-        <RailButton
-          icon={<Cpu size={17} />}
-          label={`模型: ${activeModelDisplay}`}
-          active={activeRightTab === "llm"}
-          onClick={handleOpenModelSettings}
-        />
         <RailButton
           icon={<Settings size={17} />}
           label="设置"

@@ -6,6 +6,7 @@ import type { ImageProcessingErrorCode, ProcessedImage } from "../features/captu
 import type { UiCopy } from "../i18n/messages";
 import type { usePwaUpdate } from "../pwa/use-pwa-update";
 import type { WebSearchSettings } from "../services/web-search-settings";
+import type { Live2dSettings } from "../services/live2d-settings";
 
 export interface SharedViewProps {
   controller: ReturnType<typeof useChatController>;
@@ -21,6 +22,7 @@ export interface SharedViewProps {
   llmActiveProvider?: ProviderId;
   llmEntries: readonly LlmProviderEntry[];
   webSearchSettings: WebSearchSettings;
+  live2dSettings: Live2dSettings;
   pwa: ReturnType<typeof usePwaUpdate>;
   processImage: (file: File) => Promise<ProcessedImage>;
   setPendingImageDataUrl: (url?: string) => void;
@@ -40,6 +42,7 @@ export interface SharedViewProps {
   onLlmActivate: (provider: ProviderId) => Promise<void>;
   onSkillToggle: (id: string, next: boolean) => Promise<void>;
   onWebSearchSettingsChange: (partial: Partial<WebSearchSettings>) => void;
+  onLive2dSettingsChange: (partial: Partial<Live2dSettings>) => void;
   showToast: (message: string, tone?: "info" | "error") => void;
   refreshHistory: () => Promise<void>;
   refreshLlm: () => Promise<void>;

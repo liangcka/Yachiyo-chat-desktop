@@ -1,5 +1,4 @@
-import { useMemo, useState } from "react";
-import { PROVIDER_METADATA } from "../../../domain/llm";
+import { useState } from "react";
 import { SidebarBrandHeader } from "./SidebarBrandHeader";
 import { SidebarFooter } from "./SidebarFooter";
 import { SidebarHistoryList } from "./SidebarHistoryList";
@@ -16,8 +15,6 @@ export function DesktopSidebar({
   collapsed = false,
   conversations,
   copy,
-  llmActiveProvider,
-  llmEntries = [],
   locale,
   onDeleteConversation,
   onLocale,
@@ -45,19 +42,11 @@ export function DesktopSidebar({
     totalMatches,
   } = useConversationGroups(conversations, locale, searchQuery);
 
-  const activeModelDisplay = useMemo(() => {
-    if (!llmActiveProvider) return "未选择模型";
-    const entry = llmEntries.find((e) => e.provider === llmActiveProvider);
-    const meta = PROVIDER_METADATA[llmActiveProvider];
-    return entry?.model || meta?.label || llmActiveProvider;
-  }, [llmActiveProvider, llmEntries]);
-
   const handleTogglePin = onTogglePinConversation || togglePinConversation;
 
   if (collapsed) {
     return (
       <SidebarRail
-        activeModelDisplay={activeModelDisplay}
         activeRightTab={activeRightTab}
         copy={copy}
         onNewChat={onNewChat}
@@ -108,9 +97,8 @@ export function DesktopSidebar({
         totalMatches={totalMatches}
       />
 
-      {/* 5. 底部模型状态与一体化快捷工具坞 */}
+      {/* 5. 底部快捷工具坞 (主题、语言、设置) */}
       <SidebarFooter
-        activeModelDisplay={activeModelDisplay}
         locale={locale}
         onLocale={onLocale}
         onOpenSettings={onOpenSettings}

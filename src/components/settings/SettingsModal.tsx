@@ -1,15 +1,19 @@
 import {
+  ChevronDown,
   Cpu,
   Database,
   ExternalLink,
   Folder,
   Globe,
+  HelpCircle,
   Keyboard,
   LogOut,
+  MoreHorizontal,
   Palette,
   Sliders,
   Sparkles,
   Trash2,
+  User,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -19,16 +23,18 @@ import { UserMemoryPanel } from "../UserMemoryPanel";
 import { WorkspacePanel } from "../desktop/WorkspacePanel";
 import { SKILLS } from "../../skills";
 import { PROVIDER_METADATA } from "../../domain/llm";
+import { MYGO_CHARACTERS } from "../../features/live2d/data/models";
 import type { SharedViewProps } from "../../views/layout-types";
 
 export type SettingsTabKey =
+  | "account"
   | "general"
+  | "app"
   | "appearance"
   | "models"
   | "custom"
   | "browser"
   | "project"
-  | "app"
   | "shortcuts";
 
 export interface SettingsModalProps {
@@ -41,6 +47,11 @@ export interface SettingsModalProps {
   shared: SharedViewProps;
 }
 
+const STORAGE_QUEUE_POLICY = "yachiyo-settings-queue-policy";
+const STORAGE_SECURITY_PRESET = "yachiyo-settings-security-preset";
+const STORAGE_ARTIFACT_POLICY = "yachiyo-settings-artifact-policy";
+const STORAGE_PRIVACY_MODE = "yachiyo-settings-privacy-mode";
+
 export function SettingsModal({
   initialTab = "general",
   onClose,
@@ -52,6 +63,88 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTabKey>(initialTab);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
+
+  // 1. 排队消息策略 ('queue' | 'immediate')
+  const [queuePolicy, setQueuePolicy] = useState<"queue" | "immediate">(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_QUEUE_POLICY);
+      return stored === "queue" ? "queue" : "immediate";
+    } catch {
+      return "immediate";
+    }
+  });
+
+  // 2. 安全预设 ('fast' | 'standard' | 'strict')
+  const [securityPreset, setSecurityPreset] = useState<"fast" | "standard" | "strict">(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_SECURITY_PRESET);
+      if (stored === "standard" || stored === "strict" || stored === "fast") return stored;
+      return "fast";
+    } catch {
+      return "fast";
+    }
+  });
+
+  // 3. 产物审核策略 ('always_ask' | 'auto_approve' | 'read_only')
+  const [artifactPolicy, setArtifactPolicy] = useState<"always_ask" | "auto_approve" | "read_only">(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_ARTIFACT_POLICY);
+      if (stored === "auto_approve" || stored === "read_only" || stored === "always_ask") return stored;
+      return "always_ask";
+    } catch {
+      return "always_ask";
+    }
+  });
+
+  // 4. 隐私模式 (boolean)
+  const [privacyMode, setPrivacyMode] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_PRIVACY_MODE);
+      return stored !== "false";
+    } catch {
+      return true;
+    }
+  });
+
+  const handleSetQueuePolicy = (policy: "queue" | "immediate") => {
+    setQueuePolicy(policy);
+    try {
+      localStorage.setItem(STORAGE_QUEUE_POLICY, policy);
+    } catch {
+      /* ignore storage failure */
+    }
+  };
+
+  const handleSetSecurityPreset = (preset: "fast" | "standard" | "strict") => {
+    setSecurityPreset(preset);
+    try {
+      localStorage.setItem(STORAGE_SECURITY_PRESET, preset);
+    } catch {
+      /* ignore storage failure */
+    }
+  };
+
+  const handleSetArtifactPolicy = (policy: "always_ask" | "auto_approve" | "read_only") => {
+    setArtifactPolicy(policy);
+    try {
+      localStorage.setItem(STORAGE_ARTIFACT_POLICY, policy);
+    } catch {
+      /* ignore storage failure */
+    }
+  };
+
+  const handleTogglePrivacyMode = () => {
+    setPrivacyMode((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(STORAGE_PRIVACY_MODE, String(next));
+      } catch {
+        /* ignore storage failure */
+      }
+      return next;
+    });
+  };
 
   const [prevInitialTab, setPrevInitialTab] = useState(initialTab);
   const [prevOpen, setPrevOpen] = useState(open);
@@ -107,72 +200,88 @@ export function SettingsModal({
         {/* ─── 左侧导航栏 ─────────────────────────────── */}
         <nav className="settings-modal__sidebar" aria-label="设置分类">
           <div className="settings-modal__sidebar-header">
-            <h2 className="settings-modal__sidebar-title">系统偏好设置</h2>
+            <span className="settings-modal__sidebar-kicker">设置</span>
           </div>
 
           <div className="settings-modal__nav-list" role="tablist">
-            {/* 1. 基础配置 */}
+            {/* 1. 主设置分类 */}
             <div className="settings-modal__nav-group">
-              <div className="settings-modal__nav-section-title">核心功能</div>
               <button
                 type="button"
                 role="tab"
+                aria-label="常规概览"
                 aria-selected={activeTab === "general"}
                 className={`settings-modal__nav-item ${activeTab === "general" ? "settings-modal__nav-item--active" : ""}`}
                 onClick={() => setActiveTab("general")}
               >
                 <Sliders size={16} className="settings-modal__nav-icon" />
-                <span className="settings-modal__nav-item-text">常规概览</span>
+                <span className="settings-modal__nav-item-text">常规</span>
               </button>
 
               <button
                 type="button"
                 role="tab"
+                aria-label="存储与维护"
+                aria-selected={activeTab === "app"}
+                className={`settings-modal__nav-item ${activeTab === "app" ? "settings-modal__nav-item--active" : ""}`}
+                onClick={() => setActiveTab("app")}
+              >
+                <Database size={16} className="settings-modal__nav-icon" />
+                <span className="settings-modal__nav-item-text">应用</span>
+              </button>
+
+              <button
+                type="button"
+                role="tab"
+                aria-label="外观与语言"
                 aria-selected={activeTab === "appearance"}
                 className={`settings-modal__nav-item ${activeTab === "appearance" ? "settings-modal__nav-item--active" : ""}`}
                 onClick={() => setActiveTab("appearance")}
               >
                 <Palette size={16} className="settings-modal__nav-icon" />
-                <span className="settings-modal__nav-item-text">外观与语言</span>
+                <span className="settings-modal__nav-item-text">外观</span>
               </button>
 
               <button
                 type="button"
                 role="tab"
+                aria-label="模型配置"
                 aria-selected={activeTab === "models"}
                 className={`settings-modal__nav-item ${activeTab === "models" ? "settings-modal__nav-item--active" : ""}`}
                 onClick={() => setActiveTab("models")}
               >
                 <Cpu size={16} className="settings-modal__nav-icon" />
-                <span className="settings-modal__nav-item-text">模型配置</span>
+                <span className="settings-modal__nav-item-text">模型</span>
               </button>
-            </div>
 
-            {/* 2. 智能体与能力 */}
-            <div className="settings-modal__nav-group">
-              <div className="settings-modal__nav-section-title">能力与扩展</div>
               <button
                 type="button"
                 role="tab"
+                aria-label="技能与记忆"
                 aria-selected={activeTab === "custom"}
                 className={`settings-modal__nav-item ${activeTab === "custom" ? "settings-modal__nav-item--active" : ""}`}
                 onClick={() => setActiveTab("custom")}
               >
                 <Sparkles size={16} className="settings-modal__nav-icon" />
-                <span className="settings-modal__nav-item-text">技能与记忆</span>
+                <span className="settings-modal__nav-item-text">自定义</span>
               </button>
 
               <button
                 type="button"
                 role="tab"
+                aria-label="联网检索"
                 aria-selected={activeTab === "browser"}
                 className={`settings-modal__nav-item ${activeTab === "browser" ? "settings-modal__nav-item--active" : ""}`}
                 onClick={() => setActiveTab("browser")}
               >
                 <Globe size={16} className="settings-modal__nav-icon" />
-                <span className="settings-modal__nav-item-text">联网检索</span>
+                <span className="settings-modal__nav-item-text">浏览器</span>
               </button>
+            </div>
 
+            {/* 2. 项目分组 (Projects) */}
+            <div className="settings-modal__nav-group">
+              <div className="settings-modal__nav-section-title">项目</div>
               <button
                 type="button"
                 role="tab"
@@ -180,69 +289,320 @@ export function SettingsModal({
                 className={`settings-modal__nav-item ${activeTab === "project" ? "settings-modal__nav-item--active" : ""}`}
                 onClick={() => setActiveTab("project")}
               >
-                <Folder size={16} className="settings-modal__nav-icon" />
-                <span className="settings-modal__nav-item-text">工作区</span>
+                <Folder size={15} className="settings-modal__nav-icon" />
+                <span className="settings-modal__nav-item-text">Yachiyo-chat-desktop</span>
+              </button>
+
+              <button
+                type="button"
+                className="settings-modal__nav-item settings-modal__nav-item--sub"
+                onClick={() => setActiveTab("project")}
+              >
+                <span className="settings-modal__project-dot" />
+                <span className="settings-modal__nav-item-text">Yachiyo chat</span>
+              </button>
+
+              <button
+                type="button"
+                className="settings-modal__nav-item settings-modal__nav-item--sub"
+                onClick={() => setActiveTab("project")}
+              >
+                <span className="settings-modal__project-dot" />
+                <span className="settings-modal__nav-item-text">281990</span>
+              </button>
+
+              <button
+                type="button"
+                className="settings-modal__nav-item settings-modal__nav-item--link"
+                onClick={() => setActiveTab("project")}
+              >
+                <span className="settings-modal__nav-item-text">显示全部</span>
               </button>
             </div>
 
-            {/* 3. 数据与安全 */}
+            {/* 3. 未在项目中 */}
             <div className="settings-modal__nav-group">
-              <div className="settings-modal__nav-section-title">系统与维护</div>
+              <div className="settings-modal__nav-section-title">未在项目中</div>
               <button
                 type="button"
-                role="tab"
-                aria-selected={activeTab === "app"}
-                className={`settings-modal__nav-item ${activeTab === "app" ? "settings-modal__nav-item--active" : ""}`}
-                onClick={() => setActiveTab("app")}
+                className="settings-modal__nav-item"
+                onClick={() => {
+                  onClose();
+                }}
               >
-                <Database size={16} className="settings-modal__nav-icon" />
-                <span className="settings-modal__nav-item-text">存储与维护</span>
-              </button>
-
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === "shortcuts"}
-                className={`settings-modal__nav-item ${activeTab === "shortcuts" ? "settings-modal__nav-item--active" : ""}`}
-                onClick={() => setActiveTab("shortcuts")}
-              >
-                <Keyboard size={16} className="settings-modal__nav-icon" />
-                <span className="settings-modal__nav-item-text">快捷键</span>
+                <span className="settings-modal__nav-item-text">对话</span>
               </button>
             </div>
           </div>
 
-          {/* 底部信息与外链 */}
+          {/* 4. 底部快捷操作与用户信息条 */}
           <div className="settings-modal__sidebar-footer">
             <button
               type="button"
-              className="settings-modal__footer-btn"
-              onClick={() => window.open("https://github.com/liangcka/Yachiyo-chat-desktop", "_blank")}
+              role="tab"
+              aria-selected={activeTab === "shortcuts"}
+              className={`settings-modal__sidebar-footer-link ${activeTab === "shortcuts" ? "settings-modal__sidebar-footer-link--active" : ""}`}
+              onClick={() => setActiveTab("shortcuts")}
             >
-              <span>GitHub 项目主页</span>
-              <ExternalLink size={13} style={{ marginLeft: "auto", opacity: 0.6 }} />
+              <Keyboard size={14} />
+              <span>快捷键</span>
             </button>
 
-            <div className="settings-modal__app-badge">
-              <span className="settings-modal__app-title">Yachiyo Chat Desktop</span>
-              <span className="settings-modal__app-version">v1.0.0 (Tauri 2 + Cloudflare)</span>
-            </div>
+            <button
+              type="button"
+              className="settings-modal__sidebar-footer-link"
+              onClick={() => window.open("https://github.com/liangcka/Yachiyo-chat-desktop/issues", "_blank")}
+            >
+              <HelpCircle size={14} />
+              <span>提供反馈</span>
+              <ExternalLink size={12} style={{ marginLeft: "auto", opacity: 0.6 }} />
+            </button>
+
+            {/* 底部用户卡片 (点击直达账号页) */}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "account"}
+              className={`settings-modal__user-bar ${activeTab === "account" ? "settings-modal__user-bar--active" : ""}`}
+              onClick={() => setActiveTab("account")}
+              title="查看与管理账号信息"
+            >
+              <div className="settings-modal__user-avatar">
+                <User size={16} />
+              </div>
+              <div className="settings-modal__user-info">
+                <span className="settings-modal__user-name">anon chihaya</span>
+                <span className="settings-modal__user-email">xychunliang@gmail.com</span>
+              </div>
+            </button>
           </div>
         </nav>
 
         {/* ─── 右侧内容区域 ─────────────────────────────── */}
         <main className="settings-modal__content" role="tabpanel">
-          {/* TAB 1: 常规概览 (General) */}
+          {/* TAB: 常规 (General - 图 2 风格) */}
           {activeTab === "general" ? (
             <div className="settings-panel-view">
               <div className="settings-panel-view__header">
-                <h3 className="settings-panel-view__title">常规概览</h3>
-                <p className="settings-panel-view__desc">速览当前客户端运行状态、活跃模型与快捷操作。</p>
+                <h3 className="settings-panel-view__title">常规</h3>
+                <p className="settings-panel-view__desc">
+                  配置智能体执行、排队消息发送以及权限。速览当前客户端运行状态、活跃模型与快捷操作。
+                </p>
               </div>
 
-              {/* 运行状态卡片 */}
+              {/* 1. 执行 (Execution) */}
               <div className="settings-card-group">
-                <h4 className="settings-card-group__title">运行状态</h4>
+                <h4 className="settings-card-group__title">执行</h4>
+                <div className="settings-item-card">
+                  <div className="settings-item-card__lead">
+                    <strong className="settings-item-card__name">排队消息</strong>
+                    <span className="settings-item-card__desc">
+                      配置何时发送后续消息。
+                    </span>
+                    <button
+                      type="button"
+                      className="settings-link-inline"
+                      onClick={() => setActiveTab("shortcuts")}
+                    >
+                      键盘快捷键 ⓘ
+                    </button>
+                  </div>
+                  <div className="settings-item-card__action">
+                    <div className="settings-segmented-control" role="group" aria-label="排队消息设置">
+                      <button
+                        type="button"
+                        className={`settings-segmented-btn ${queuePolicy === "queue" ? "settings-segmented-btn--active" : ""}`}
+                        onClick={() => handleSetQueuePolicy("queue")}
+                      >
+                        排队
+                      </button>
+                      <button
+                        type="button"
+                        className={`settings-segmented-btn ${queuePolicy === "immediate" ? "settings-segmented-btn--active" : ""}`}
+                        onClick={() => handleSetQueuePolicy("immediate")}
+                      >
+                        立即发送
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Agent 设置 */}
+              <div className="settings-card-group">
+                <h4 className="settings-card-group__title">Agent 设置</h4>
+                <div className="settings-item-card">
+                  <div className="settings-item-card__lead">
+                    <strong className="settings-item-card__name">安全预设</strong>
+                    <span className="settings-item-card__desc">
+                      为智能体选择预设安全策略。它会控制终端自动执行策略和文件访问策略。
+                    </span>
+                    <button
+                      type="button"
+                      className="settings-link-inline"
+                      onClick={() => setActiveTab("project")}
+                    >
+                      了解更多 about 极速模式 ⓘ
+                    </button>
+                  </div>
+                  <div className="settings-item-card__action">
+                    <div className="settings-select-wrapper">
+                      <select
+                        className="settings-select"
+                        value={securityPreset}
+                        onChange={(e) =>
+                          handleSetSecurityPreset(e.target.value as "fast" | "standard" | "strict")
+                        }
+                        aria-label="安全预设"
+                      >
+                        <option value="fast">极速模式</option>
+                        <option value="standard">标准模式</option>
+                        <option value="strict">严格模式</option>
+                      </select>
+                      <ChevronDown size={14} className="settings-select-chevron" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. 智能体行为 */}
+              <div className="settings-card-group">
+                <h4 className="settings-card-group__title">智能体行为</h4>
+                <div className="settings-item-card">
+                  <div className="settings-item-card__lead">
+                    <strong className="settings-item-card__name">产物审核策略</strong>
+                    <span className="settings-item-card__desc">
+                      指定智能体在请求审核产物时的行为。产物是智能体创建的文档，用于提供更丰富的对话体验。
+                    </span>
+                  </div>
+                  <div className="settings-item-card__action">
+                    <div className="settings-select-wrapper">
+                      <select
+                        className="settings-select"
+                        value={artifactPolicy}
+                        onChange={(e) =>
+                          handleSetArtifactPolicy(
+                            e.target.value as "always_ask" | "auto_approve" | "read_only"
+                          )
+                        }
+                        aria-label="产物审核策略"
+                      >
+                        <option value="always_ask">始终询问</option>
+                        <option value="auto_approve">自动批准</option>
+                        <option value="read_only">仅只读</option>
+                      </select>
+                      <ChevronDown size={14} className="settings-select-chevron" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. 文件权限 */}
+              <div className="settings-card-group">
+                <h4 className="settings-card-group__title">文件权限</h4>
+                <div className="settings-item-card">
+                  <div className="settings-item-card__lead">
+                    <strong className="settings-item-card__name">文件访问规则</strong>
+                    <span className="settings-item-card__desc">配置允许和拒绝读写的文件路径。</span>
+                  </div>
+                  <div className="settings-item-card__action">
+                    <button
+                      type="button"
+                      className="settings-btn settings-btn--ghost"
+                      onClick={() => setActiveTab("project")}
+                    >
+                      打开
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 5. 网络权限 */}
+              <div className="settings-card-group">
+                <h4 className="settings-card-group__title">网络权限</h4>
+                <div className="settings-item-card">
+                  <div className="settings-item-card__lead">
+                    <div className="settings-item-title-with-badge">
+                      <strong className="settings-item-card__name">网络访问规则</strong>
+                      <span className="settings-count-badge">6</span>
+                    </div>
+                    <span className="settings-item-card__desc">配置允许和拒绝读取的 URL。</span>
+                  </div>
+                  <div className="settings-item-card__action">
+                    <button
+                      type="button"
+                      className="settings-btn settings-btn--ghost"
+                      onClick={() => setActiveTab("browser")}
+                    >
+                      打开
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 6. 终端与工具权限 */}
+              <div className="settings-card-group">
+                <h4 className="settings-card-group__title">终端与工具权限</h4>
+                <div className="settings-item-card">
+                  <div className="settings-item-card__lead">
+                    <div className="settings-item-title-with-badge">
+                      <strong className="settings-item-card__name">终端命令</strong>
+                      <span className="settings-count-badge">32</span>
+                    </div>
+                    <span className="settings-item-card__desc">配置允许的终端命令。</span>
+                  </div>
+                  <div className="settings-item-card__action">
+                    <button
+                      type="button"
+                      className="settings-btn settings-btn--ghost"
+                      onClick={() => setActiveTab("project")}
+                    >
+                      打开
+                    </button>
+                  </div>
+                </div>
+
+                <div className="settings-item-card">
+                  <div className="settings-item-card__lead">
+                    <strong className="settings-item-card__name">沙盒外命令</strong>
+                    <span className="settings-item-card__desc">配置允许在沙盒外运行的命令。</span>
+                  </div>
+                  <div className="settings-item-card__action">
+                    <button
+                      type="button"
+                      className="settings-btn settings-btn--ghost"
+                      onClick={() => setActiveTab("project")}
+                    >
+                      打开
+                    </button>
+                  </div>
+                </div>
+
+                <div className="settings-item-card">
+                  <div className="settings-item-card__lead">
+                    <div className="settings-item-title-with-badge">
+                      <strong className="settings-item-card__name">MCP 工具</strong>
+                      <span className="settings-count-badge">3</span>
+                    </div>
+                    <span className="settings-item-card__desc">
+                      配置通过 模型上下文协议 (MCP) 使用的外部工具。
+                    </span>
+                  </div>
+                  <div className="settings-item-card__action">
+                    <button
+                      type="button"
+                      className="settings-btn settings-btn--ghost"
+                      onClick={() => setActiveTab("custom")}
+                    >
+                      打开
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 7. 运行状态 */}
+              <div className="settings-card-group">
+                <h4 className="settings-card-group__title">系统状态</h4>
                 <div className="settings-item-card">
                   <div className="settings-item-card__lead">
                     <strong className="settings-item-card__name">当前活跃大模型</strong>
@@ -279,42 +639,142 @@ export function SettingsModal({
                   </div>
                 </div>
               </div>
+            </div>
+          ) : null}
 
-              {/* 快捷操作 */}
+          {/* TAB: 账号 (Account - 图 1 风格) */}
+          {activeTab === "account" ? (
+            <div className="settings-panel-view">
+              <div className="settings-panel-view__header">
+                <h3 className="settings-panel-view__title">账号</h3>
+                <p className="settings-panel-view__desc">管理您的账户信息、会员订阅权限以及数据隐私保护策略。</p>
+              </div>
+
+              {/* 1. 账户信息 */}
               <div className="settings-card-group">
-                <h4 className="settings-card-group__title">快捷操作</h4>
+                <h4 className="settings-card-group__title">账户信息</h4>
                 <div className="settings-item-card">
                   <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">开启全新对话</strong>
-                    <span className="settings-item-card__desc">重置当前上下文并创建空白会话。</span>
+                    <strong className="settings-item-card__name">安魂曲</strong>
+                    <span className="settings-item-card__desc">152*******49</span>
                   </div>
                   <div className="settings-item-card__action">
                     <button
                       type="button"
-                      className="settings-btn"
-                      onClick={() => {
-                        onClose();
-                        void shared.onNewChat();
-                      }}
+                      className="settings-btn settings-btn--ghost"
+                      onClick={() => window.open("https://github.com/liangcka/Yachiyo-chat-desktop", "_blank")}
                     >
-                      新建对话
+                      <span>管理账号</span>
+                      <ExternalLink size={12} style={{ marginLeft: 4 }} />
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-btn settings-btn--icon"
+                      title="更多选项"
+                      aria-label="更多选项"
+                    >
+                      <MoreHorizontal size={14} />
                     </button>
                   </div>
                 </div>
 
                 <div className="settings-item-card">
                   <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">上下文智能压缩</strong>
-                    <span className="settings-item-card__desc">精炼多轮历史，节约 token 消耗。</span>
+                    <div className="settings-item-title-with-badge">
+                      <strong className="settings-item-card__name">会员 Lite</strong>
+                      <span className="settings-lite-badge">Lite</span>
+                    </div>
+                    <span className="settings-item-card__desc">单次购买 · 到期时间 2026/09/22</span>
                   </div>
                   <div className="settings-item-card__action">
-                    {onCompress ? (
-                      <button type="button" className="settings-btn" onClick={onCompress}>
-                        立即压缩
-                      </button>
-                    ) : null}
+                    <button
+                      type="button"
+                      className="settings-btn settings-btn--ghost"
+                      onClick={() => window.open("https://github.com/liangcka/Yachiyo-chat-desktop", "_blank")}
+                    >
+                      <span>管理订阅</span>
+                      <ExternalLink size={12} style={{ marginLeft: 4 }} />
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-btn settings-btn--primary"
+                      onClick={() => window.open("https://github.com/liangcka/Yachiyo-chat-desktop", "_blank")}
+                    >
+                      升级权益
+                    </button>
                   </div>
                 </div>
+              </div>
+
+              {/* 2. 隐私模式 */}
+              <div className="settings-card-group">
+                <h4 className="settings-card-group__title">隐私模式</h4>
+                <div className="settings-item-card">
+                  <div className="settings-item-card__lead">
+                    <strong className="settings-item-card__name">隐私模式</strong>
+                    <span className="settings-item-card__desc">
+                      当启用隐私模式时，Yachiyo不会将您的信息（如您的聊天互动，包括相关代码片段和AI生成的输出）用于分析、产品改进和模型训练。更多详情请见{" "}
+                      <a
+                        href="https://github.com/liangcka/Yachiyo-chat-desktop"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="settings-link-inline-text"
+                      >
+                        隐私模式
+                      </a>
+                      。
+                    </span>
+                  </div>
+                  <div className="settings-item-card__action">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={privacyMode}
+                      className={`settings-toggle-switch ${privacyMode ? "settings-toggle-switch--active" : ""}`}
+                      onClick={handleTogglePrivacyMode}
+                      aria-label="切换隐私模式"
+                    >
+                      <span className="settings-toggle-knob" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. 退出登录操作 */}
+              <div className="settings-card-group" style={{ marginTop: 24 }}>
+                {showSignOutConfirm ? (
+                  <div className="settings-confirm-row">
+                    <span style={{ fontSize: 13, color: "var(--yx-alias-state-error)" }}>
+                      确认退出当前登录账号并清除本地 Session？
+                    </span>
+                    <button
+                      type="button"
+                      className="settings-btn settings-btn--danger"
+                      onClick={() => {
+                        setShowSignOutConfirm(false);
+                        void shared.onSignOut();
+                      }}
+                    >
+                      确认退出
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-btn"
+                      onClick={() => setShowSignOutConfirm(false)}
+                    >
+                      取消
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="settings-btn settings-btn--ghost"
+                    style={{ padding: "8px 18px", fontSize: 13 }}
+                    onClick={() => setShowSignOutConfirm(true)}
+                  >
+                    退出登录
+                  </button>
+                )}
               </div>
             </div>
           ) : null}
@@ -368,6 +828,304 @@ export function SettingsModal({
                     </button>
                   </div>
                 </div>
+              </div>
+
+              {/* Live2D 看板娘设置 */}
+              <div className="settings-card-group">
+                <h4 className="settings-card-group__title">MyGO!!!!! Live2D 看板娘</h4>
+                <div className="settings-item-card">
+                  <div className="settings-item-card__lead">
+                    <strong className="settings-item-card__name">启用看板娘</strong>
+                    <span className="settings-item-card__desc">
+                      在桌面与网页端加载 MyGO!!!!! 成员 Live2D 模型交互挂件（点击互动、角色切换与动画台词）。
+                    </span>
+                  </div>
+                  <div className="settings-item-card__action">
+                    <button
+                      type="button"
+                      className={`settings-btn ${shared.live2dSettings?.enabled ? "settings-btn--active" : ""}`}
+                      onClick={() =>
+                        shared.onLive2dSettingsChange({
+                          enabled: !shared.live2dSettings?.enabled,
+                        })
+                      }
+                    >
+                      {shared.live2dSettings?.enabled ? "已启用" : "已停用"}
+                    </button>
+                  </div>
+                </div>
+
+                {shared.live2dSettings?.enabled ? (
+                  <>
+                    {/* 角色与成员选择 */}
+                    <div className="settings-item-card">
+                      <div className="settings-item-card__lead">
+                        <strong className="settings-item-card__name">当前角色</strong>
+                        <span className="settings-item-card__desc">
+                          选择当前展示的 MyGO!!!!! 乐队成员。
+                        </span>
+                      </div>
+                      <div className="settings-item-card__action">
+                        <div className="settings-segmented-control" role="group" aria-label="角色选择">
+                          {MYGO_CHARACTERS.map((char, idx) => {
+                            const isSelected = (shared.live2dSettings?.characterIndex ?? 0) === idx;
+                            return (
+                              <button
+                                key={char.id}
+                                type="button"
+                                className={`settings-segmented-btn ${isSelected ? "settings-segmented-btn--active" : ""}`}
+                                onClick={() =>
+                                  shared.onLive2dSettingsChange({
+                                    characterIndex: idx,
+                                    outfitIndex: 0,
+                                  })
+                                }
+                              >
+                                {char.name.split(" ")[1] ?? char.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 服装与立绘 */}
+                    <div className="settings-item-card">
+                      <div className="settings-item-card__lead">
+                        <strong className="settings-item-card__name">服装与立绘</strong>
+                        <span className="settings-item-card__desc">
+                          为当前角色换上不同的演出服、日常私服或活动限定纪念立绘。
+                        </span>
+                      </div>
+                      <div className="settings-item-card__action">
+                        <div className="settings-select-wrapper">
+                          <select
+                            className="settings-select"
+                            value={shared.live2dSettings.outfitIndex ?? 0}
+                            onChange={(e) =>
+                              shared.onLive2dSettingsChange({
+                                outfitIndex: parseInt(e.target.value, 10),
+                              })
+                            }
+                            aria-label="服装选择"
+                          >
+                            {(MYGO_CHARACTERS[shared.live2dSettings.characterIndex ?? 0] ?? MYGO_CHARACTERS[0]).outfits.map(
+                              (outfit, oIdx) => (
+                                <option key={outfit.id} value={oIdx}>
+                                  {outfit.name}
+                                </option>
+                              ),
+                            )}
+                          </select>
+                          <ChevronDown size={14} className="settings-select-chevron" />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 挂件尺寸缩放 */}
+                    <div className="settings-item-card">
+                      <div className="settings-item-card__lead">
+                        <strong className="settings-item-card__name">尺寸缩放比例</strong>
+                        <span className="settings-item-card__desc">
+                          调节桌宠挂件在屏幕上的渲染缩放尺寸（当前：{Math.round((shared.live2dSettings.scale ?? 1.0) * 100)}%）。
+                        </span>
+                      </div>
+                      <div className="settings-item-card__action" style={{ minWidth: "160px" }}>
+                        <input
+                          type="range"
+                          min="0.6"
+                          max="1.4"
+                          step="0.05"
+                          value={shared.live2dSettings.scale ?? 1.0}
+                          onChange={(e) =>
+                            shared.onLive2dSettingsChange({
+                              scale: parseFloat(e.target.value),
+                            })
+                          }
+                          aria-label="尺寸缩放比例"
+                          style={{ width: "100%", accentColor: "#38bdf8" }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* 不透明度调节 */}
+                    <div className="settings-item-card">
+                      <div className="settings-item-card__lead">
+                        <strong className="settings-item-card__name">不透明度</strong>
+                        <span className="settings-item-card__desc">
+                          调节桌宠挂件的背景融合不透明度（当前：{Math.round((shared.live2dSettings.opacity ?? 1.0) * 100)}%）。
+                        </span>
+                      </div>
+                      <div className="settings-item-card__action" style={{ minWidth: "160px" }}>
+                        <input
+                          type="range"
+                          min="0.4"
+                          max="1.0"
+                          step="0.05"
+                          value={shared.live2dSettings.opacity ?? 1.0}
+                          onChange={(e) =>
+                            shared.onLive2dSettingsChange({
+                              opacity: parseFloat(e.target.value),
+                            })
+                          }
+                          aria-label="不透明度"
+                          style={{ width: "100%", accentColor: "#38bdf8" }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* AI 对话状态联动 */}
+                    <div className="settings-item-card">
+                      <div className="settings-item-card__lead">
+                        <strong className="settings-item-card__name">AI 对话状态联动</strong>
+                        <span className="settings-item-card__desc">
+                          当 AI 正在思考与流式生成时展示思考专注动作与台词，生成完成时展示开心动作。
+                        </span>
+                      </div>
+                      <div className="settings-item-card__action">
+                        <button
+                          type="button"
+                          className={`settings-btn ${shared.live2dSettings?.aiReactivity !== false ? "settings-btn--active" : ""}`}
+                          onClick={() =>
+                            shared.onLive2dSettingsChange({
+                              aiReactivity: !(shared.live2dSettings?.aiReactivity !== false),
+                            })
+                          }
+                        >
+                          {shared.live2dSettings?.aiReactivity !== false ? "已开启" : "已关闭"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="settings-item-card">
+                      <div className="settings-item-card__lead">
+                        <strong className="settings-item-card__name">展示位置</strong>
+                        <span className="settings-item-card__desc">
+                          选择 Live2D 看板娘在屏幕上的展示模式（贴靠左下角、右下角，或在屏幕上随意拖动）。
+                        </span>
+                      </div>
+                      <div className="settings-item-card__action">
+                        <div className="settings-segmented-control" role="group" aria-label="看板娘位置">
+                          <button
+                            type="button"
+                            className={`settings-segmented-btn ${shared.live2dSettings.position === "left" ? "settings-segmented-btn--active" : ""}`}
+                            onClick={() => shared.onLive2dSettingsChange({ position: "left" })}
+                          >
+                            左下角
+                          </button>
+                          <button
+                            type="button"
+                            className={`settings-segmented-btn ${shared.live2dSettings.position === "right" ? "settings-segmented-btn--active" : ""}`}
+                            onClick={() => shared.onLive2dSettingsChange({ position: "right" })}
+                          >
+                            右下角
+                          </button>
+                          <button
+                            type="button"
+                            className={`settings-segmented-btn ${shared.live2dSettings.position === "custom" ? "settings-segmented-btn--active" : ""}`}
+                            onClick={() => shared.onLive2dSettingsChange({ position: "custom" })}
+                          >
+                            随意拖动
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="settings-item-card">
+                      <div className="settings-item-card__lead">
+                        <strong className="settings-item-card__name">回家（停靠归位目标）</strong>
+                        <span className="settings-item-card__desc">
+                          点击工具栏中的回家按钮或一键复位时，看板娘停靠归位的侧边（放左边或放右边）。
+                        </span>
+                      </div>
+                      <div className="settings-item-card__action">
+                        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                          <div className="settings-segmented-control" role="group" aria-label="回家目标位置">
+                            <button
+                              type="button"
+                              className={`settings-segmented-btn ${(shared.live2dSettings.homePosition ?? (shared.live2dSettings.position === "right" ? "right" : "left")) === "left" ? "settings-segmented-btn--active" : ""}`}
+                              onClick={() =>
+                                shared.onLive2dSettingsChange({
+                                  homePosition: "left",
+                                  ...(shared.live2dSettings.position !== "custom" ? { position: "left" } : {}),
+                                })
+                              }
+                            >
+                              放左边
+                            </button>
+                            <button
+                              type="button"
+                              className={`settings-segmented-btn ${(shared.live2dSettings.homePosition ?? (shared.live2dSettings.position === "right" ? "right" : "left")) === "right" ? "settings-segmented-btn--active" : ""}`}
+                              onClick={() =>
+                                shared.onLive2dSettingsChange({
+                                  homePosition: "right",
+                                  ...(shared.live2dSettings.position !== "custom" ? { position: "right" } : {}),
+                                })
+                              }
+                            >
+                              放右边
+                            </button>
+                          </div>
+                          {shared.live2dSettings.position === "custom" ? (
+                            <button
+                              type="button"
+                              className="settings-btn"
+                              onClick={() =>
+                                shared.onLive2dSettingsChange({
+                                  position: shared.live2dSettings.homePosition ?? "left",
+                                })
+                              }
+                            >
+                              立即回家
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="settings-item-card">
+                      <div className="settings-item-card__lead">
+                        <strong className="settings-item-card__name">动作与表情预加载</strong>
+                        <span className="settings-item-card__desc">
+                          配置是否预加载所有角色的表情和动作文件。
+                        </span>
+                      </div>
+                      <div className="settings-item-card__action">
+                        <div className="settings-select-wrapper">
+                          <select
+                            className="settings-select"
+                            value={shared.live2dSettings.preload}
+                            onChange={(e) =>
+                              shared.onLive2dSettingsChange({
+                                preload: e.target.value as "ALL" | "IDLE" | "NONE",
+                              })
+                            }
+                            aria-label="动作与表情预加载"
+                          >
+                            <option value="IDLE">默认（仅预加载空闲表情，省流量）</option>
+                            <option value="ALL">全量预加载（动作切换更流畅）</option>
+                            <option value="NONE">不预加载（按需加载）</option>
+                          </select>
+                          <ChevronDown size={14} className="settings-select-chevron" />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="settings-item-card">
+                      <div className="settings-item-card__lead">
+                        <strong className="settings-item-card__name">离线资源状态</strong>
+                        <span className="settings-item-card__desc">
+                          全部 Live2D 模型与音频数据已 100% 移植至客户端本地目录（/live2d/），支持完全离线加载。
+                        </span>
+                      </div>
+                      <div className="settings-item-card__action">
+                        <span className="settings-count-badge" style={{ padding: "4px 8px" }}>
+                          本地离线就绪
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                ) : null}
               </div>
             </div>
           ) : null}
@@ -521,6 +1279,20 @@ export function SettingsModal({
                         清空数据
                       </button>
                     )}
+                  </div>
+                </div>
+
+                <div className="settings-item-card">
+                  <div className="settings-item-card__lead">
+                    <strong className="settings-item-card__name">上下文智能压缩</strong>
+                    <span className="settings-item-card__desc">精炼多轮历史，节约 token 消耗。</span>
+                  </div>
+                  <div className="settings-item-card__action">
+                    {onCompress ? (
+                      <button type="button" className="settings-btn" onClick={onCompress}>
+                        立即压缩
+                      </button>
+                    ) : null}
                   </div>
                 </div>
 

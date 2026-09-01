@@ -1,6 +1,7 @@
 import Dexie, { type Table } from "dexie";
 import type { ChatMessage, Conversation, Locale, StoredImage } from "../domain/chat";
 import type { LlmSettingsRecord, ProviderId } from "../domain/llm";
+import type { Live2dSettings } from "../services/live2d-settings";
 
 export type AppSetting =
   | { key: "locale"; value: Locale }
@@ -9,6 +10,7 @@ export type AppSetting =
   | { key: "webSearchEnabled"; value: boolean }
   | { key: "webSearchShowSources"; value: boolean }
   | { key: "webSearchSmart"; value: boolean }
+  | { key: "live2dSettings"; value: Live2dSettings }
   | { key: "userMemory"; value: string };
 
 export class YachiyoDatabase extends Dexie {

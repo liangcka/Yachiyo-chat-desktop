@@ -139,9 +139,229 @@ export interface ActiveLlmConfig {
   readonly model: string;
 }
 
+/** 扩展供应商展示卡片模型（支持图 2 丰富的供应商选择列表） */
+export interface ModelVendorItem {
+  readonly id: string;
+  readonly name: string;
+  readonly mappedProvider: ProviderId;
+  readonly defaultModel: string;
+  readonly models: readonly string[];
+  readonly defaultBaseUrl?: string;
+  readonly keyHint: string;
+  readonly supportsImage: boolean;
+  readonly isCustom?: boolean;
+}
+
+export const MODEL_VENDORS: readonly ModelVendorItem[] = [
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    mappedProvider: "deepseek",
+    defaultModel: "deepseek-v4-flash",
+    models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp", "deepseek-chat", "deepseek-reasoner"],
+    keyHint: "在 platform.deepseek.com 获取 API Key",
+    supportsImage: true,
+  },
+  {
+    id: "volcengine",
+    name: "火山引擎",
+    mappedProvider: "openai",
+    defaultModel: "doubao-pro-32k",
+    models: ["doubao-pro-32k", "doubao-lite-32k", "doubao-vision-pro"],
+    defaultBaseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    keyHint: "在 console.volcengine.com/ark 获取 API Key",
+    supportsImage: true,
+  },
+  {
+    id: "minimax_cn",
+    name: "MiniMax CN",
+    mappedProvider: "openai",
+    defaultModel: "abab6.5s-chat",
+    models: ["abab6.5s-chat", "abab6.5t-chat", "abab7-chat-preview"],
+    defaultBaseUrl: "https://api.minimax.chat/v1",
+    keyHint: "在 platform.minimaxi.com 获取 API Key",
+    supportsImage: true,
+  },
+  {
+    id: "minimax_global",
+    name: "MiniMax Global",
+    mappedProvider: "openai",
+    defaultModel: "abab6.5s-chat",
+    models: ["abab6.5s-chat", "abab6.5t-chat"],
+    defaultBaseUrl: "https://api.minimaxi.chat/v1",
+    keyHint: "在 api.minimaxi.chat 控制台获取 API Key",
+    supportsImage: true,
+  },
+  {
+    id: "glm",
+    name: "Bigmodel",
+    mappedProvider: "glm",
+    defaultModel: "glm-5.3-flash",
+    models: ["glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-4.7-flash", "glm-4.6", "glm-4.6v-flash"],
+    keyHint: "在 open.bigmodel.cn 控制台获取 API Key",
+    supportsImage: true,
+  },
+  {
+    id: "aliyun",
+    name: "阿里云",
+    mappedProvider: "openai",
+    defaultModel: "qwen-max",
+    models: ["qwen-max", "qwen-plus", "qwen-turbo", "qwen-vl-max"],
+    defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    keyHint: "在 dashscope.console.aliyun.com 获取 API Key",
+    supportsImage: true,
+  },
+  {
+    id: "xiaomi_mimo",
+    name: "Xiaomi MIMO",
+    mappedProvider: "openai",
+    defaultModel: "mimo-v1-chat",
+    models: ["mimo-v1-chat", "mimo-v1-pro"],
+    defaultBaseUrl: "https://api.mimo.mi.com/v1",
+    keyHint: "在 mimo.mi.com 开放平台获取 API Key",
+    supportsImage: false,
+  },
+  {
+    id: "siliconflow",
+    name: "硅基流动",
+    mappedProvider: "openai",
+    defaultModel: "deepseek-ai/DeepSeek-V3",
+    models: ["deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1", "Qwen/Qwen2.5-72B-Instruct"],
+    defaultBaseUrl: "https://api.siliconflow.cn/v1",
+    keyHint: "在 cloud.siliconflow.cn 获取 API Key",
+    supportsImage: true,
+  },
+  {
+    id: "zai",
+    name: "Z.ai",
+    mappedProvider: "glm",
+    defaultModel: "glm-5.3-flash",
+    models: ["glm-5.3-flash", "glm-4.7-flash"],
+    keyHint: "在 z.ai 开发者中心获取 API Key",
+    supportsImage: true,
+  },
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    mappedProvider: "openai",
+    defaultModel: "anthropic/claude-3.7-sonnet",
+    models: ["anthropic/claude-3.7-sonnet", "openai/gpt-4o", "deepseek/deepseek-r1", "google/gemini-2.5-flash"],
+    defaultBaseUrl: "https://openrouter.ai/api/v1",
+    keyHint: "在 openrouter.ai/keys 获取 API Key",
+    supportsImage: true,
+  },
+  {
+    id: "kimi_cn",
+    name: "Kimi CN",
+    mappedProvider: "openai",
+    defaultModel: "moonshot-v1-8k",
+    models: ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
+    defaultBaseUrl: "https://api.moonshot.cn/v1",
+    keyHint: "在 platform.moonshot.cn 获取 API Key",
+    supportsImage: true,
+  },
+  {
+    id: "kimi_global",
+    name: "Kimi Global",
+    mappedProvider: "openai",
+    defaultModel: "moonshot-v1-8k",
+    models: ["moonshot-v1-8k", "moonshot-v1-32k"],
+    defaultBaseUrl: "https://api.moonshot.cn/v1",
+    keyHint: "在 platform.moonshot.cn 获取 API Key",
+    supportsImage: true,
+  },
+  {
+    id: "byteplus",
+    name: "BytePlus",
+    mappedProvider: "openai",
+    defaultModel: "doubao-pro-32k",
+    models: ["doubao-pro-32k", "doubao-lite-32k"],
+    defaultBaseUrl: "https://api.byteplus.com/v1",
+    keyHint: "在 byteplus.com 控制台获取 API Key",
+    supportsImage: true,
+  },
+  {
+    id: "aws",
+    name: "AWS",
+    mappedProvider: "claude",
+    defaultModel: "claude-sonnet-5",
+    models: ["claude-sonnet-5", "claude-haiku-4-5"],
+    keyHint: "在 aws.amazon.com/bedrock 获取凭据",
+    supportsImage: true,
+  },
+  {
+    id: "tencent",
+    name: "腾讯云",
+    mappedProvider: "openai",
+    defaultModel: "hunyuan-pro",
+    models: ["hunyuan-pro", "hunyuan-standard", "hunyuan-vision"],
+    defaultBaseUrl: "https://api.hunyuan.cloud.tencent.com/v1",
+    keyHint: "在 console.cloud.tencent.com/hunyuan 获取 API Key",
+    supportsImage: true,
+  },
+  {
+    id: "magic_ark",
+    name: "魔力方舟",
+    mappedProvider: "openai",
+    defaultModel: "magic-v1-chat",
+    models: ["magic-v1-chat", "magic-v1-fast"],
+    defaultBaseUrl: "https://api.magicark.cn/v1",
+    keyHint: "在 magicark.cn 开发者控制台获取 API Key",
+    supportsImage: false,
+  },
+  {
+    id: "ppio",
+    name: "PPIO",
+    mappedProvider: "openai",
+    defaultModel: "deepseek/deepseek-v3",
+    models: ["deepseek/deepseek-v3", "deepseek/deepseek-r1"],
+    defaultBaseUrl: "https://api.ppinfra.com/v3/openai",
+    keyHint: "在 ppinfra.com 控制台获取 API Key",
+    supportsImage: true,
+  },
+  {
+    id: "stepfun",
+    name: "阶跃星辰 StepFun",
+    mappedProvider: "stepfun",
+    defaultModel: "step-3.7-flash",
+    models: ["step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"],
+    keyHint: "在 StepFun Step Plan 控制台获取 API Key",
+    supportsImage: true,
+  },
+  {
+    id: "openai",
+    name: "OpenAI (GPT)",
+    mappedProvider: "openai",
+    defaultModel: "gpt-5.6-luna",
+    models: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-4.1", "gpt-4.1-mini"],
+    keyHint: "在 platform.openai.com 获取 API Key",
+    supportsImage: true,
+  },
+  {
+    id: "claude",
+    name: "Anthropic (Claude)",
+    mappedProvider: "claude",
+    defaultModel: "claude-sonnet-5",
+    models: ["claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
+    keyHint: "在 console.anthropic.com 获取 API Key",
+    supportsImage: true,
+  },
+  {
+    id: "gemini",
+    name: "Google (Gemini)",
+    mappedProvider: "gemini",
+    defaultModel: "gemini-3.7-flash",
+    models: ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-pro"],
+    keyHint: "在 aistudio.google.com 获取 API Key",
+    supportsImage: true,
+  },
+];
+
 /** 前端 API Key 宽松校验：非空、长度 20-512、可打印 ASCII（与后端 isValidApiKey 对齐） */
 export function isValidApiKey(value: string): boolean {
   const trimmed = value.trim();
   if (trimmed.length < 20 || trimmed.length > 512) return false;
   return /^[\x20-\x7E]+$/u.test(trimmed);
 }
+
+

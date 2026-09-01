@@ -1,5 +1,4 @@
 import type { Conversation, Locale } from "../../../domain/chat";
-import type { ProviderId } from "../../../domain/llm";
 import type { UiCopy } from "../../../i18n/messages";
 import type { SettingsTabKey } from "../../../components/settings/SettingsModal";
 
@@ -19,8 +18,6 @@ export interface DesktopSidebarProps {
   collapsed?: boolean;
   conversations: Conversation[];
   copy: UiCopy;
-  llmActiveProvider?: ProviderId;
-  llmEntries?: readonly { provider: ProviderId; apiKey: string; model: string }[];
   locale: Locale;
   onClearData?: () => Promise<void>;
   onCompress?: () => void;

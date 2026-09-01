@@ -140,6 +140,29 @@ export function DesktopChatArea({
     }
   };
 
+  const handlePaste = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (event.defaultPrevented || isOffline || isStreaming || isCompressing || !onImage) return;
+    const items = event.clipboardData?.items;
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) {
+            event.preventDefault();
+            try {
+              const processed = await processImage(file);
+              onImage(processed);
+            } catch {
+              showToast(copy.imageInvalid, "error");
+            }
+            return;
+          }
+        }
+      }
+    }
+  };
+
   const composerNode = (
     <div className="desktop-composer-dock__inner">
       {/* 上下文标签 (Context Chip) 放置在输入框左上角外部 */}
@@ -181,9 +204,13 @@ export function DesktopChatArea({
         />
 
         {/* 图片附件预览轨道 */}
-        {pendingImageDataUrl ? (
+        {pendingImageDataUrl || controller.pendingImage ? (
           <div className="dsh-composer-card__attachment">
-            <img src={pendingImageDataUrl} alt="待发送图片" className="dsh-composer-card__attachment-img" />
+            <img
+              src={pendingImageDataUrl || "blob:mock-image"}
+              alt="待发送图片"
+              className="dsh-composer-card__attachment-img"
+            />
             <button
               type="button"
               className="dsh-composer-card__attachment-remove"
@@ -207,7 +234,8 @@ export function DesktopChatArea({
             value={composerValue}
             onChange={(e) => setComposerValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isOffline ? copy.offline : isBlank ? "问点什么，或者输入 / 查看可用指令..." : "给八千代发送消息..."}
+            onPaste={handlePaste}
+            placeholder={isOffline ? copy.offline : copy.inputHint}
             disabled={isOffline || isCompressing}
             rows={1}
           />
@@ -220,8 +248,8 @@ export function DesktopChatArea({
             <button
               type="button"
               className="dsh-composer-card__add-btn"
-              title="上传图片 / 附件"
-              aria-label="上传图片"
+              title={copy.capture}
+              aria-label={copy.capture}
               onClick={() => fileInputRef.current?.click()}
               disabled={isOffline || isStreaming || isCompressing}
             >
@@ -295,8 +323,8 @@ export function DesktopChatArea({
                   }
                 }}
                 disabled={isOffline || isCompressing || (!composerValue.trim() && !pendingImageDataUrl)}
-                title="发送 (Enter)"
-                aria-label="发送消息"
+                title={`${copy.send} (Enter)`}
+                aria-label={copy.send}
               >
                 <ArrowUp size={16} strokeWidth={2.5} />
               </button>
