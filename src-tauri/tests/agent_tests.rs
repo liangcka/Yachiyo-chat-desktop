@@ -273,3 +273,52 @@ async fn test_approval_registry_cancel() {
     registry.cancel("req-2");
     assert!(rx.await.is_err(), "cancelled receiver should error");
 }
+
+#[test]
+fn test_checkpoint_backup_and_rollback() {
+    use yachiyo_desktop_lib::gateway::agent::checkpoint::CheckpointStore;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+
+    let original = "原内容 v1";
+    std::fs::write(root.join("a.txt"), original).unwrap();
+
+    let mut store = CheckpointStore::new(root, "run-test-1");
+    assert!(store.backup_before_write("a.txt").unwrap());
+    assert_eq!(store.entries().len(), 1);
+
+    std::fs::write(root.join("a.txt"), "被改坏的内容").unwrap();
+
+    let restored = store.rollback_all().unwrap();
+    assert_eq!(restored, 1);
+    assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), original);
+}
+
+#[test]
+fn test_checkpoint_skips_new_files_and_yachiyo_dir() {
+    use yachiyo_desktop_lib::gateway::agent::checkpoint::CheckpointStore;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+
+    let mut store = CheckpointStore::new(root, "run-test-2");
+    assert!(!store.backup_before_write("new-file.txt").unwrap());
+    assert!(!store.backup_before_write(".yachiyo/x.txt").unwrap());
+    assert_eq!(store.entries().len(), 0);
+}
+
+#[test]
+fn test_checkpoint_ensure_gitignore() {
+    use yachiyo_desktop_lib::gateway::agent::checkpoint::CheckpointStore;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    let store = CheckpointStore::new(root, "run-test-3");
+    store.ensure_gitignore().unwrap();
+    let content = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+    assert!(content.contains(".yachiyo/"));
+    store.ensure_gitignore().unwrap();
+    let again = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+    assert_eq!(content.matches(".yachiyo/").count(), again.matches(".yachiyo/").count());
+}
