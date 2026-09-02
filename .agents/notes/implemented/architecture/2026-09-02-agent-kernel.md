@@ -8,7 +8,7 @@ Status: implemented
 
 ## Proposal
 
-完整设计见 [docs/PHASE1_AGENT_KERNEL_DESIGN.md](../../../docs/PHASE1_AGENT_KERNEL_DESIGN.md)，实施计划与任务拆分见 [docs/plans/2026-09-02-phase1-agent-kernel.md](../../../docs/plans/2026-09-02-phase1-agent-kernel.md)。落地要点：
+完整设计见 [docs/PHASE1_AGENT_KERNEL_DESIGN.md](../../../docs/PHASE1_AGENT_KERNEL_DESIGN.md)。落地要点：
 
 **Rust 侧循环架构（`src-tauri/src/gateway/agent/`）**
 
@@ -60,8 +60,7 @@ Status: implemented
 
 - Merge readiness：**Ready with follow-ups**。
 - 合并前已修复：停止（stopped）/ 失败（failed）终态下前端 reducer 残留 `pendingPermission` 的问题——Rust 侧 `gate.cancel` 虽已清理 pending（无误执行风险），但权限卡片会残留在输入区上方，点击后 POST 404 被静默吞掉；现 `chatReducer` 的 `stopped`/`failed` 分支与 send-started / conversation-selected 同模式清除该状态。
-- 遗留 follow-up 清单：
-  - **P0**：checkpoint 回滚闭环与备份清理；UTF-8 增量解码（跨 chunk 边界缺陷）。
-  - **P1**：三处测试盲区。
-  - **P2**：若干 Minor 项。
-  - 详见 `.superpowers/sdd/progress.md` 台账。
+- 遗留 follow-up 清单（按优先级）：
+  - **P0**：checkpoint 回滚闭环未接线（`rollback_all` 无生产调用方，且 `.yachiyo/checkpoints/` 无清理机制）；UTF-8 跨 chunk 增量解码（`runtime.rs` 与纯聊天路径共有的丢字节缺陷）。
+  - **P1**：三处测试盲区——权限等待中的取消路径（`runtime.rs` select 分支）、`/api/agent/approval` HTTP 路由集成测试、`makeRequestMessages` 的 toolSteps 历史展开逻辑单测。
+  - **P2**：PermissionCard 焦点管理等 a11y 增强；`turn` 事件接入真实逐轮 usage；Agent 模式与联网搜索的互斥提示；停止后未决 ToolStep 徽章显示"完成"的语义瑕疵；事件通道背压评估。
