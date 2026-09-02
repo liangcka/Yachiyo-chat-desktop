@@ -337,3 +337,55 @@ describe("streamChat", () => {
     expect(result).toEqual({ truncated: false });
   });
 });
+
+describe("agent 事件解析", () => {
+  let serverFetch: ReturnType<typeof vi.fn<typeof fetch>>;
+
+  beforeEach(() => {
+    serverFetch = vi.fn<typeof fetch>();
+  });
+
+  function sse(event: string, data: unknown): string {
+    return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  }
+
+  it("解析 tool_call / tool_result / turn 事件", async () => {
+    const events: unknown[] = [];
+    serverFetch.mockResolvedValue(
+      sseResponse(
+        sse("turn", { index: 1 }) +
+          sse("tool_call", { id: "call-1", name: "read_file", arguments: { path: "a.ts" } }) +
+          sse("tool_result", { id: "call-1", name: "read_file", output: "hi", isError: false, durationMs: 12 }) +
+          sse("done", { truncated: false }),
+      ),
+    );
+
+    await streamChat(
+      { locale: "zh-CN", messages: [{ role: "user", text: "hi" }], agent: { enabled: true } },
+      {
+        fetcher: serverFetch,
+        onDelta: () => undefined,
+        onToolCall: (call) => events.push({ kind: "tool_call", call }),
+        onToolResult: (result) => events.push({ kind: "tool_result", result }),
+        onTurn: (turn) => events.push({ kind: "turn", turn }),
+      },
+    );
+
+    expect(events).toEqual([
+      { kind: "turn", turn: { index: 1 } },
+      { kind: "tool_call", call: { id: "call-1", name: "read_file", arguments: { path: "a.ts" } } },
+      { kind: "tool_result", result: { id: "call-1", name: "read_file", output: "hi", isError: false, durationMs: 12 } },
+    ]);
+  });
+
+  it("畸形 tool_call 载荷抛 STREAM_ERROR", async () => {
+    serverFetch.mockResolvedValue(sseResponse('event: tool_call\ndata: {"id":1}\n\n'));
+
+    await expect(
+      streamChat(
+        { locale: "zh-CN", messages: [{ role: "user", text: "hi" }] },
+        { fetcher: serverFetch, onDelta: () => undefined, onToolCall: () => undefined },
+      ),
+    ).rejects.toMatchObject({ code: "STREAM_ERROR" });
+  });
+});

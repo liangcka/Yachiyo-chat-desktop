@@ -4,9 +4,14 @@ import { apiCredentials } from "./app-platform";
 import { apiFetch } from "./api-origins";
 
 export interface StreamChatMessage {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "tool";
   text: string;
   imageDataUrl?: string;
+  /** assistant 消息携带的工具调用列表（与 Rust 侧 serde 命名一致） */
+  toolCalls?: { id: string; name: string; arguments: unknown }[];
+  /** role: "tool" 消息对应的调用 id 与工具名 */
+  toolCallId?: string;
+  toolName?: string;
 }
 
 export interface StreamChatRequest {
@@ -23,6 +28,8 @@ export interface StreamChatRequest {
   webSearch?: boolean;
   /** 智能搜索：联网搜索开启时启用双市场并行检索（结果更多、带发布日期） */
   smartSearch?: boolean;
+  /** Agent 模式：开启后服务端启用多轮工具调用循环 */
+  agent?: { enabled: true; maxTurns?: number };
 }
 
 export interface StreamChatResult {
@@ -81,6 +88,16 @@ export interface StreamChatOptions {
   onThought?: (text: string) => void;
   /** sources 事件（先于首个 delta 到达）合法时回调一次 */
   onSources?: (sources: ChatSource[]) => void;
+  /** Agent 工具调用下发（载荷校验失败视为流损坏） */
+  onToolCall?: (call: { id: string; name: string; arguments: unknown }) => void;
+  /** Agent 工具执行结果回传 */
+  onToolResult?: (result: { id: string; name: string; output: string; isError: boolean; durationMs: number }) => void;
+  /** Agent 工具权限审批请求（等待 UI 通过 submitAgentApproval 回传决定） */
+  onPermissionRequest?: (request: { requestId: string; toolName: string; arguments: unknown }) => void;
+  /** 权限审批决议下发（批准或拒绝/超时） */
+  onPermissionResolved?: (resolved: { requestId: string; approved: boolean }) => void;
+  /** Agent 单轮（模型调用 + 工具执行）完成，usage 存在时携带该轮用量 */
+  onTurn?: (turn: { index: number; usage?: TokenUsage }) => void;
   signal?: AbortSignal;
   fetcher?: typeof fetch;
   /** 单次分片读取超时（毫秒），默认 15000ms；0 或负数表示不设超时 */
@@ -245,6 +262,36 @@ export async function streamChat(
       } else if (fields.event === "sources") {
         const sources = sourcesPayload(payload);
         options.onSources?.(sources);
+      } else if (fields.event === "tool_call") {
+        if (typeof payload.id !== "string" || typeof payload.name !== "string") throw new ChatClientError("STREAM_ERROR");
+        options.onToolCall?.({ id: payload.id, name: payload.name, arguments: payload.arguments });
+      } else if (fields.event === "tool_result") {
+        if (
+          typeof payload.id !== "string" ||
+          typeof payload.name !== "string" ||
+          typeof payload.output !== "string" ||
+          typeof payload.isError !== "boolean" ||
+          typeof payload.durationMs !== "number"
+        ) {
+          throw new ChatClientError("STREAM_ERROR");
+        }
+        options.onToolResult?.({
+          id: payload.id,
+          name: payload.name,
+          output: payload.output,
+          isError: payload.isError,
+          durationMs: payload.durationMs,
+        });
+      } else if (fields.event === "permission_request") {
+        if (typeof payload.requestId !== "string" || typeof payload.toolName !== "string") throw new ChatClientError("STREAM_ERROR");
+        options.onPermissionRequest?.({ requestId: payload.requestId, toolName: payload.toolName, arguments: payload.arguments });
+      } else if (fields.event === "permission_resolved") {
+        if (typeof payload.requestId !== "string" || typeof payload.approved !== "boolean") throw new ChatClientError("STREAM_ERROR");
+        options.onPermissionResolved?.({ requestId: payload.requestId, approved: payload.approved });
+      } else if (fields.event === "turn") {
+        if (typeof payload.index !== "number") throw new ChatClientError("STREAM_ERROR");
+        const usage = isUsagePayload(payload.usage) ? payload.usage : undefined;
+        options.onTurn?.(usage !== undefined ? { index: payload.index, usage } : { index: payload.index });
       } else if (fields.event === "done" && typeof payload.truncated === "boolean") {
         const usage = isUsagePayload(payload.usage) ? payload.usage : undefined;
         finished = { truncated: payload.truncated, ...(usage !== undefined ? { usage } : {}) };
@@ -295,4 +342,22 @@ export async function streamChat(
   if (finished === undefined) throw new ChatClientError("STREAM_ERROR");
   await reader.cancel().catch(() => undefined);
   return finished;
+}
+
+/** 桌面端 Agent 权限批准回传（与 /api/chat 同 origin 路由规则） */
+export async function submitAgentApproval(payload: {
+  requestId: string;
+  approved: boolean;
+  sessionScope?: boolean;
+}): Promise<void> {
+  try {
+    await apiFetch("/api/agent/approval", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      credentials: apiCredentials(),
+      headers: { "content-type": "application/json" },
+    });
+  } catch {
+    // 网络失败静默：流内 permission_resolved 不会到达，UI 卡片最终走超时拒绝
+  }
 }
