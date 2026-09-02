@@ -16,10 +16,33 @@ impl Default for ChatLocale {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientHistoryMessage {
+    /// "user" | "assistant" | "tool"（tool 角色仅在 Agent 历史重放时出现）
     pub role: String,
     pub text: String,
     #[serde(rename = "imageDataUrl", skip_serializing_if = "Option::is_none")]
     pub image_data_url: Option<String>,
+    #[serde(rename = "toolCalls", skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolInvocation>>,
+    #[serde(rename = "toolCallId", skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(rename = "toolName", skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+}
+
+/// Agent 循环解析出的一次工具调用（provider 原生 function calling 产物）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolInvocation {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+}
+
+/// 请求携带的 Agent 模式配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRequestConfig {
+    pub enabled: bool,
+    #[serde(rename = "maxTurns", skip_serializing_if = "Option::is_none")]
+    pub max_turns: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,6 +81,8 @@ pub struct ClientChatRequest {
     pub smart_search: Option<bool>,
     #[serde(rename = "currentTime", skip_serializing_if = "Option::is_none")]
     pub current_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentRequestConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -93,6 +118,42 @@ pub enum ClientStreamEvent {
     },
     #[serde(rename = "error")]
     Error { code: String },
+    #[serde(rename = "tool_call")]
+    ToolCall {
+        id: String,
+        name: String,
+        arguments: serde_json::Value,
+    },
+    #[serde(rename = "tool_result")]
+    ToolResult {
+        id: String,
+        name: String,
+        output: String,
+        #[serde(rename = "isError")]
+        is_error: bool,
+        #[serde(rename = "durationMs")]
+        duration_ms: u64,
+    },
+    #[serde(rename = "permission_request")]
+    PermissionRequest {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "toolName")]
+        tool_name: String,
+        arguments: serde_json::Value,
+    },
+    #[serde(rename = "permission_resolved")]
+    PermissionResolved {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        approved: bool,
+    },
+    #[serde(rename = "turn")]
+    Turn {
+        index: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        usage: Option<TokenUsage>,
+    },
 }
 
 #[derive(Debug, Clone, Default)]

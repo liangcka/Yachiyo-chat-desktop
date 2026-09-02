@@ -22,6 +22,34 @@ pub fn encode_client_event(event: &ClientStreamEvent) -> String {
         ClientStreamEvent::Error { code } => {
             format!("event: error\ndata: {}\n\n", json!({ "code": code }))
         }
+        ClientStreamEvent::ToolCall { id, name, arguments } => {
+            format!("event: tool_call\ndata: {}\n\n", json!({ "id": id, "name": name, "arguments": arguments }))
+        }
+        ClientStreamEvent::ToolResult { id, name, output, is_error, duration_ms } => {
+            format!(
+                "event: tool_result\ndata: {}\n\n",
+                json!({ "id": id, "name": name, "output": output, "isError": is_error, "durationMs": duration_ms })
+            )
+        }
+        ClientStreamEvent::PermissionRequest { request_id, tool_name, arguments } => {
+            format!(
+                "event: permission_request\ndata: {}\n\n",
+                json!({ "requestId": request_id, "toolName": tool_name, "arguments": arguments })
+            )
+        }
+        ClientStreamEvent::PermissionResolved { request_id, approved } => {
+            format!(
+                "event: permission_resolved\ndata: {}\n\n",
+                json!({ "requestId": request_id, "approved": approved })
+            )
+        }
+        ClientStreamEvent::Turn { index, usage } => {
+            let mut payload = json!({ "index": index });
+            if let Some(u) = usage {
+                payload["usage"] = json!(u);
+            }
+            format!("event: turn\ndata: {}\n\n", payload)
+        }
     }
 }
 

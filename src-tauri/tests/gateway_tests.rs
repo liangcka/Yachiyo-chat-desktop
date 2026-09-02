@@ -109,3 +109,86 @@ fn test_parse_tool_call() {
     assert_eq!(name, "list_directory");
     assert_eq!(args["path"], ".");
 }
+
+#[test]
+fn test_agent_event_encoding() {
+    use yachiyo_desktop_lib::types::{ClientStreamEvent, ToolInvocation};
+
+    let tool_call = ClientStreamEvent::ToolCall {
+        id: "call-1".to_string(),
+        name: "read_file".to_string(),
+        arguments: serde_json::json!({"path": "a.rs"}),
+    };
+    let encoded = encode_client_event(&tool_call);
+    assert!(encoded.starts_with("event: tool_call\ndata: "));
+    assert!(encoded.contains("\"id\":\"call-1\""));
+    assert!(encoded.contains("\"name\":\"read_file\""));
+    assert!(encoded.ends_with("\n\n"));
+
+    let tool_result = ClientStreamEvent::ToolResult {
+        id: "call-1".to_string(),
+        name: "read_file".to_string(),
+        output: "fn main() {}".to_string(),
+        is_error: false,
+        duration_ms: 42,
+    };
+    let encoded = encode_client_event(&tool_result);
+    assert!(encoded.starts_with("event: tool_result\ndata: "));
+    assert!(encoded.contains("\"isError\":false"));
+    assert!(encoded.contains("\"durationMs\":42"));
+
+    let perm_req = ClientStreamEvent::PermissionRequest {
+        request_id: "req-9".to_string(),
+        tool_name: "write_file".to_string(),
+        arguments: serde_json::json!({"path": "b.rs"}),
+    };
+    let encoded = encode_client_event(&perm_req);
+    assert!(encoded.starts_with("event: permission_request\ndata: "));
+    assert!(encoded.contains("\"requestId\":\"req-9\""));
+
+    let perm_res = ClientStreamEvent::PermissionResolved {
+        request_id: "req-9".to_string(),
+        approved: true,
+    };
+    let encoded = encode_client_event(&perm_res);
+    assert_eq!(
+        encoded,
+        "event: permission_resolved\ndata: {\"requestId\":\"req-9\",\"approved\":true}\n\n"
+    );
+
+    let turn = ClientStreamEvent::Turn { index: 3, usage: None };
+    let encoded = encode_client_event(&turn);
+    assert_eq!(encoded, "event: turn\ndata: {\"index\":3}\n\n");
+}
+
+#[test]
+fn test_agent_request_deserialization() {
+    use yachiyo_desktop_lib::types::ClientChatRequest;
+
+    let raw = r#"{
+        "locale": "zh-CN",
+        "messages": [
+            {"role": "user", "text": "看下这个项目"},
+            {"role": "assistant", "text": "好的，我先列目录", "toolCalls": [{"id": "call-1", "name": "list_directory", "arguments": {"path": "."}}]},
+            {"role": "tool", "text": "src/ functions/", "toolCallId": "call-1", "toolName": "list_directory"}
+        ],
+        "agent": {"enabled": true, "maxTurns": 8}
+    }"#;
+    let req: ClientChatRequest = serde_json::from_str(raw).expect("should parse agent request");
+    assert_eq!(req.agent.as_ref().expect("agent config").enabled, true);
+    assert_eq!(req.agent.as_ref().unwrap().max_turns, Some(8));
+    assert_eq!(req.messages.len(), 3);
+    assert_eq!(req.messages[1].tool_calls.as_ref().unwrap()[0].name, "list_directory");
+    assert_eq!(req.messages[2].tool_call_id.as_deref(), Some("call-1"));
+    assert_eq!(req.messages[2].tool_name.as_deref(), Some("list_directory"));
+}
+
+#[test]
+fn test_plain_request_still_parses_without_agent_fields() {
+    use yachiyo_desktop_lib::types::ClientChatRequest;
+
+    let raw = r#"{"locale": "zh-CN", "messages": [{"role": "user", "text": "你好"}]}"#;
+    let req: ClientChatRequest = serde_json::from_str(raw).expect("legacy request must parse");
+    assert!(req.agent.is_none());
+    assert!(req.messages[0].tool_calls.is_none());
+}

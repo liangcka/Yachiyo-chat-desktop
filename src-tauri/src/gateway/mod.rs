@@ -384,11 +384,17 @@ pub fn handle_chat_stream(
                 role: "assistant".to_string(),
                 text: full_accumulated_text.clone(),
                 image_data_url: None,
+                tool_calls: None,
+                tool_call_id: None,
+                tool_name: None,
             });
             second_turn_req.messages.push(ClientHistoryMessage {
                 role: "user".to_string(),
                 text: format!("【系统执行工具 {} 结果如下】：\n{}\n\n请结合以上执行结果，用八千代生动可爱的语气向彩叶汇报并给出详细解答。", tool_name, output),
                 image_data_url: None,
+                tool_calls: None,
+                tool_call_id: None,
+                tool_name: None,
             });
 
             if let Ok(second_built_req) = build_upstream_request(&second_turn_req, &api_key, &model) {
