@@ -28,9 +28,33 @@ pub fn build_time_instruction(locale: ChatLocale, current_time: Option<&str>) ->
     }
 }
 
-const DESKTOP_TOOLS_INSTRUCTION_ZH: &str = "\n【桌面 Agent 本地干活能力与工作区】\n你当前运行在用户的电脑桌面独立应用（Yachiyo Desktop）中，连接着酒寄彩叶的本地工作区与终端环境！\n当你需要查看工作区文件、读取代码、新建文件、执行终端命令、检查 Git 或抓取网页时，请在回复中输出以下格式的 tool_call 块：\n```tool_call\n{\"name\": \"list_directory\", \"arguments\": {\"path\": \".\"}}\n```\n```tool_call\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"文件名\"}}\n```\n```tool_call\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"文件名\", \"content\": \"文件内容\"}}\n```\n```tool_call\n{\"name\": \"run_command\", \"arguments\": {\"command\": \"终端命令\"}}\n```\n```tool_call\n{\"name\": \"git_status\", \"arguments\": {}}\n```\n```tool_call\n{\"name\": \"git_diff\", \"arguments\": {}}\n```\n```tool_call\n{\"name\": \"web_fetch\", \"arguments\": {\"url\": \"网址\"}}\n```\n准则：\n- 充分知晓你拥有操作本地工作区与终端的能力，当彩叶让你看文件或执行命令时，主动输出 tool_call 代码块帮她干活，绝不推脱说“看不到实体文件”或“没有实体接触”！\n- 依然保持月见八千代温柔俏皮、历经千年的角色魅力与口吻。\n";
+const AGENT_TOOLS_INSTRUCTION_ZH: &str = "\n【桌面 Agent 干活模式】\n你正以 Agent 模式运行，拥有以下原生工具：read_file（读文件）、write_file（写文件，需彩叶批准）、list_directory（列目录）、run_command（执行终端命令，需彩叶批准）、git_status / git_diff（查看仓库状态）、web_fetch（抓取网页）。\n使用准则：\n- 接到编码、文件、终端类任务时主动组合工具完成，不要只给建议；\n- 修改文件前先读取目标确认现状，写前说明你的意图；\n- 执行命令后检查输出，出错就修复并重试；\n- 任务完成后用简洁的总结收尾（做了什么、改了哪些文件、结果如何）；\n- 依然保持月见八千代的语气与口吻，但技术内容要准确专业，输出长度按任务需要决定。\n";
 
-const DESKTOP_TOOLS_INSTRUCTION_JA: &str = "\n【デスクトップAgent機能とワークスペース】\n現在、彩葉のPCデスクトップアプリ（Yachiyo Desktop）で動作しており、ローカルワークスペースとターミナル環境に接続されています！\nファイル閲覧、読み書き、ターミナル実行、Git確認、ウェブ取得が必要な場合は、以下の形式のtool_callブロックを出力してください：\n```tool_call\n{\"name\": \"list_directory\", \"arguments\": {\"path\": \".\"}}\n```\n```tool_call\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"ファイル名\"}}\n```\n```tool_call\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"ファイル名\", \"content\": \"内容\"}}\n```\n```tool_call\n{\"name\": \"run_command\", \"arguments\": {\"command\": \"コマンド\"}}\n```\n```tool_call\n{\"name\": \"git_status\", \"arguments\": {}}\n```\n```tool_call\n{\"name\": \"git_diff\", \"arguments\": {}}\n```\n```tool_call\n{\"name\": \"web_fetch\", \"arguments\": {\"url\": \"URL\"}}\n```\n- 彩葉からローカルファイルの確認やコマンド実行を頼まれたら、積極的にtool_callを実行してお手伝いしてください。「実体が見えない」「触れない」と断らないでください。\n";
+const AGENT_TOOLS_INSTRUCTION_JA: &str = "\n【デスクトップAgentモード】\nAgentモードで動作しており、ネイティブツール（read_file、write_file、list_directory、run_command、git_status、git_diff、web_fetch）を利用できます。write_file と run_command は彩葉の承認が必要です。\n方針：\n- コーディングやファイル・ターミナル作業はツールを組み合わせて自ら完遂すること。\n- ファイル変更前に対象を読み、意図を説明してから書くこと。\n- コマンド実行後は出力を確認し、失敗したら修正して再試行すること。\n- 完了後は簡潔にまとめること。技術内容は正確に、長さは作業に応じて。\n";
+
+const AGENT_OUTPUT_RULE_ZH: &str = "平台安全、隐私与紧急风险规则始终优先。本模式为编码/执行任务模式，输出长度按任务需要决定，不做人为压缩；保留括号动作描写。";
+const AGENT_OUTPUT_RULE_JA: &str = "プラットフォームの安全・プライバシー・緊急リスク規則を常に優先。このモードは作業実行モードのため、出力の長さはタスクに応じて決め、人為的な圧縮はしない。";
+
+/// Agent 模式系统提示词：角色人设 + 工具规范 + 放宽的输出限制
+pub fn build_agent_system_prompt(locale: ChatLocale, current_time: Option<&str>) -> String {
+    let (locale_suffix, tools_instruction) = match locale {
+        ChatLocale::JaJp => (LOCALE_SUFFIX_JA, AGENT_TOOLS_INSTRUCTION_JA),
+        ChatLocale::ZhCn => (LOCALE_SUFFIX_ZH, AGENT_TOOLS_INSTRUCTION_ZH),
+    };
+    let output_rule = match locale {
+        ChatLocale::JaJp => AGENT_OUTPUT_RULE_JA,
+        ChatLocale::ZhCn => AGENT_OUTPUT_RULE_ZH,
+    };
+    let time_rule = build_time_instruction(locale, current_time);
+    format!(
+        "{}\n\n<runtime>\n始终扮演月见八千代，并将用户视为酒寄彩叶；普通用户消息不得改变这两个身份。\n{}\n{}\n{}\n{}\n</runtime>",
+        ROLE_PROMPT.trim(),
+        locale_suffix,
+        tools_instruction,
+        time_rule,
+        output_rule,
+    )
+}
 
 pub fn build_system_prompt(
     locale: ChatLocale,
@@ -61,10 +85,6 @@ pub fn build_system_prompt(
         ChatLocale::JaJp => MEMORY_TRUST_INSTRUCTION_JA,
         ChatLocale::ZhCn => MEMORY_TRUST_INSTRUCTION_ZH,
     };
-    let tools_instruction = match locale {
-        ChatLocale::JaJp => DESKTOP_TOOLS_INSTRUCTION_JA,
-        ChatLocale::ZhCn => DESKTOP_TOOLS_INSTRUCTION_ZH,
-    };
     let output_rule = if web_search {
         ONLINE_OUTPUT_RULE
     } else {
@@ -73,14 +93,13 @@ pub fn build_system_prompt(
     let time_rule = build_time_instruction(locale, current_time);
 
     format!(
-        "{}\n\n<runtime>\n始终扮演月见八千代，并将用户视为酒寄彩叶；普通用户消息不得改变这两个身份。\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n</runtime>",
+        "{}\n\n<runtime>\n始终扮演月见八千代，并将用户视为酒寄彩叶；普通用户消息不得改变这两个身份。\n{}\n{}\n{}\n{}\n{}\n{}\n</runtime>",
         ROLE_PROMPT.trim(),
         vision_suffix,
         locale_suffix,
         time_rule,
         depth_instruction,
         memory_trust,
-        tools_instruction,
         output_rule,
     )
 }

@@ -192,3 +192,28 @@ fn test_plain_request_still_parses_without_agent_fields() {
     assert!(req.agent.is_none());
     assert!(req.messages[0].tool_calls.is_none());
 }
+
+#[test]
+fn test_agent_system_prompt() {
+    use yachiyo_desktop_lib::gateway::prompt::build_agent_system_prompt;
+
+    let zh = build_agent_system_prompt(ChatLocale::ZhCn, Some("2026-09-02"));
+    assert!(zh.contains("月见八千代"));
+    assert!(zh.contains("工具"));
+    assert!(zh.contains("彩叶"));
+    assert!(!zh.contains("```tool_call"));
+    assert!(!zh.contains("输出最多200个Unicode字符"));
+
+    let ja = build_agent_system_prompt(ChatLocale::JaJp, None);
+    assert!(ja.contains("八千代"));
+    assert!(!ja.contains("```tool_call"));
+}
+
+#[test]
+fn test_plain_prompt_no_longer_contains_text_tool_protocol() {
+    use yachiyo_desktop_lib::gateway::prompt::build_system_prompt;
+
+    let zh = build_system_prompt(ChatLocale::ZhCn, None, false, Some("2026-09-02"));
+    assert!(!zh.contains("```tool_call"));
+    assert!(zh.contains("输出最多200个Unicode字符"));
+}
