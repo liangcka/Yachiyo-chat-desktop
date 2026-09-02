@@ -1,3 +1,4 @@
+use crate::gateway::agent::messages::AgentMessage;
 use crate::gateway::prompt::build_system_prompt;
 use crate::types::{ChatLocale, ClientChatRequest, ClientHistoryMessage, ExtractedDelta, TokenUsage};
 use serde_json::json;
@@ -136,6 +137,84 @@ pub fn build_anthropic_body(
     })
 }
 
+/// Agent 模式请求体：tool_use 块 + tool_result 回填（user 角色内嵌）
+pub fn build_anthropic_agent_body(
+    model: &str,
+    messages: &[AgentMessage],
+    system_prompt: &str,
+    tools: &[serde_json::Value],
+) -> serde_json::Value {
+    let anthropic_tools: Vec<serde_json::Value> = tools
+        .iter()
+        .map(|t| {
+            let function = &t["function"];
+            json!({
+                "name": function["name"],
+                "description": function["description"],
+                "input_schema": function["parameters"],
+            })
+        })
+        .collect();
+
+    let mut mapped: Vec<serde_json::Value> = Vec::new();
+    for msg in messages {
+        match msg {
+            AgentMessage::User { text, image_data_url } => {
+                let mut blocks = vec![json!({ "type": "text", "text": text })];
+                if let Some(url) = image_data_url {
+                    if let Some((mime_type, base64_data)) = parse_image_data_url(url) {
+                        blocks.push(json!({
+                            "type": "image",
+                            "source": { "type": "base64", "media_type": mime_type, "data": base64_data }
+                        }));
+                    }
+                }
+                mapped.push(json!({ "role": "user", "content": blocks }));
+            }
+            AgentMessage::Assistant { text, tool_calls } => {
+                let mut blocks: Vec<serde_json::Value> = Vec::new();
+                if !text.is_empty() {
+                    blocks.push(json!({ "type": "text", "text": text }));
+                }
+                for call in tool_calls {
+                    blocks.push(json!({
+                        "type": "tool_use",
+                        "id": call.id,
+                        "name": call.name,
+                        "input": call.arguments,
+                    }));
+                }
+                if !blocks.is_empty() {
+                    mapped.push(json!({ "role": "assistant", "content": blocks }));
+                }
+            }
+            AgentMessage::ToolResult { tool_call_id, content, .. } => {
+                let block = json!({
+                    "type": "tool_result",
+                    "tool_use_id": tool_call_id,
+                    "content": content,
+                });
+                // 连续 tool_result 合并进同一条 user 消息（Anthropic 要求）
+                match mapped.last_mut() {
+                    Some(last) if last["role"] == "user" && last["content"].is_array() => {
+                        last["content"].as_array_mut().unwrap().push(block);
+                    }
+                    _ => mapped.push(json!({ "role": "user", "content": [block] })),
+                }
+            }
+        }
+    }
+
+    json!({
+        "model": model,
+        "max_tokens": 8192,
+        "system": system_prompt,
+        "messages": mapped,
+        "tools": anthropic_tools,
+        "stream": true
+    })
+}
+
 pub fn extract_anthropic_delta(data: &str) -> Option<ExtractedDelta> {
     if data == "[DONE]" {
         return None;
@@ -176,6 +255,29 @@ pub fn extract_anthropic_delta(data: &str) -> Option<ExtractedDelta> {
             }
             None
         }
+        "content_block_start" => {
+            if let Some(block) = parsed.get("content_block") {
+                if block.get("type").and_then(|v| v.as_str()) == Some("tool_use") {
+                    let index = parsed.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                    let block_id = block.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                    let name = block.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                    if !block_id.is_empty() && !name.is_empty() {
+                        delta.tool_calls.push(crate::types::ToolCallStreamDelta::AnthropicStart {
+                            index,
+                            block_id,
+                            name,
+                        });
+                        return Some(delta);
+                    }
+                }
+            }
+            None
+        }
+        "content_block_stop" => {
+            let index = parsed.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            delta.tool_calls.push(crate::types::ToolCallStreamDelta::AnthropicStop { index });
+            Some(delta)
+        }
         "content_block_delta" => {
             if let Some(delta_obj) = parsed.get("delta") {
                 let delta_type = delta_obj.get("type").and_then(|v| v.as_str()).unwrap_or("text_delta");
@@ -190,6 +292,17 @@ pub fn extract_anthropic_delta(data: &str) -> Option<ExtractedDelta> {
                     if let Some(text) = delta_obj.get("text").and_then(|v| v.as_str()) {
                         if !text.is_empty() {
                             delta.content = Some(text.to_string());
+                            return Some(delta);
+                        }
+                    }
+                } else if delta_type == "input_json_delta" {
+                    if let Some(partial) = delta_obj.get("partial_json").and_then(|v| v.as_str()) {
+                        if !partial.is_empty() {
+                            let index = parsed.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                            delta.tool_calls.push(crate::types::ToolCallStreamDelta::AnthropicArgs {
+                                index,
+                                partial_json: partial.to_string(),
+                            });
                             return Some(delta);
                         }
                     }

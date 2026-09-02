@@ -125,3 +125,68 @@ fn test_aggregator_assigns_id_for_gemini_calls() {
     assert_eq!(calls.len(), 1);
     assert!(!calls[0].id.is_empty());
 }
+
+#[test]
+fn test_anthropic_agent_body_structure() {
+    use yachiyo_desktop_lib::gateway::providers::anthropic::build_anthropic_agent_body;
+
+    let messages = vec![
+        AgentMessage::User { text: "读 a.rs".to_string(), image_data_url: None },
+        AgentMessage::Assistant {
+            text: "好的".to_string(),
+            tool_calls: vec![ToolInvocation {
+                id: "toolu_1".to_string(),
+                name: "read_file".to_string(),
+                arguments: serde_json::json!({"path": "a.rs"}),
+            }],
+        },
+        AgentMessage::ToolResult {
+            tool_call_id: "toolu_1".to_string(),
+            name: "read_file".to_string(),
+            content: "fn main() {}".to_string(),
+        },
+    ];
+    let tools = vec![serde_json::json!({
+        "type": "function",
+        "function": {"name": "read_file", "description": "read", "parameters": {"type": "object", "properties": {}}}
+    })];
+    let body = build_anthropic_agent_body("claude-sonnet-5", &messages, "系统提示", &tools);
+
+    assert_eq!(body["model"], "claude-sonnet-5");
+    assert_eq!(body["system"], "系统提示");
+    let msgs = body["messages"].as_array().unwrap();
+    assert_eq!(msgs[0]["role"], "user");
+    assert_eq!(msgs[1]["role"], "assistant");
+    assert_eq!(msgs[1]["content"][1]["type"], "tool_use");
+    assert_eq!(msgs[1]["content"][1]["id"], "toolu_1");
+    assert_eq!(msgs[1]["content"][1]["input"]["path"], "a.rs");
+    assert_eq!(msgs[2]["role"], "user");
+    assert_eq!(msgs[2]["content"][0]["type"], "tool_result");
+    assert_eq!(msgs[2]["content"][0]["tool_use_id"], "toolu_1");
+    assert_eq!(body["tools"][0]["name"], "read_file");
+    assert!(body["tools"][0].get("input_schema").is_some());
+}
+
+#[test]
+fn test_anthropic_tool_use_stream_extraction() {
+    use yachiyo_desktop_lib::gateway::providers::anthropic::extract_anthropic_delta;
+
+    let start = r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"write_file"}}"#;
+    let args1 = r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"a"}}"#;
+    let args2 = r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":".rs\"}"}}"#;
+    let stop = r#"{"type":"content_block_stop","index":1}"#;
+
+    let mut agg = ToolCallAggregator::new();
+    for chunk in [start, args1, args2, stop] {
+        if let Some(delta) = extract_anthropic_delta(chunk) {
+            for tc in &delta.tool_calls {
+                agg.push(tc);
+            }
+        }
+    }
+    let calls = agg.finish();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].id, "toolu_1");
+    assert_eq!(calls[0].name, "write_file");
+    assert_eq!(calls[0].arguments["path"], "a.rs");
+}
