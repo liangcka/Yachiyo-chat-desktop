@@ -156,10 +156,37 @@ pub enum ClientStreamEvent {
     },
 }
 
+/// provider 流式工具调用增量（跨 chunk 聚合前的原始形态）
+#[derive(Debug, Clone)]
+pub enum ToolCallStreamDelta {
+    Openai {
+        index: usize,
+        id: Option<String>,
+        name: Option<String>,
+        arguments_fragment: Option<String>,
+    },
+    AnthropicStart {
+        index: usize,
+        block_id: String,
+        name: String,
+    },
+    AnthropicArgs {
+        index: usize,
+        partial_json: String,
+    },
+    AnthropicStop {
+        index: usize,
+    },
+    Gemini {
+        call: ToolInvocation,
+    },
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ExtractedDelta {
     pub content: Option<String>,
     pub thought: Option<String>,
     pub usage: Option<TokenUsage>,
     pub sources: Option<Vec<ChatSource>>,
+    pub tool_calls: Vec<ToolCallStreamDelta>,
 }

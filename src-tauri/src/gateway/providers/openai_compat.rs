@@ -1,3 +1,4 @@
+use crate::gateway::agent::messages::AgentMessage;
 use crate::gateway::prompt::build_system_prompt;
 use crate::gateway::providers::registry::ProviderConfig;
 use crate::types::ClientChatRequest;
@@ -66,4 +67,65 @@ pub fn build_openai_compat_body(
     }
 
     body
+}
+
+/// Agent 模式请求体：messages 含 assistant tool_calls 与 role:"tool" 结果回填
+pub fn build_openai_agent_body(
+    model: &str,
+    messages: &[AgentMessage],
+    system_prompt: &str,
+    tools: &[serde_json::Value],
+) -> serde_json::Value {
+    let mut out = vec![json!({ "role": "system", "content": system_prompt })];
+    for msg in messages {
+        match msg {
+            AgentMessage::User { text, image_data_url } => {
+                if let Some(url) = image_data_url {
+                    out.push(json!({
+                        "role": "user",
+                        "content": [
+                            { "type": "text", "text": text },
+                            { "type": "image_url", "image_url": { "url": url } }
+                        ]
+                    }));
+                } else {
+                    out.push(json!({ "role": "user", "content": text }));
+                }
+            }
+            AgentMessage::Assistant { text, tool_calls } => {
+                if tool_calls.is_empty() {
+                    if !text.is_empty() {
+                        out.push(json!({ "role": "assistant", "content": text }));
+                    }
+                    continue;
+                }
+                let calls: Vec<serde_json::Value> = tool_calls
+                    .iter()
+                    .map(|c| {
+                        json!({
+                            "id": c.id,
+                            "type": "function",
+                            "function": { "name": c.name, "arguments": c.arguments.to_string() }
+                        })
+                    })
+                    .collect();
+                out.push(json!({
+                    "role": "assistant",
+                    "content": if text.is_empty() { serde_json::Value::Null } else { json!(text) },
+                    "tool_calls": calls
+                }));
+            }
+            AgentMessage::ToolResult { tool_call_id, content, .. } => {
+                out.push(json!({ "role": "tool", "tool_call_id": tool_call_id, "content": content }));
+            }
+        }
+    }
+    json!({
+        "model": model,
+        "messages": out,
+        "tools": tools,
+        "tool_choice": "auto",
+        "stream": true,
+        "stream_options": { "include_usage": true }
+    })
 }

@@ -91,11 +91,34 @@ pub fn extract_openai_delta(data: &str) -> Option<crate::types::ExtractedDelta> 
                         delta.thought = Some(thought.to_string());
                     }
                 }
+                if let Some(tool_calls) = delta_obj.get("tool_calls").and_then(|v| v.as_array()) {
+                    for tc in tool_calls {
+                        let index = tc.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                        let id = tc.get("id").and_then(|v| v.as_str()).map(String::from);
+                        let function = tc.get("function");
+                        let name = function
+                            .and_then(|f| f.get("name"))
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
+                        let arguments_fragment = function
+                            .and_then(|f| f.get("arguments"))
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
+                        if id.is_some() || name.is_some() || arguments_fragment.is_some() {
+                            delta.tool_calls.push(crate::types::ToolCallStreamDelta::Openai {
+                                index,
+                                id,
+                                name,
+                                arguments_fragment,
+                            });
+                        }
+                    }
+                }
             }
         }
     }
 
-    if delta.content.is_none() && delta.thought.is_none() && delta.usage.is_none() {
+    if delta.content.is_none() && delta.thought.is_none() && delta.usage.is_none() && delta.tool_calls.is_empty() {
         None
     } else {
         Some(delta)
