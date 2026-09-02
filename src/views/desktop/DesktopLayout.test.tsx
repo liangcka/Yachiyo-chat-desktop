@@ -5,7 +5,6 @@ import type { useChatController } from "../../app/use-chat-controller";
 import type { Conversation } from "../../domain/chat";
 import { copyFor } from "../../i18n/messages";
 import { defaultWebSearchSettings } from "../../services/web-search-settings";
-import { defaultLive2dSettings } from "../../services/live2d-settings";
 import type { SharedViewProps } from "../layout-types";
 import { DesktopLayout } from "./DesktopLayout";
 
@@ -59,13 +58,11 @@ describe("DesktopLayout", () => {
     copy,
     imageUrls: new Map(),
     isOnline: true,
-    live2dSettings: defaultLive2dSettings,
     llmActiveProvider: undefined,
     llmEntries: [],
     onClearData: vi.fn(),
     onDelete: vi.fn(),
     onImage: vi.fn(),
-    onLive2dSettingsChange: vi.fn(),
     onLlmActivate: vi.fn(),
     onLlmClear: vi.fn(),
     onLlmSave: vi.fn(),
