@@ -190,3 +190,60 @@ fn test_anthropic_tool_use_stream_extraction() {
     assert_eq!(calls[0].name, "write_file");
     assert_eq!(calls[0].arguments["path"], "a.rs");
 }
+
+#[test]
+fn test_gemini_agent_body_structure() {
+    use yachiyo_desktop_lib::gateway::providers::gemini::build_gemini_agent_body;
+
+    let messages = vec![
+        AgentMessage::User { text: "读 a.rs".to_string(), image_data_url: None },
+        AgentMessage::Assistant {
+            text: "好的".to_string(),
+            tool_calls: vec![ToolInvocation {
+                id: "call-gemini-0".to_string(),
+                name: "read_file".to_string(),
+                arguments: serde_json::json!({"path": "a.rs"}),
+            }],
+        },
+        AgentMessage::ToolResult {
+            tool_call_id: "call-gemini-0".to_string(),
+            name: "read_file".to_string(),
+            content: "fn main() {}".to_string(),
+        },
+    ];
+    let tools = vec![serde_json::json!({
+        "type": "function",
+        "function": {"name": "read_file", "description": "read", "parameters": {"type": "object", "properties": {}}}
+    })];
+    let body = build_gemini_agent_body("gemini-3.7-flash", &messages, "系统提示", &tools);
+
+    assert_eq!(body["systemInstruction"]["parts"][0]["text"], "系统提示");
+    let contents = body["contents"].as_array().unwrap();
+    assert_eq!(contents[0]["role"], "user");
+    assert_eq!(contents[1]["role"], "model");
+    assert_eq!(contents[1]["parts"][1]["functionCall"]["name"], "read_file");
+    assert_eq!(contents[1]["parts"][1]["functionCall"]["args"]["path"], "a.rs");
+    assert_eq!(contents[2]["role"], "user");
+    assert_eq!(contents[2]["parts"][0]["functionResponse"]["name"], "read_file");
+    assert_eq!(
+        contents[2]["parts"][0]["functionResponse"]["response"]["result"],
+        "fn main() {}"
+    );
+    assert_eq!(body["tools"][0]["functionDeclarations"][0]["name"], "read_file");
+}
+
+#[test]
+fn test_gemini_function_call_extraction() {
+    use yachiyo_desktop_lib::gateway::providers::gemini::extract_gemini_delta;
+
+    let chunk = r#"{"candidates":[{"content":{"parts":[{"functionCall":{"name":"list_directory","args":{"path":"."}}}]}}]}"#;
+    let delta = extract_gemini_delta(chunk).expect("should parse functionCall");
+    assert_eq!(delta.tool_calls.len(), 1);
+    match &delta.tool_calls[0] {
+        yachiyo_desktop_lib::types::ToolCallStreamDelta::Gemini { call } => {
+            assert_eq!(call.name, "list_directory");
+            assert_eq!(call.arguments["path"], ".");
+        }
+        _ => panic!("expected Gemini delta"),
+    }
+}

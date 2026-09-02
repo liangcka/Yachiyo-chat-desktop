@@ -1,3 +1,4 @@
+use crate::gateway::agent::messages::AgentMessage;
 use crate::gateway::prompt::build_system_prompt;
 use crate::types::{ChatLocale, ChatSource, ClientChatRequest, ClientHistoryMessage, ExtractedDelta, TokenUsage};
 use serde_json::json;
@@ -122,6 +123,67 @@ pub fn build_gemini_body(
     body
 }
 
+/// Agent 模式请求体：functionDeclarations + functionCall/functionResponse parts
+pub fn build_gemini_agent_body(
+    model: &str,
+    messages: &[AgentMessage],
+    system_prompt: &str,
+    tools: &[serde_json::Value],
+) -> serde_json::Value {
+    let declarations: Vec<serde_json::Value> = tools
+        .iter()
+        .map(|t| {
+            let function = &t["function"];
+            json!({
+                "name": function["name"],
+                "description": function["description"],
+                "parameters": function["parameters"],
+            })
+        })
+        .collect();
+
+    let mut contents: Vec<serde_json::Value> = Vec::new();
+    for msg in messages {
+        match msg {
+            AgentMessage::User { text, image_data_url } => {
+                let mut parts = vec![json!({ "text": text })];
+                if let Some(url) = image_data_url {
+                    if let Some((mime_type, base64_data)) = parse_image_data_url(url) {
+                        parts.push(json!({ "inlineData": { "mimeType": mime_type, "data": base64_data } }));
+                    }
+                }
+                contents.push(json!({ "role": "user", "parts": parts }));
+            }
+            AgentMessage::Assistant { text, tool_calls } => {
+                let mut parts: Vec<serde_json::Value> = Vec::new();
+                if !text.is_empty() {
+                    parts.push(json!({ "text": text }));
+                }
+                for call in tool_calls {
+                    parts.push(json!({ "functionCall": { "name": call.name, "args": call.arguments } }));
+                }
+                if !parts.is_empty() {
+                    contents.push(json!({ "role": "model", "parts": parts }));
+                }
+            }
+            AgentMessage::ToolResult { name, content, .. } => {
+                contents.push(json!({
+                    "role": "user",
+                    "parts": [{ "functionResponse": { "name": name, "response": { "result": content } } }]
+                }));
+            }
+        }
+    }
+
+    json!({
+        "contents": contents,
+        "systemInstruction": { "parts": [{ "text": system_prompt }] },
+        "tools": [{ "functionDeclarations": declarations }],
+        "generationConfig": { "thinkingConfig": { "thinkingLevel": "low" } },
+        "model": model
+    })
+}
+
 pub fn extract_gemini_delta(data: &str) -> Option<ExtractedDelta> {
     if data == "[DONE]" {
         return None;
@@ -160,6 +222,20 @@ pub fn extract_gemini_delta(data: &str) -> Option<ExtractedDelta> {
                             }
                         }
                     }
+                    if let Some(function_call) = part.get("functionCall") {
+                        let name = function_call.get("name").and_then(|v| v.as_str()).unwrap_or_default();
+                        if !name.is_empty() {
+                            let args = function_call.get("args").cloned().unwrap_or(serde_json::json!({}));
+                            delta.tool_calls.push(crate::types::ToolCallStreamDelta::Gemini {
+                                call: crate::types::ToolInvocation {
+                                    // Gemini 不返回调用 id，由聚合器分配
+                                    id: String::new(),
+                                    name: name.to_string(),
+                                    arguments: args,
+                                },
+                            });
+                        }
+                    }
                 }
 
                 if !content_text.is_empty() {
@@ -194,7 +270,7 @@ pub fn extract_gemini_delta(data: &str) -> Option<ExtractedDelta> {
         }
     }
 
-    if delta.content.is_none() && delta.thought.is_none() && delta.usage.is_none() && delta.sources.is_none() {
+    if delta.content.is_none() && delta.thought.is_none() && delta.usage.is_none() && delta.sources.is_none() && delta.tool_calls.is_empty() {
         None
     } else {
         Some(delta)
