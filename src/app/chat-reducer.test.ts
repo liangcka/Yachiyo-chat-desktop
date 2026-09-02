@@ -456,4 +456,37 @@ describe("agent 工具事件动作", () => {
     });
     expect(state.pendingPermission).toBeUndefined();
   });
+
+  it("stopped 与 failed 终态清除 pendingPermission（权限卡片不残留）", () => {
+    let state = chatReducer(baseState, {
+      type: "permission-requested",
+      messageId: "a1",
+      requestId: "req-1",
+      toolName: "write_file",
+      argumentsJson: '{"path":"b.ts"}',
+    });
+    expect(state.pendingPermission?.requestId).toBe("req-1");
+
+    const stopped = chatReducer(state, { type: "stopped", messageId: "a1", latencyMs: 120 });
+    expect(stopped.pendingPermission).toBeUndefined();
+    expect(stopped.messages[0]).toMatchObject({ status: "stopped", interrupted: true, latencyMs: 120 });
+
+    state = chatReducer(stopped, {
+      type: "permission-requested",
+      messageId: "a1",
+      requestId: "req-2",
+      toolName: "run_command",
+      argumentsJson: "{}",
+    });
+    expect(state.pendingPermission?.requestId).toBe("req-2");
+
+    const failed = chatReducer(state, {
+      type: "failed",
+      messageId: "a1",
+      errorCode: "PROVIDER_ERROR",
+      latencyMs: 80,
+    });
+    expect(failed.pendingPermission).toBeUndefined();
+    expect(failed).toMatchObject({ phase: "error", errorCode: "PROVIDER_ERROR" });
+  });
 });

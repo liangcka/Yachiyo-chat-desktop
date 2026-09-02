@@ -1,6 +1,6 @@
 # Agent Note: 阶段一 Agent 内核（多步循环 / 原生 function calling / 结构化工具协议 / 权限门）
 
-Status: proposed
+Status: implemented
 
 ## Problem
 
@@ -55,3 +55,13 @@ Status: proposed
 - 协议演进需保持 5 事件向后兼容（云端路径零改动的红线依赖于此）。
 - 会话级批准（session_scope）在长会话中的权限面扩大，依赖 CheckpointStore 回滚兜底。
 - UTF-8 跨 chunk 边界缺陷（见上文已知事项）在极端分帧下可能导致个别事件丢失。
+
+## 终审结论（2026-09-02）
+
+- Merge readiness：**Ready with follow-ups**。
+- 合并前已修复：停止（stopped）/ 失败（failed）终态下前端 reducer 残留 `pendingPermission` 的问题——Rust 侧 `gate.cancel` 虽已清理 pending（无误执行风险），但权限卡片会残留在输入区上方，点击后 POST 404 被静默吞掉；现 `chatReducer` 的 `stopped`/`failed` 分支与 send-started / conversation-selected 同模式清除该状态。
+- 遗留 follow-up 清单：
+  - **P0**：checkpoint 回滚闭环与备份清理；UTF-8 增量解码（跨 chunk 边界缺陷）。
+  - **P1**：三处测试盲区。
+  - **P2**：若干 Minor 项。
+  - 详见 `.superpowers/sdd/progress.md` 台账。

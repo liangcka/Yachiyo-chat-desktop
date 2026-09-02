@@ -210,6 +210,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       const folded = foldStreamedContent(state, action.messageId);
       return {
         ...state,
+        // 流程终止后 Rust 侧 gate 已取消 pending，前端同步丢弃权限卡片避免残留死卡
+        pendingPermission: undefined,
         messages: updateMessage(state.messages, action.messageId, (message) => ({
           ...message,
           ...streamedFields(folded),
@@ -226,6 +228,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return {
         ...state,
         errorCode: action.errorCode,
+        // 运行失败即终态，权限审批不可能再有回填，卡片随之失效须清除
+        pendingPermission: undefined,
         messages: updateMessage(state.messages, action.messageId, (message) => ({
           ...message,
           ...streamedFields(folded),
