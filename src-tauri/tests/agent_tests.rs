@@ -261,7 +261,7 @@ async fn test_approval_registry_flow() {
     use yachiyo_desktop_lib::gateway::agent::permission::{ApprovalDecision, ApprovalRegistry};
 
     let registry = ApprovalRegistry::new();
-    let mut rx = registry.register("req-1");
+    let rx = registry.register("req-1");
     assert!(registry.resolve(
         "req-1",
         ApprovalDecision { approved: true, session_scope: false }
@@ -277,7 +277,7 @@ async fn test_approval_registry_cancel() {
     use yachiyo_desktop_lib::gateway::agent::permission::ApprovalRegistry;
 
     let registry = ApprovalRegistry::new();
-    let mut rx = registry.register("req-2");
+    let rx = registry.register("req-2");
     registry.cancel("req-2");
     assert!(rx.await.is_err(), "cancelled receiver should error");
 }

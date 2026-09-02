@@ -95,7 +95,7 @@ fn test_keystore_encrypt_decrypt() {
 
 #[test]
 fn test_agent_event_encoding() {
-    use yachiyo_desktop_lib::types::{ClientStreamEvent, ToolInvocation};
+    use yachiyo_desktop_lib::types::ClientStreamEvent;
 
     let tool_call = ClientStreamEvent::ToolCall {
         id: "call-1".to_string(),

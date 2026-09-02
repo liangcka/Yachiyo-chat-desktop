@@ -1827,6 +1827,112 @@
   word-break: break-all;
 }
 
+/* 写类工具权限批准卡片（视觉变量沿用 .tool-card 体系，警示色边框区分） */
+
+.permission-card {
+  margin: 0.5rem 0;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  border-radius: 14px;
+  background: var(--dsw-alias-bg-layer-2);
+  overflow: hidden;
+  font-size: 0.85rem;
+}
+
+.permission-card__header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 0.75rem;
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.permission-card__body {
+  padding: 0.6rem 0.75rem;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.permission-card__tool {
+  margin: 0 0 0.4rem;
+  font-weight: 600;
+  font-family: var(--ds-font-family-code);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.permission-card__args {
+  margin: 0;
+  padding: 0.4rem;
+  background: var(--dsw-alias-bg-layer-1);
+  border-radius: 0.4rem;
+  font-family: var(--ds-font-family-code);
+  font-size: 0.78rem;
+  color: var(--dsw-alias-label-primary);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.permission-card__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+}
+
+.permission-card__btn {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 0.2s var(--ds-ease-in-out), border-color 0.2s var(--ds-ease-in-out);
+}
+
+.permission-card__btn:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  border-color: var(--dsw-alias-border-l3);
+}
+
+.permission-card__btn--primary {
+  border-color: var(--accent-brand);
+  color: var(--accent-brand);
+}
+
+.permission-card__btn--deny {
+  border-color: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* 输入区工具栏的 Agent 模式开关（按钮形态的 dsh-chip） */
+
+.desktop-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border: none;
+  border-radius: 12px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-interactive-bg-hover);
+  cursor: pointer;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out), color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.desktop-toggle:hover {
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+}
+
+.desktop-toggle--active {
+  color: var(--accent-brand);
+  background: var(--dsw-alias-state-business-tertiary);
+}
+
 .workspace-panel {
   display: flex;
   flex-direction: column;

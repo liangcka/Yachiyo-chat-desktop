@@ -20,6 +20,7 @@ import { useEffect, useRef, useState } from "react";
 import { ContextMeter } from "../../components/ContextMeter";
 import { ConversationView } from "../../components/ConversationView";
 import { ModelSelect } from "../../components/desktop/ModelSelect";
+import { PermissionCard } from "../../components/tools/PermissionCard";
 import { CaptureButton } from "../../features/capture/CaptureButton";
 import { isRetryableChatErrorCode } from "../../services/chat-client";
 import { controllerErrorMessage, imageErrorMessage, type SharedViewProps } from "../layout-types";
@@ -65,6 +66,7 @@ export function DesktopChatArea({
   webSearchSettings,
 }: DesktopChatAreaProps) {
   const currentTitle = controller.activeConversation?.title || copy.newChat;
+  const pendingPermission = controller.pendingPermission;
   const isStreaming = controller.phase === "streaming";
   const isCompressing = controller.phase === "compressing";
   const isOffline = !isOnline || controller.phase === "offline";
@@ -279,6 +281,17 @@ export function DesktopChatArea({
                 <span>联网搜索</span>
               </span>
             ) : null}
+
+            <button
+              aria-label="Agent 模式开关"
+              aria-pressed={controller.agentEnabled}
+              className={controller.agentEnabled ? "desktop-toggle desktop-toggle--active" : "desktop-toggle"}
+              onClick={controller.toggleAgent}
+              title="Agent 模式：八千代多步读写工作区"
+              type="button"
+            >
+              Agent
+            </button>
           </div>
 
           <div className="dsh-composer-card__tools-right">
@@ -556,6 +569,20 @@ export function DesktopChatArea({
           />
         )}
       </div>
+
+      {/* Agent 写类工具的授权卡片：消息流之后、输入区之前，等待用户批准/拒绝 */}
+      {pendingPermission !== undefined ? (
+        <PermissionCard
+          argumentsJson={pendingPermission.argumentsJson}
+          toolName={pendingPermission.toolName}
+          onApprove={(sessionScope) => {
+            void controller.approvePermission(pendingPermission.requestId, true, sessionScope);
+          }}
+          onDeny={() => {
+            void controller.approvePermission(pendingPermission.requestId, false);
+          }}
+        />
+      ) : null}
 
       {/* 底部锚定输入交互区（仅在有消息时渲染） */}
       {!isBlank ? (

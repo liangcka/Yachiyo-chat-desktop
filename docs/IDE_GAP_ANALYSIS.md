@@ -36,10 +36,10 @@
 
 | #  | 严重度 | 差距                                                                                                                           | 证据                                                                      |
 | :- | :-- | :--------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------- |
-| A1 | 🔴  | **无多步 Agent 循环**。当前仅支持"流结束后解析单个工具调用 → 执行一次 → 第二轮汇报"，无法链式完成多步任务                                                               | `src-tauri/src/gateway/mod.rs` L361-L393                                |
-| A2 | 🔴  | **非原生 function calling**。工具调用依赖正则解析  ` ```tool_call`  ` 文本协议；`get\_agent\_tools\_schema()`生成了标准 schema 却未通过 API`tools\` 字段下发 | `src-tauri/src/gateway/mod.rs` L23-L54、`src-tauri/src/tools/mod.rs` L54 |
-| A3 | 🔴  | **工具结果走四层手写协议**（Rust 塞 markdown 代码块 → SSE → 前端正则解析渲染），契约脆弱，任一层变动全链路断裂                                                        | `src/components/MessageBubble.tsx` L29                                  |
-| A4 | 🔴  | **无权限确认门 / 无 checkpoint 回滚**。写文件、执行命令前无人工审批；无法回滚 Agent 破坏性操作                                                                 | `src-tauri/src/tools/mod.rs`（`execute_tool` 直通执行）                       |
+| A1 | ✅  | **无多步 Agent 循环**。当前仅支持"流结束后解析单个工具调用 → 执行一次 → 第二轮汇报"，无法链式完成多步任务 —— **已实施（2026-09-02 阶段一落地，`src-tauri/src/gateway/agent/runtime.rs` 多步循环）**                                                               | `src-tauri/src/gateway/mod.rs` L361-L393                                |
+| A2 | ✅  | **非原生 function calling**。工具调用依赖正则解析  ` ```tool_call`  ` 文本协议；`get\_agent\_tools\_schema()`生成了标准 schema 却未通过 API`tools\` 字段下发 —— **已实施（2026-09-02 阶段一落地，全 Provider 原生 function calling）** | `src-tauri/src/gateway/mod.rs` L23-L54、`src-tauri/src/tools/mod.rs` L54 |
+| A3 | ✅  | **工具结果走四层手写协议**（Rust 塞 markdown 代码块 → SSE → 前端正则解析渲染），契约脆弱，任一层变动全链路断裂 —— **已实施（2026-09-02 阶段一落地，`ChatMessage.toolSteps` 结构化渲染）**                                                        | `src/components/MessageBubble.tsx` L29                                  |
+| A4 | ✅  | **无权限确认门 / 无 checkpoint 回滚**。写文件、执行命令前无人工审批；无法回滚 Agent 破坏性操作 —— **已实施（2026-09-02 阶段一落地，`ApprovalRegistry` + `CheckpointStore`）**                                                                 | `src-tauri/src/tools/mod.rs`（`execute_tool` 直通执行）                       |
 | A5 | 🟠  | **无任务规划与待办体系**。对标 Claude Code plan 模式 / Trae Work 任务面板，缺少可暂停、可审阅的任务结构                                                        | 全局缺失                                                                    |
 | A6 | 🟠  | **云端路径零工具能力**。请求模型无 tool 字段，Web/移动端为纯聊天                                                                                      | `functions/_shared/validation.ts` L26-L38                               |
 

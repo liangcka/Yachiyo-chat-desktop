@@ -1,5 +1,7 @@
 # 阶段一：Agent 内核详细设计
 
+> **状态：已实施（2026-09-02）**。架构决策与实施记录见 [Agent Note: 阶段一 Agent 内核](../.agents/notes/proposed/architecture/2026-09-02-agent-kernel.md)。
+
 依据 [IDE\_GAP\_ANALYSIS.md](./IDE_GAP_ANALYSIS.md) 的演进路线，本文档定义阶段一（A1 多步 Agent 循环 / A2 原生 function calling / A3 结构化工具协议 / A4 权限门与 checkpoint）的详细设计。
 
 ## 0. 已确认的决策

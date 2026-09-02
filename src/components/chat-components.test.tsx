@@ -8,8 +8,21 @@ import { copyFor } from "../i18n/messages";
 import { Composer } from "./Composer";
 import { ControlDock } from "./ControlDock";
 import { ConversationView } from "./ConversationView";
+import { MessageBubble } from "./MessageBubble";
 import { SkillsPanel } from "./SkillsPanel";
 import { TopControls } from "./TopControls";
+
+function makeAssistantMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
+  return {
+    conversationId: "one",
+    createdAt: 1,
+    id: "assistant-1",
+    role: "assistant",
+    status: "complete",
+    text: "",
+    ...overrides,
+  };
+}
 
 describe("reference chat components", () => {
   it("renders the reference controls with localized labels", () => {
@@ -91,6 +104,29 @@ describe("reference chat components", () => {
     expect(screen.getByRole("article", { name: "我的消息" })).toHaveClass(
       "message-bubble--user",
     );
+  });
+
+  it("assistant 消息按 toolSteps 渲染工具卡片", () => {
+    const message = makeAssistantMessage({
+      toolSteps: [
+        {
+          id: "call-1",
+          name: "read_file",
+          argumentsJson: '{"path":"a.ts"}',
+          result: { output: "hi", isError: false, durationMs: 3 },
+        },
+      ],
+    });
+    render(<MessageBubble locale="zh-CN" message={message} />);
+    expect(screen.getByText("read_file")).toBeInTheDocument();
+  });
+
+  it("旧格式 tool_call 文本不再解析为卡片（按纯文本渲染）", () => {
+    const message = makeAssistantMessage({
+      text: '```tool_call\n{"name":"read_file"}\n```',
+    });
+    render(<MessageBubble locale="zh-CN" message={message} />);
+    expect(screen.queryByText("read_file")).not.toBeInTheDocument();
   });
 
   it("follows streaming updates only while the reader stays near the bottom", () => {

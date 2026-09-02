@@ -1,5 +1,5 @@
 import { Copy, RotateCcw, RotateCw } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { ChatMessage, Locale } from "../domain/chat";
 import { copyFor } from "../i18n/messages";
 import { ToolCard } from "./tools/ToolCard";
@@ -14,82 +14,6 @@ export interface MessageBubbleProps {
   onRegenerate?: () => void;
   onToast?: (message: string) => void;
   onImageLoad?: () => void;
-}
-
-interface ParsedContentChunk {
-  type: "text" | "tool_call";
-  content: string;
-  toolName?: string;
-  args?: Record<string, unknown>;
-  output?: string;
-}
-
-function parseMessageToolChunks(text: string): ParsedContentChunk[] {
-  const chunks: ParsedContentChunk[] = [];
-  const toolCallRegex = /```(?:tool_call|tool)\s*\n([\s\S]*?)\n```/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = toolCallRegex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      const textChunk = text.slice(lastIndex, match.index).trim();
-      if (textChunk) {
-        chunks.push({ type: "text", content: textChunk });
-      }
-    }
-    const jsonStr = match[1].trim();
-    try {
-      const parsed = JSON.parse(jsonStr) as {
-        name?: string;
-        tool?: string;
-        arguments?: Record<string, unknown>;
-        args?: Record<string, unknown>;
-        output?: string;
-      };
-      const toolName = parsed.name || parsed.tool || "tool";
-      const args = parsed.arguments || parsed.args;
-      const output = parsed.output;
-
-      // If the preceding chunk is a tool_call for the same tool without output, update it instead of creating a duplicate
-      const lastChunk = chunks[chunks.length - 1];
-      if (
-        lastChunk !== undefined &&
-        lastChunk.type === "tool_call" &&
-        lastChunk.toolName === toolName &&
-        lastChunk.output === undefined &&
-        output !== undefined
-      ) {
-        lastChunk.output = output;
-        if (args !== undefined) {
-          lastChunk.args = args;
-        }
-      } else {
-        chunks.push({
-          type: "tool_call",
-          content: jsonStr,
-          toolName,
-          args,
-          output,
-        });
-      }
-    } catch {
-      chunks.push({ type: "text", content: match[0] });
-    }
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (lastIndex < text.length) {
-    const trailing = text.slice(lastIndex).trim();
-    if (trailing) {
-      chunks.push({ type: "text", content: trailing });
-    }
-  }
-
-  if (chunks.length === 0 && text.trim().length > 0) {
-    chunks.push({ type: "text", content: text });
-  }
-
-  return chunks;
 }
 
 function messageLabel(role: ChatMessage["role"], locale: Locale): string {
@@ -124,11 +48,12 @@ export const MessageBubble = memo(function MessageBubble({
   const hideCitations = showSources === false && message.sources !== undefined && message.sources.length > 0;
   const strippedText = hideCitations ? stripCitationMarkers(message.text) : message.text;
   const displayText = strippedText.trim().length > 0 ? strippedText : message.text;
-  const parsedChunks = useMemo(() => parseMessageToolChunks(displayText), [displayText]);
 
   const hasText = displayText.trim().length > 0;
   const hasImage = message.imageId !== undefined;
   const isTyping = message.text.length === 0 && message.status === "streaming";
+  // Agent 消息可能仅有工具步骤而无正文（模型先调工具后作答），此时气泡仍需渲染卡片
+  const hasToolSteps = message.toolSteps !== undefined && message.toolSteps.length > 0;
   // 仅 assistant 消息渲染联网搜索的参考来源，且受"显示引用来源"开关控制；
   // 正文到达前（搜索与模型等待期）不渲染来源区块，保持三点等待动画
   const visibleSources =
@@ -233,7 +158,7 @@ export const MessageBubble = memo(function MessageBubble({
     onRegenerate?.();
   };
 
-  if (!hasText && !hasImage && !isTyping) {
+  if (!hasText && !hasImage && !isTyping && !hasToolSteps) {
     return null;
   }
 
@@ -266,6 +191,20 @@ export const MessageBubble = memo(function MessageBubble({
           <div aria-hidden="true" className="message-bubble__image message-bubble__image--loading" />
         )
       ) : null}
+      {hasToolSteps ? (
+        <div className="message-bubble__tools">
+          {message.toolSteps?.map((step) => (
+            <ToolCard
+              isError={step.result?.isError}
+              isRunning={step.result === undefined && message.status === "streaming"}
+              key={step.id}
+              args={safeParseArgs(step.argumentsJson)}
+              output={step.result?.output}
+              toolName={step.name}
+            />
+          ))}
+        </div>
+      ) : null}
       {message.text.length === 0 && message.status === "streaming" && !hasImage ? (
         <span aria-hidden="true" className="message-bubble__typing">
           <i />
@@ -274,19 +213,7 @@ export const MessageBubble = memo(function MessageBubble({
         </span>
       ) : hasText ? (
         <>
-          {parsedChunks.map((chunk, idx) => {
-            if (chunk.type === "tool_call" && chunk.toolName) {
-              return (
-                <ToolCard
-                  key={idx}
-                  toolName={chunk.toolName}
-                  args={chunk.args}
-                  output={chunk.output}
-                />
-              );
-            }
-            return <p key={idx}>{chunk.content}</p>;
-          })}
+          <p>{displayText}</p>
           {message.truncated === true ? (
             <span className="message-bubble__truncated">{copyFor(locale).truncated}</span>
           ) : null}
@@ -359,3 +286,15 @@ export const MessageBubble = memo(function MessageBubble({
     </article>
   );
 });
+
+/** 工具步骤参数 JSON 的防御性解析：非法 JSON 或非对象形态回退为 undefined（模型输出不可信） */
+function safeParseArgs(json: string): Record<string, unknown> | undefined {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
