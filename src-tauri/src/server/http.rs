@@ -56,6 +56,7 @@ async fn handle_chat(
         payload,
         state.key_store,
         state.workspace_manager,
+        Arc::clone(&state.approvals),
     );
     let body_stream = stream.map(|res| match res {
         Ok(s) => Ok::<_, axum::Error>(axum::body::Bytes::from(s)),

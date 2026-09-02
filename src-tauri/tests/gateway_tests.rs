@@ -94,23 +94,6 @@ fn test_keystore_encrypt_decrypt() {
 }
 
 #[test]
-fn test_parse_tool_call() {
-    use yachiyo_desktop_lib::gateway::parse_tool_call;
-
-    // 1. JSON code block format
-    let block = "好的，我这就帮你查看：\n```tool_call\n{\"name\": \"list_directory\", \"arguments\": {\"path\": \".\"}}\n```";
-    let (name, args) = parse_tool_call(block).expect("Should parse json block");
-    assert_eq!(name, "list_directory");
-    assert_eq!(args["path"], ".");
-
-    // 2. XML tag format (like model output)
-    let xml = "<tool_call>\n<ollama:name>list_directory</ollama:name>\n<args><path>.</path></args>\n</function_calls>";
-    let (name, args) = parse_tool_call(xml).expect("Should parse xml format");
-    assert_eq!(name, "list_directory");
-    assert_eq!(args["path"], ".");
-}
-
-#[test]
 fn test_agent_event_encoding() {
     use yachiyo_desktop_lib::types::{ClientStreamEvent, ToolInvocation};
 

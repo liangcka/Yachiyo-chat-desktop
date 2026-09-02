@@ -1,8 +1,16 @@
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
+use yachiyo_desktop_lib::gateway::agent::checkpoint::CheckpointStore;
 use yachiyo_desktop_lib::gateway::agent::messages::{history_to_agent_messages, AgentMessage};
+use yachiyo_desktop_lib::gateway::agent::permission::{ApprovalDecision, ApprovalRegistry};
+use yachiyo_desktop_lib::gateway::agent::runtime::{
+    run_agent_loop, AgentLoopConfig, LoopEmit, LoopOutcome, TurnExecutor, TurnOutcome,
+};
 use yachiyo_desktop_lib::gateway::agent::stream_agg::ToolCallAggregator;
 use yachiyo_desktop_lib::gateway::providers::openai_compat::build_openai_agent_body;
 use yachiyo_desktop_lib::gateway::stream::extract_openai_delta;
-use yachiyo_desktop_lib::types::{ClientHistoryMessage, ToolInvocation};
+use yachiyo_desktop_lib::tools::get_agent_tools_schema;
+use yachiyo_desktop_lib::types::{ClientHistoryMessage, ClientStreamEvent, TokenUsage, ToolInvocation};
 
 #[test]
 fn test_history_to_agent_messages() {
@@ -321,4 +329,339 @@ fn test_checkpoint_ensure_gitignore() {
     store.ensure_gitignore().unwrap();
     let again = std::fs::read_to_string(root.join(".gitignore")).unwrap();
     assert_eq!(content.matches(".yachiyo/").count(), again.matches(".yachiyo/").count());
+}
+
+/// 脚本化执行器：按序返回预编排轮次，并记录收到的消息序列
+struct ScriptedExecutor {
+    turns: Mutex<Vec<TurnOutcome>>,
+    seen: Mutex<Vec<Vec<AgentMessage>>>,
+}
+
+impl ScriptedExecutor {
+    fn new(turns: Vec<TurnOutcome>) -> Self {
+        Self { turns: Mutex::new(turns), seen: Mutex::new(Vec::new()) }
+    }
+}
+
+impl TurnExecutor for ScriptedExecutor {
+    fn execute(
+        &self,
+        messages: &[AgentMessage],
+        _sink: &yachiyo_desktop_lib::gateway::agent::runtime::EventSink,
+    ) -> futures::future::BoxFuture<'_, Result<TurnOutcome, String>> {
+        self.seen.lock().unwrap().push(messages.to_vec());
+        let next = self.turns.lock().unwrap().remove(0);
+        Box::pin(async move { Ok(next) })
+    }
+}
+
+fn collector() -> (yachiyo_desktop_lib::gateway::agent::runtime::EventSink, Arc<Mutex<Vec<ClientStreamEvent>>>) {
+    let events: Arc<Mutex<Vec<ClientStreamEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink_events = Arc::clone(&events);
+    let sink: yachiyo_desktop_lib::gateway::agent::runtime::EventSink =
+        Arc::new(move |emit| {
+            if let LoopEmit::Event(ev) = emit {
+                sink_events.lock().unwrap().push(ev);
+            }
+        });
+    (sink, events)
+}
+
+fn read_call(id: &str, path: &str) -> TurnOutcome {
+    TurnOutcome {
+        text: "我先读文件".to_string(),
+        tool_calls: vec![ToolInvocation {
+            id: id.to_string(),
+            name: "read_file".to_string(),
+            arguments: serde_json::json!({ "path": path }),
+        }],
+        usage: None,
+    }
+}
+
+#[tokio::test]
+async fn test_loop_plain_text_completion() {
+    let dir = tempfile::tempdir().unwrap();
+    let executor = ScriptedExecutor::new(vec![TurnOutcome {
+        text: "任务完成".to_string(),
+        tool_calls: vec![],
+        usage: None,
+    }]);
+    let (sink, events) = collector();
+    let gate = ApprovalRegistry::new();
+    let mut checkpoint = CheckpointStore::new(dir.path(), "run-1");
+    let cancelled = AtomicBool::new(false);
+    let http = reqwest::Client::new();
+
+    let outcome = run_agent_loop(
+        vec![AgentMessage::User { text: "hi".to_string(), image_data_url: None }],
+        get_agent_tools_schema(),
+        AgentLoopConfig::default(),
+        &executor,
+        &gate,
+        &mut checkpoint,
+        &cancelled,
+        &sink,
+        dir.path(),
+        &http,
+    )
+    .await
+    .unwrap();
+
+    assert!(matches!(outcome, LoopOutcome::Completed { .. }));
+    assert!(events.lock().unwrap().iter().all(|ev| !matches!(ev, ClientStreamEvent::ToolCall { .. })));
+    assert_eq!(executor.seen.lock().unwrap()[0].len(), 1);
+}
+
+#[tokio::test]
+async fn test_loop_multi_turn_chain() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "内容").unwrap();
+    let executor = ScriptedExecutor::new(vec![
+        read_call("call-1", "a.txt"),
+        TurnOutcome { text: "读完了".to_string(), tool_calls: vec![], usage: None },
+    ]);
+    let (sink, events) = collector();
+    let gate = ApprovalRegistry::new();
+    let mut checkpoint = CheckpointStore::new(dir.path(), "run-2");
+    let cancelled = AtomicBool::new(false);
+    let http = reqwest::Client::new();
+
+    let outcome = run_agent_loop(
+        vec![AgentMessage::User { text: "读 a.txt".to_string(), image_data_url: None }],
+        get_agent_tools_schema(),
+        AgentLoopConfig::default(),
+        &executor,
+        &gate,
+        &mut checkpoint,
+        &cancelled,
+        &sink,
+        dir.path(),
+        &http,
+    )
+    .await
+    .unwrap();
+
+    assert!(matches!(outcome, LoopOutcome::Completed { .. }));
+    let all = events.lock().unwrap();
+    assert!(all.iter().any(|ev| matches!(ev, ClientStreamEvent::ToolCall { name, .. } if name == "read_file")));
+    assert!(all.iter().any(|ev| matches!(ev, ClientStreamEvent::ToolResult { is_error: false, .. })));
+    let second = &executor.seen.lock().unwrap()[1];
+    assert_eq!(second.len(), 3);
+    assert!(matches!(&second[2], AgentMessage::ToolResult { content, .. } if content.contains("内容")));
+}
+
+#[tokio::test]
+async fn test_loop_write_permission_denied() {
+    let dir = tempfile::tempdir().unwrap();
+    let executor = ScriptedExecutor::new(vec![
+        TurnOutcome {
+            text: "我要写文件".to_string(),
+            tool_calls: vec![ToolInvocation {
+                id: "call-w".to_string(),
+                name: "write_file".to_string(),
+                arguments: serde_json::json!({ "path": "out.txt", "content": "x" }),
+            }],
+            usage: None,
+        },
+        TurnOutcome { text: "好的，那我不写了".to_string(), tool_calls: vec![], usage: None },
+    ]);
+    let (sink, events) = collector();
+    let gate = Arc::new(ApprovalRegistry::new());
+    let mut checkpoint = CheckpointStore::new(dir.path(), "run-3");
+    let cancelled = AtomicBool::new(false);
+    let http = reqwest::Client::new();
+
+    let gate_ref = Arc::clone(&gate);
+    let handle = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        gate_ref.resolve("run-3-call-w", ApprovalDecision { approved: false, session_scope: false });
+    });
+
+    let outcome = run_agent_loop(
+        vec![AgentMessage::User { text: "写 out.txt".to_string(), image_data_url: None }],
+        get_agent_tools_schema(),
+        AgentLoopConfig::default(),
+        &executor,
+        &gate,
+        &mut checkpoint,
+        &cancelled,
+        &sink,
+        dir.path(),
+        &http,
+    )
+    .await
+    .unwrap();
+    handle.abort();
+
+    assert!(matches!(outcome, LoopOutcome::Completed { .. }));
+    let all = events.lock().unwrap();
+    assert!(all.iter().any(|ev| matches!(ev, ClientStreamEvent::PermissionRequest { .. })));
+    assert!(all.iter().any(|ev| matches!(ev, ClientStreamEvent::ToolResult { is_error: true, .. })));
+    assert!(!dir.path().join("out.txt").exists());
+}
+
+#[tokio::test]
+async fn test_loop_session_scope_skips_second_prompt() {
+    let dir = tempfile::tempdir().unwrap();
+    let write_call = |id: &str| TurnOutcome {
+        text: "写".to_string(),
+        tool_calls: vec![ToolInvocation {
+            id: id.to_string(),
+            name: "write_file".to_string(),
+            arguments: serde_json::json!({ "path": format!("{}.txt", id), "content": "x" }),
+        }],
+        usage: None,
+    };
+    let executor = ScriptedExecutor::new(vec![
+        write_call("w1"),
+        write_call("w2"),
+        TurnOutcome { text: "完成".to_string(), tool_calls: vec![], usage: None },
+    ]);
+    let (sink, events) = collector();
+    let gate = Arc::new(ApprovalRegistry::new());
+    let mut checkpoint = CheckpointStore::new(dir.path(), "run-4");
+    let cancelled = AtomicBool::new(false);
+    let http = reqwest::Client::new();
+
+    let gate_ref = Arc::clone(&gate);
+    let approver = tokio::spawn(async move {
+        for _ in 0..2 {
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+            gate_ref.resolve("run-4-w1", ApprovalDecision { approved: true, session_scope: true });
+            gate_ref.resolve("run-4-w2", ApprovalDecision { approved: true, session_scope: true });
+        }
+    });
+
+    let outcome = run_agent_loop(
+        vec![AgentMessage::User { text: "写两个文件".to_string(), image_data_url: None }],
+        get_agent_tools_schema(),
+        AgentLoopConfig::default(),
+        &executor,
+        &gate,
+        &mut checkpoint,
+        &cancelled,
+        &sink,
+        dir.path(),
+        &http,
+    )
+    .await
+    .unwrap();
+    approver.abort();
+
+    assert!(matches!(outcome, LoopOutcome::Completed { .. }));
+    let all = events.lock().unwrap();
+    let permission_count = all
+        .iter()
+        .filter(|ev| matches!(ev, ClientStreamEvent::PermissionRequest { .. }))
+        .count();
+    assert_eq!(permission_count, 1, "session_scope 批准后同类工具不再询问");
+    assert!(dir.path().join("w1.txt").exists());
+    assert!(dir.path().join("w2.txt").exists());
+}
+
+#[tokio::test]
+async fn test_loop_permission_timeout_treated_as_denied() {
+    let dir = tempfile::tempdir().unwrap();
+    let executor = ScriptedExecutor::new(vec![
+        TurnOutcome {
+            text: "写".to_string(),
+            tool_calls: vec![ToolInvocation {
+                id: "w1".to_string(),
+                name: "write_file".to_string(),
+                arguments: serde_json::json!({ "path": "t.txt", "content": "x" }),
+            }],
+            usage: None,
+        },
+        TurnOutcome { text: "超时了".to_string(), tool_calls: vec![], usage: None },
+    ]);
+    let (sink, events) = collector();
+    let gate = ApprovalRegistry::new();
+    let mut checkpoint = CheckpointStore::new(dir.path(), "run-5");
+    let cancelled = AtomicBool::new(false);
+    let http = reqwest::Client::new();
+
+    let outcome = run_agent_loop(
+        vec![AgentMessage::User { text: "写".to_string(), image_data_url: None }],
+        get_agent_tools_schema(),
+        AgentLoopConfig { max_turns: 12, permission_timeout_secs: 1 },
+        &executor,
+        &gate,
+        &mut checkpoint,
+        &cancelled,
+        &sink,
+        dir.path(),
+        &http,
+    )
+    .await
+    .unwrap();
+
+    assert!(matches!(outcome, LoopOutcome::Completed { .. }));
+    assert!(events.lock().unwrap().iter().any(|ev| matches!(ev, ClientStreamEvent::ToolResult { is_error: true, .. })));
+    assert!(!dir.path().join("t.txt").exists());
+}
+
+#[tokio::test]
+async fn test_loop_cancel_between_turns() {
+    let dir = tempfile::tempdir().unwrap();
+    let executor = ScriptedExecutor::new(vec![read_call("c1", ".")]);
+    let (sink, _events) = collector();
+    let gate = ApprovalRegistry::new();
+    let mut checkpoint = CheckpointStore::new(dir.path(), "run-6");
+    let cancelled = AtomicBool::new(true);
+    let http = reqwest::Client::new();
+
+    let outcome = run_agent_loop(
+        vec![AgentMessage::User { text: "列目录".to_string(), image_data_url: None }],
+        get_agent_tools_schema(),
+        AgentLoopConfig::default(),
+        &executor,
+        &gate,
+        &mut checkpoint,
+        &cancelled,
+        &sink,
+        dir.path(),
+        &http,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(outcome, LoopOutcome::Cancelled));
+}
+
+#[tokio::test]
+async fn test_loop_usage_accumulates() {
+    let dir = tempfile::tempdir().unwrap();
+    let executor = ScriptedExecutor::new(vec![TurnOutcome {
+        text: "a".to_string(),
+        tool_calls: vec![],
+        usage: Some(TokenUsage {
+            prompt_tokens: Some(10),
+            completion_tokens: Some(5),
+            total_tokens: Some(15),
+        }),
+    }]);
+    let (sink, _events) = collector();
+    let gate = ApprovalRegistry::new();
+    let mut checkpoint = CheckpointStore::new(dir.path(), "run-7");
+    let cancelled = AtomicBool::new(false);
+    let http = reqwest::Client::new();
+
+    let outcome = run_agent_loop(
+        vec![AgentMessage::User { text: "hi".to_string(), image_data_url: None }],
+        get_agent_tools_schema(),
+        AgentLoopConfig::default(),
+        &executor,
+        &gate,
+        &mut checkpoint,
+        &cancelled,
+        &sink,
+        dir.path(),
+        &http,
+    )
+    .await
+    .unwrap();
+    match outcome {
+        LoopOutcome::Completed { usage } => assert_eq!(usage.total_tokens, Some(15)),
+        _ => panic!("expected Completed"),
+    }
 }
