@@ -57,3 +57,52 @@ async fn test_safe_command_execution() {
         .expect("Echo command should succeed");
     assert!(result.contains("Yachiyo Agent"));
 }
+
+use yachiyo_desktop_lib::tools::{preview_tool_output, tool_risk, truncate_tool_output, ToolRisk};
+
+#[test]
+fn test_tool_risk_classification() {
+    assert_eq!(tool_risk("read_file"), Some(ToolRisk::Read));
+    assert_eq!(tool_risk("list_directory"), Some(ToolRisk::Read));
+    assert_eq!(tool_risk("git_status"), Some(ToolRisk::Read));
+    assert_eq!(tool_risk("git_diff"), Some(ToolRisk::Read));
+    assert_eq!(tool_risk("web_fetch"), Some(ToolRisk::Read));
+    assert_eq!(tool_risk("write_file"), Some(ToolRisk::Write));
+    assert_eq!(tool_risk("run_command"), Some(ToolRisk::Write));
+    assert_eq!(tool_risk("unknown_tool"), None);
+}
+
+#[test]
+fn test_truncate_tool_output() {
+    let small = "hello";
+    assert_eq!(truncate_tool_output("read_file", small), "hello");
+
+    let big = "x".repeat(70 * 1024);
+    let truncated = truncate_tool_output("read_file", &big);
+    assert!(truncated.len() < big.len());
+    assert!(truncated.contains("输出已截断"));
+
+    // 多字节字符不产生 panic 且截断在字符边界
+    let cjk = "八".repeat(40 * 1024);
+    let truncated_cjk = truncate_tool_output("read_file", &cjk);
+    let _ = truncated_cjk.chars().count();
+}
+
+#[test]
+fn test_preview_tool_output() {
+    let short = "abc".to_string();
+    assert_eq!(preview_tool_output(&short), "abc");
+    let long = "y".repeat(3000);
+    let preview = preview_tool_output(&long);
+    assert!(preview.len() <= 2 * 1024 + 64);
+    assert!(preview.contains("…"));
+}
+
+#[test]
+fn test_resolve_in_workspace() {
+    use yachiyo_desktop_lib::tools::fs::resolve_in_workspace;
+    let root = std::env::temp_dir();
+    let resolved = resolve_in_workspace("sub/a.txt", &root).expect("relative path resolves");
+    assert!(resolved.starts_with(&root));
+    assert!(resolved.ends_with("sub\\a.txt") || resolved.ends_with("sub/a.txt"));
+}

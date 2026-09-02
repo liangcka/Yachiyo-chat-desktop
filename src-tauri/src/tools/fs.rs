@@ -43,13 +43,18 @@ pub fn is_path_inside_workspace(target: &Path, workspace_root: &Path) -> bool {
     canonical_target.starts_with(&canonical_root)
 }
 
-pub fn read_file(path_str: &str, workspace_root: &Path) -> Result<String, String> {
+/// 相对路径基于工作区根解析、绝对路径原样保留；不含越界校验（由调用方决定）
+pub fn resolve_in_workspace(path_str: &str, workspace_root: &Path) -> Result<PathBuf, String> {
     let target = PathBuf::from(path_str);
-    let resolved = if target.is_relative() {
+    Ok(if target.is_relative() {
         workspace_root.join(target)
     } else {
         target
-    };
+    })
+}
+
+pub fn read_file(path_str: &str, workspace_root: &Path) -> Result<String, String> {
+    let resolved = resolve_in_workspace(path_str, workspace_root)?;
 
     if !is_path_inside_workspace(&resolved, workspace_root) {
         return Err(format!("Access denied: Path '{}' is outside workspace boundary", path_str));
@@ -59,12 +64,7 @@ pub fn read_file(path_str: &str, workspace_root: &Path) -> Result<String, String
 }
 
 pub fn write_file(path_str: &str, content: &str, workspace_root: &Path) -> Result<String, String> {
-    let target = PathBuf::from(path_str);
-    let resolved = if target.is_relative() {
-        workspace_root.join(target)
-    } else {
-        target
-    };
+    let resolved = resolve_in_workspace(path_str, workspace_root)?;
 
     if !is_path_inside_workspace(&resolved, workspace_root) {
         return Err(format!("Access denied: Path '{}' is outside workspace boundary", path_str));
@@ -83,12 +83,7 @@ pub fn list_directory(path_str: &str, workspace_root: &Path) -> Result<Vec<Strin
     let target = if path_str.is_empty() || path_str == "." {
         workspace_root.to_path_buf()
     } else {
-        let p = PathBuf::from(path_str);
-        if p.is_relative() {
-            workspace_root.join(p)
-        } else {
-            p
-        }
+        resolve_in_workspace(path_str, workspace_root)?
     };
 
     if !is_path_inside_workspace(&target, workspace_root) {

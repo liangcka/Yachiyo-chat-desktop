@@ -7,6 +7,66 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
+/// 工具风险分级：读类自动放行，写类需用户批准
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolRisk {
+    Read,
+    Write,
+}
+
+pub fn tool_risk(name: &str) -> Option<ToolRisk> {
+    match name {
+        "read_file" | "list_directory" | "git_status" | "git_diff" | "web_fetch" => Some(ToolRisk::Read),
+        "write_file" | "run_command" => Some(ToolRisk::Write),
+        _ => None,
+    }
+}
+
+/// 回填模型前的工具输出上限（字节）
+fn tool_output_limit(name: &str) -> usize {
+    match name {
+        "read_file" => 64 * 1024,
+        "run_command" => 16 * 1024,
+        "web_fetch" => 32 * 1024,
+        _ => 16 * 1024,
+    }
+}
+
+/// 截断到字符边界的安全切片（不产生 panic）
+fn floor_char_boundary(s: &str, mut index: usize) -> usize {
+    if index >= s.len() {
+        return s.len();
+    }
+    while index > 0 && !s.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
+pub fn truncate_tool_output(name: &str, output: &str) -> String {
+    let limit = tool_output_limit(name);
+    if output.len() <= limit {
+        return output.to_string();
+    }
+    let cut = floor_char_boundary(output, limit);
+    format!(
+        "{}\n[输出已截断：原始 {} 字节，截断至 {} 字节]",
+        &output[..cut],
+        output.len(),
+        cut
+    )
+}
+
+/// 下发给前端 ToolCard 的 2KB 预览
+pub fn preview_tool_output(output: &str) -> String {
+    const PREVIEW_LIMIT: usize = 2 * 1024;
+    if output.len() <= PREVIEW_LIMIT {
+        return output.to_string();
+    }
+    let cut = floor_char_boundary(output, PREVIEW_LIMIT);
+    format!("{}…", &output[..cut])
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
     pub id: String,
