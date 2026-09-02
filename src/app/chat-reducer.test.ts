@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatMessage, Conversation } from "../domain/chat";
-import { chatReducer, initialChatState } from "./chat-reducer";
+import { chatReducer, initialChatState, type ChatState } from "./chat-reducer";
 
 const conversation: Conversation = {
   id: "conversation-1",
@@ -398,5 +398,62 @@ describe("chatReducer", () => {
       messages: [user],
     });
     expect(reverted.streaming).toBeUndefined();
+  });
+});
+
+describe("agent 工具事件动作", () => {
+  const baseState: ChatState = {
+    ...initialChatState,
+    phase: "streaming",
+    messages: [
+      { id: "a1", conversationId: "c1", role: "assistant", text: "", status: "streaming", createdAt: 1 },
+    ],
+  };
+
+  it("tool-call 追加 ToolStep，tool-result 回填结果", () => {
+    let state = chatReducer(baseState, {
+      type: "tool-call",
+      messageId: "a1",
+      call: { id: "call-1", name: "read_file", argumentsJson: '{"path":"a.ts"}' },
+    });
+    expect(state.messages[0].toolSteps?.length).toBe(1);
+    expect(state.messages[0].toolSteps?.[0].name).toBe("read_file");
+
+    state = chatReducer(state, {
+      type: "tool-result",
+      messageId: "a1",
+      callId: "call-1",
+      result: { output: "hi", isError: false, durationMs: 5 },
+    });
+    expect(state.messages[0].toolSteps?.[0].result?.output).toBe("hi");
+  });
+
+  it("permission-requested 设置 pendingPermission，resolved 清除", () => {
+    let state = chatReducer(baseState, {
+      type: "permission-requested",
+      messageId: "a1",
+      requestId: "req-1",
+      toolName: "write_file",
+      argumentsJson: '{"path":"b.ts"}',
+    });
+    expect(state.pendingPermission?.requestId).toBe("req-1");
+
+    state = chatReducer(state, { type: "permission-resolved", requestId: "req-1", approved: true });
+    expect(state.pendingPermission).toBeUndefined();
+  });
+
+  it("send-started 清除 pendingPermission", () => {
+    let state = chatReducer(baseState, {
+      type: "permission-requested",
+      messageId: "a1",
+      requestId: "req-1",
+      toolName: "write_file",
+      argumentsJson: "{}",
+    });
+    state = chatReducer(state, {
+      type: "send-started",
+      assistant: { id: "a2", conversationId: "c1", role: "assistant", text: "", status: "streaming", createdAt: 2 },
+    });
+    expect(state.pendingPermission).toBeUndefined();
   });
 });

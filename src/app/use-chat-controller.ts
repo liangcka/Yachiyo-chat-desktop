@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useReducer, useRef } from "react";
-import type { ChatMessage, ChatSource, Conversation, Locale, StoredImage, TokenUsage } from "../domain/chat";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import type { ChatMessage, ChatSource, Conversation, Locale, StoredImage, TokenUsage, ToolStep } from "../domain/chat";
 import type { ActiveLlmConfig } from "../domain/llm";
 import type { SkillDefinition } from "../skills";
 
+import { isDesktopApp } from "../services/app-platform";
 import {
   ChatClientError,
   isRetryableChatErrorCode,
   streamChat as streamChatRequest,
+  submitAgentApproval,
   type StreamChatMessage,
   type StreamChatOptions,
   type StreamChatRequest,
@@ -87,6 +89,10 @@ export interface ChatController extends ChatState {
   setPendingImage(image?: StoredImage): void;
   setOnline(online: boolean): void;
   clearError(): void;
+  /** Agent 模式开关（仅桌面端生效，请求体携带 agent: { enabled: true }） */
+  agentEnabled: boolean;
+  toggleAgent(): void;
+  approvePermission(requestId: string, approved: boolean, sessionScope?: boolean): Promise<void>;
 }
 
 interface ControllerServices {
@@ -104,6 +110,9 @@ interface InitialData {
   hasMoreHistory?: boolean;
 }
 
+/** ActiveRun 内的工具步骤可变缓冲（domain ToolStep 为 readonly 快照形态） */
+type MutableToolStep = { -readonly [K in keyof ToolStep]: ToolStep[K] };
+
 interface ActiveRun {
   assistant: ChatMessage;
   controller: AbortController;
@@ -117,6 +126,8 @@ interface ActiveRun {
   startTime: number;
   /** 联网搜索返回的参考来源（sources 事件先于 delta 到达），随消息持久化 */
   sources?: ReadonlyArray<ChatSource>;
+  /** Agent 工具步骤缓冲（onToolCall 追加、onToolResult 回填），终态快照进消息 */
+  toolSteps: MutableToolStep[];
   timer?: ReturnType<typeof setTimeout>;
   token: number;
 }
@@ -368,6 +379,15 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   useEffect(() => {
     webSearchSmartRef.current = options.webSearchSmart ?? false;
   }, [options.webSearchSmart]);
+  // Agent 开关只存在于本地（ref 供请求闭包读取最新值，state 驱动 UI）
+  const agentEnabledRef = useRef(false);
+  const [agentEnabled, setAgentEnabled] = useState(false);
+  const toggleAgent = useCallback(() => {
+    setAgentEnabled((prev) => {
+      agentEnabledRef.current = !prev;
+      return !prev;
+    });
+  }, []);
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const stateRef = useRef<ChatState>(initialChatState);
   const activeRef = useRef<ActiveRun | undefined>(undefined);
@@ -574,22 +594,48 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       );
       const lastIndex = history.length - 1;
 
-      const chatMessages = await Promise.all(
-        history.map(async ({ message, text }, index) => {
-          const requestMessage: StreamChatMessage = {
-            role: message.role,
-            text,
-          };
-          if (index === lastIndex && message.role === "user" && message.imageId !== undefined) {
-            const image =
-              pendingImage?.id === message.imageId
-                ? pendingImage
-                : await servicesRef.current.repository.getImage(message.imageId);
-            if (image !== undefined) requestMessage.imageDataUrl = await blobToDataUrl(image);
-          }
-          return requestMessage;
-        }),
-      );
+      // 每条历史消息可能展开为多条请求消息（agent 工具步骤序列），故 map 后 flat 展平
+      const chatMessages = (
+        await Promise.all(
+          history.map(async ({ message, text }, index): Promise<StreamChatMessage[]> => {
+            if (
+              message.role === "assistant" &&
+              message.toolSteps !== undefined &&
+              message.toolSteps.length > 0
+            ) {
+              const requestMessages: StreamChatMessage[] = [
+                {
+                  role: "assistant",
+                  text,
+                  toolCalls: message.toolSteps.map((step) => ({
+                    id: step.id,
+                    name: step.name,
+                    arguments: safeParseArguments(step.argumentsJson),
+                  })),
+                },
+              ];
+              for (const step of message.toolSteps) {
+                requestMessages.push({
+                  role: "tool",
+                  text: step.result?.output ?? "",
+                  toolCallId: step.id,
+                  toolName: step.name,
+                });
+              }
+              return requestMessages;
+            }
+            const requestMessage: StreamChatMessage = { role: message.role, text };
+            if (index === lastIndex && message.role === "user" && message.imageId !== undefined) {
+              const image =
+                pendingImage?.id === message.imageId
+                  ? pendingImage
+                  : await servicesRef.current.repository.getImage(message.imageId);
+              if (image !== undefined) requestMessage.imageDataUrl = await blobToDataUrl(image);
+            }
+            return [requestMessage];
+          }),
+        )
+      ).flat();
 
       const prefixMessages: StreamChatMessage[] = [];
       if (hasSkills) {
@@ -645,6 +691,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           ...(status === "stopped" ? { interrupted: true } : {}),
           ...(truncated === true ? { truncated: true } : {}),
           ...(run.sources !== undefined ? { sources: run.sources } : {}),
+          ...(run.toolSteps.length > 0
+            ? { toolSteps: run.toolSteps.map((step) => ({ ...step })) }
+            : {}),
         };
         if (mountedRef.current) {
           if (status === "complete") {
@@ -697,6 +746,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         provider: currentProvider,
         model: currentModel,
         startTime: servicesRef.current.now(),
+        toolSteps: [],
         token: ++runTokenRef.current,
       };
       activeRef.current = run;
@@ -735,6 +785,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             ...(run.provider !== undefined ? { provider: run.provider } : {}),
             ...(run.model !== undefined ? { model: run.model } : {}),
             ...(run.sources !== undefined ? { sources: run.sources } : {}),
+            ...(run.toolSteps.length > 0
+              ? { toolSteps: run.toolSteps.map((step) => ({ ...step })) }
+              : {}),
           }).catch(() => undefined);
         }, partialPersistenceInterval);
       };
@@ -759,6 +812,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             ...(webSearchEnabledRef.current === true && webSearchSmartRef.current === true
               ? { smartSearch: true }
               : {}),
+            ...(agentEnabledRef.current && isDesktopApp() ? { agent: { enabled: true } } : {}),
           },
           {
             onDelta(text) {
@@ -782,6 +836,48 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
               run.sources = sources;
               emit({ messageId: run.assistant.id, sources, type: "sources-received" });
               schedulePartialPersistence();
+            },
+            onToolCall(call) {
+              if (activeRef.current?.token !== run.token) return;
+              const argumentsJson = JSON.stringify(call.arguments ?? {});
+              run.toolSteps.push({ id: call.id, name: call.name, argumentsJson });
+              emit({ messageId: run.assistant.id, call: { id: call.id, name: call.name, argumentsJson }, type: "tool-call" });
+            },
+            onToolResult(result) {
+              if (activeRef.current?.token !== run.token) return;
+              const step = run.toolSteps.find((s) => s.id === result.id);
+              if (step !== undefined) {
+                step.result = { output: result.output, isError: result.isError, durationMs: result.durationMs };
+              }
+              emit({
+                messageId: run.assistant.id,
+                callId: result.id,
+                result: { output: result.output, isError: result.isError, durationMs: result.durationMs },
+                type: "tool-result",
+              });
+            },
+            onPermissionRequest(request) {
+              if (activeRef.current?.token !== run.token) return;
+              emit({
+                messageId: run.assistant.id,
+                requestId: request.requestId,
+                toolName: request.toolName,
+                argumentsJson: JSON.stringify(request.arguments ?? {}),
+                type: "permission-requested",
+              });
+            },
+            onPermissionResolved(resolved) {
+              emit({ type: "permission-resolved", requestId: resolved.requestId, approved: resolved.approved });
+            },
+            onTurn(turn) {
+              // Agent 多轮各自上报 usage 时逐轮累加；done 事件的最终 usage 优先（finishRun 取 usage ?? run.usage）
+              if (activeRef.current?.token !== run.token || turn.usage === undefined) return;
+              const previous = run.usage;
+              run.usage = {
+                promptTokens: (previous?.promptTokens ?? 0) + (turn.usage.promptTokens ?? 0),
+                completionTokens: (previous?.completionTokens ?? 0) + (turn.usage.completionTokens ?? 0),
+                totalTokens: (previous?.totalTokens ?? 0) + (turn.usage.totalTokens ?? 0),
+              };
             },
             signal: run.controller.signal,
           },
@@ -1347,22 +1443,42 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
   const clearError = useCallback(() => emit({ type: "clear-error" }), [emit]);
 
+  const approvePermission = useCallback(
+    async (requestId: string, approved: boolean, sessionScope = false): Promise<void> => {
+      await submitAgentApproval({ requestId, approved, ...(sessionScope ? { sessionScope: true } : {}) });
+    },
+    [],
+  );
+
   return {
     ...state,
     messages: overlayStreamedText(state),
+    agentEnabled,
+    approvePermission,
     clearError,
     newConversation,
     loadEarlier,
+    pendingPermission: state.pendingPermission,
     recall,
     regenerate,
     retry,
     selectConversation,
     send,
     compressConversation,
+    toggleAgent,
     updateUserMemory,
     setLocale,
     setOnline,
     setPendingImage,
     stop,
   };
+}
+
+/** 工具步骤参数 JSON 的宽松解析：非法 JSON 回退为空对象（服务端/模型输出不可信） */
+function safeParseArguments(json: string): unknown {
+  try {
+    return JSON.parse(json) as unknown;
+  } catch {
+    return {};
+  }
 }

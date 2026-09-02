@@ -18,6 +18,13 @@ export interface ChatState {
   streaming?: { messageId: string; text?: string; thought?: string };
   /** 当前窗口之前是否还有更早历史（UI 窗口化上翻加载入口） */
   hasMoreHistory?: boolean;
+  /** Agent 工具权限审批中卡片（同一时刻至多一个，等待用户批准/拒绝） */
+  pendingPermission?: {
+    messageId: string;
+    requestId: string;
+    toolName: string;
+    argumentsJson: string;
+  };
 }
 
 export type ChatAction =
@@ -57,7 +64,26 @@ export type ChatAction =
     }
   | { type: "user-memory-updated"; memory: string }
   | { type: "messages-reverted"; messages: ChatMessage[] }
-  | { type: "load-earlier-loaded"; messages: ChatMessage[] };
+  | { type: "load-earlier-loaded"; messages: ChatMessage[] }
+  | {
+      type: "tool-call";
+      messageId: string;
+      call: { id: string; name: string; argumentsJson: string };
+    }
+  | {
+      type: "tool-result";
+      messageId: string;
+      callId: string;
+      result: { output: string; isError: boolean; durationMs: number };
+    }
+  | {
+      type: "permission-requested";
+      messageId: string;
+      requestId: string;
+      toolName: string;
+      argumentsJson: string;
+    }
+  | { type: "permission-resolved"; requestId: string; approved: boolean };
 
 export const initialChatState: ChatState = {
   locale: "zh-CN",
@@ -148,6 +174,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         errorCode: undefined,
         messages: [...state.messages, ...(action.user === undefined ? [] : [action.user]), action.assistant],
         pendingImage: undefined,
+        pendingPermission: undefined,
         phase: "streaming",
         streaming: undefined,
       };
@@ -222,6 +249,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         locale: action.conversation.locale,
         messages: action.messages,
         pendingImage: undefined,
+        pendingPermission: undefined,
         phase: "idle",
         streaming: undefined,
         hasMoreHistory: action.hasMoreHistory,
@@ -286,5 +314,43 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
             ? undefined
             : state.streaming,
       };
+    case "tool-call":
+      if (!state.messages.some((message) => message.id === action.messageId)) return state;
+      return {
+        ...state,
+        messages: updateMessage(state.messages, action.messageId, (message) => ({
+          ...message,
+          toolSteps: [
+            ...(message.toolSteps ?? []),
+            { id: action.call.id, name: action.call.name, argumentsJson: action.call.argumentsJson },
+          ],
+        })),
+      };
+    case "tool-result":
+      if (!state.messages.some((message) => message.id === action.messageId)) return state;
+      return {
+        ...state,
+        messages: updateMessage(state.messages, action.messageId, (message) => ({
+          ...message,
+          toolSteps: (message.toolSteps ?? []).map((step) =>
+            step.id === action.callId ? { ...step, result: action.result } : step,
+          ),
+        })),
+      };
+    case "permission-requested":
+      if (!state.messages.some((message) => message.id === action.messageId)) return state;
+      return {
+        ...state,
+        pendingPermission: {
+          messageId: action.messageId,
+          requestId: action.requestId,
+          toolName: action.toolName,
+          argumentsJson: action.argumentsJson,
+        },
+      };
+    case "permission-resolved":
+      return state.pendingPermission?.requestId === action.requestId
+        ? { ...state, pendingPermission: undefined }
+        : state;
   }
 }

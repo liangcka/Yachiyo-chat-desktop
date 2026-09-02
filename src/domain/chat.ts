@@ -29,6 +29,18 @@ export interface TokenUsage {
   readonly totalTokens?: number;
 }
 
+/** Agent 工具执行步骤（调用 + 可选结果），随 assistant 消息持久化 */
+export interface ToolStep {
+  readonly id: string;
+  readonly name: string;
+  readonly argumentsJson: string;
+  readonly result?: {
+    readonly output: string;
+    readonly isError: boolean;
+    readonly durationMs: number;
+  };
+}
+
 export interface ChatMessage {
   id: string;
   conversationId: string;
@@ -53,6 +65,8 @@ export interface ChatMessage {
   latencyMs?: number;
   /** 用户主动停止/中断标记 */
   interrupted?: boolean;
+  /** Agent 模式下该消息内的工具调用步骤序列 */
+  toolSteps?: ReadonlyArray<ToolStep>;
 }
 
 export type StoredImageMimeType = "image/jpeg" | "image/png" | "image/webp";
