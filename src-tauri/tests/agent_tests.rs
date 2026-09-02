@@ -247,3 +247,29 @@ fn test_gemini_function_call_extraction() {
         _ => panic!("expected Gemini delta"),
     }
 }
+
+#[tokio::test]
+async fn test_approval_registry_flow() {
+    use yachiyo_desktop_lib::gateway::agent::permission::{ApprovalDecision, ApprovalRegistry};
+
+    let registry = ApprovalRegistry::new();
+    let mut rx = registry.register("req-1");
+    assert!(registry.resolve(
+        "req-1",
+        ApprovalDecision { approved: true, session_scope: false }
+    ));
+    let decision = rx.await.expect("should receive decision");
+    assert!(decision.approved);
+    assert!(!registry.resolve("req-1", ApprovalDecision { approved: false, session_scope: false }));
+    assert!(!registry.resolve("req-404", ApprovalDecision { approved: true, session_scope: false }));
+}
+
+#[tokio::test]
+async fn test_approval_registry_cancel() {
+    use yachiyo_desktop_lib::gateway::agent::permission::ApprovalRegistry;
+
+    let registry = ApprovalRegistry::new();
+    let mut rx = registry.register("req-2");
+    registry.cancel("req-2");
+    assert!(rx.await.is_err(), "cancelled receiver should error");
+}

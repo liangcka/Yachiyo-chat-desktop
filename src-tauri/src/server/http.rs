@@ -25,6 +25,7 @@ pub struct AppState {
     pub workspace_manager: Arc<WorkspaceManager>,
     pub http_client: reqwest::Client,
     pub port: u16,
+    pub approvals: Arc<crate::gateway::agent::permission::ApprovalRegistry>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -100,6 +101,33 @@ async fn handle_delete_key(
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AgentApprovalRequest {
+    #[serde(rename = "requestId")]
+    pub request_id: String,
+    pub approved: bool,
+    #[serde(rename = "sessionScope", default)]
+    pub session_scope: bool,
+}
+
+async fn handle_agent_approval(
+    State(state): State<AppState>,
+    Json(payload): Json<AgentApprovalRequest>,
+) -> impl IntoResponse {
+    let decision = crate::gateway::agent::permission::ApprovalDecision {
+        approved: payload.approved,
+        session_scope: payload.session_scope,
+    };
+    if state.approvals.resolve(&payload.request_id, decision) {
+        (StatusCode::OK, Json(serde_json::json!({ "success": true })))
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "Unknown or expired requestId" })),
+        )
+    }
+}
+
 pub fn create_router(state: AppState, dist_path: PathBuf) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -115,6 +143,7 @@ pub fn create_router(state: AppState, dist_path: PathBuf) -> Router {
             get(handle_session).post(handle_session).delete(handle_session),
         )
         .route("/api/chat", post(handle_chat))
+        .route("/api/agent/approval", post(handle_agent_approval))
         .route("/api/keys", get(handle_list_keys).post(handle_save_key))
         .route("/api/keys/{provider}", delete(handle_delete_key))
         .fallback_service(static_service)
@@ -162,6 +191,7 @@ pub async fn start_local_server(
         workspace_manager,
         http_client,
         port: selected_port,
+        approvals: Arc::new(crate::gateway::agent::permission::ApprovalRegistry::new()),
     };
 
     let app = create_router(state, dist_path);
