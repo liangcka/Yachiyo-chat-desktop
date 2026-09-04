@@ -21,7 +21,7 @@ export function usePanel<T extends HTMLElement = HTMLElement>(
   const panelRef = useRef<T | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
-  const { render, closing } = useClosing(open, 300);
+  const { render, closing } = useClosing(open, 250);
 
   useEffect(() => {
     if (!open) return;

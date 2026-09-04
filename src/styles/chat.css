@@ -1412,6 +1412,15 @@
   color: var(--yx-alias-label-primary);
   background: var(--yx-alias-interactive-bg-hover);
   text-align: left;
+  transition:
+    transform var(--motion-duration-press) var(--ease-out),
+    border-color var(--ds-transition-duration-fast) var(--ds-ease-hover),
+    background-color var(--ds-transition-duration-fast) var(--ds-ease-hover);
+}
+
+.drawer__actions button:active,
+.drawer__footer button:active {
+  transform: scale(var(--motion-scale-pressed));
 }
 
 .drawer__language {
@@ -1446,6 +1455,14 @@
   color: var(--yx-alias-label-secondary);
   background: transparent;
   font-size: 0.82rem;
+  transition:
+    transform var(--motion-duration-press) var(--ease-out),
+    background-color var(--ds-transition-duration-fast) var(--ds-ease-hover),
+    color var(--ds-transition-duration-fast) var(--ds-ease-hover);
+}
+
+.drawer__language button:active {
+  transform: scale(var(--motion-scale-pressed));
 }
 
 .drawer__language button[aria-pressed="true"] {
@@ -1842,6 +1859,19 @@
     transition-duration: 120ms !important;
     transition-timing-function: ease !important;
     transform: none !important;
+  }
+
+  .drawer {
+    animation: fadeIn 180ms ease !important;
+    transform: none !important;
+    transition: opacity 180ms ease !important;
+  }
+
+  .drawer--closing {
+    animation: none !important;
+    transform: none !important;
+    opacity: 0 !important;
+    transition: opacity 180ms ease !important;
   }
 }
 
@@ -2466,11 +2496,19 @@
 }
 
 .overlay {
-  animation: motion-fade-in var(--motion-duration-fast) var(--motion-ease-standard) backwards;
+  animation: fadeIn var(--motion-duration-panel) var(--ease-out) backwards;
 }
 
 .drawer {
+  transform: translate3d(0, 0, 0);
+  transition: transform var(--motion-duration-panel) var(--ease-drawer);
   animation: motion-drawer-in var(--motion-duration-panel) var(--ease-drawer) backwards;
+}
+
+@starting-style {
+  .drawer {
+    transform: translate3d(-100%, 0, 0);
+  }
 }
 
 .history-panel,
@@ -2691,10 +2729,12 @@
 }
 
 .overlay--closing {
-  animation: motion-fade-out var(--motion-duration-panel) var(--motion-ease-standard) forwards;
+  animation: motion-fade-out var(--motion-duration-panel) var(--ease-out) forwards;
 }
 .drawer--closing {
-  animation: motion-drawer-out var(--motion-duration-panel) var(--ease-drawer) forwards;
+  animation: none;
+  transform: translate3d(-100%, 0, 0);
+  transition: transform var(--motion-duration-panel) var(--ease-drawer);
 }
 .history-panel--closing, .llm-panel--closing, .skills-panel--closing {
   animation: motion-sheet-out var(--motion-duration-panel) var(--ease-drawer) forwards;

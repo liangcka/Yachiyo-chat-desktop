@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Pin } from "lucide-react";
+import { ChevronDown, Pin } from "lucide-react";
 import type { Conversation } from "../../../domain/chat";
 import type { UiCopy } from "../../../i18n/messages";
 import { SidebarConversationItem } from "./SidebarConversationItem";
@@ -39,8 +39,12 @@ export function SidebarGroupSection({
         onClick={onToggleCollapse}
         title={`${isCollapsed ? "展开" : "折叠"} ${group.label}`}
       >
-        <span className="desktop-sidebar__group-chevron">
-          {isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+        <span
+          className={`desktop-sidebar__group-chevron ${
+            isCollapsed ? "desktop-sidebar__group-chevron--collapsed" : ""
+          }`}
+        >
+          <ChevronDown size={13} />
         </span>
         {isPinnedGroup ? <Pin size={12} className="desktop-sidebar__group-pin-icon" /> : null}
         <span className="desktop-sidebar__group-label">{group.label}</span>
