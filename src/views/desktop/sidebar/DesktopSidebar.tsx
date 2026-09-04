@@ -47,11 +47,9 @@ export function DesktopSidebar({
   if (collapsed) {
     return (
       <SidebarRail
-        activeRightTab={activeRightTab}
         copy={copy}
         onNewChat={onNewChat}
         onOpenSettings={onOpenSettings}
-        onSelectRightTab={onSelectRightTab}
         onToggleCollapse={onToggleCollapse}
         onToggleTheme={onToggleTheme}
         resolvedTheme={resolvedTheme}
@@ -61,7 +59,7 @@ export function DesktopSidebar({
 
   const toggleTab = (tab: "llm" | "settings") => {
     const nextTab: DesktopRightTab = activeRightTab === tab ? "none" : tab;
-    onSelectRightTab(nextTab);
+    onSelectRightTab?.(nextTab);
   };
 
   return (
@@ -74,8 +72,12 @@ export function DesktopSidebar({
       {/* 1. 顶部品牌与折叠按钮 */}
       <SidebarBrandHeader onNewChat={onNewChat} onToggleCollapse={onToggleCollapse} />
 
-      {/* 2. 新建对话按钮 */}
-      <SidebarNewChat copy={copy} onNewChat={onNewChat} />
+      {/* 2. 新建对话与项目选择下拉菜单 */}
+      <SidebarNewChat
+        copy={copy}
+        onNewChat={onNewChat}
+        onOpenSettings={() => onOpenSettings?.("project")}
+      />
 
       {/* 3. 历史会话实时搜索过滤 */}
       <SidebarSearch locale={locale} onChange={setSearchQuery} value={searchQuery} />

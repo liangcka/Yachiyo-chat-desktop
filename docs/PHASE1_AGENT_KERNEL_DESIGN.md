@@ -158,7 +158,7 @@ Provider 构建时不支持 tools 则显式报错，不静默降级。
 | 层                         | 变更                                                                                                                                  |
 | :------------------------ | :---------------------------------------------------------------------------------------------------------------------------------- |
 | `services/chat-client.ts` | `StreamChatOptions` 新增 `onToolCall` / `onToolResult` / `onPermissionRequest` / `onTurn` 回调；SSE 解析器加新事件类型与载荷校验（沿用现有严格校验风格）           |
-| `domain/chat`             | 消息 chunk 新增结构化 `"tool"` 块，取代 MessageBubble 的  ` ```tool_call` \` 正则解析                                                               |
+| `domain/chat`             | 消息 chunk 新增结构化 `"tool"` 块，取代 MessageBubble 的   ` ```tool_call` \` 正则解析                                                              |
 | `app/chat-reducer`        | 新增 `tool-call` / `tool-result` / `permission-request` 动作；PermissionCard 状态机（pending → approved / denied / timeout）                  |
 | UI 组件                     | 消息流内渲染 **ToolCard**（读=蓝卡折叠 / 写=橙卡）与 **PermissionCard**（批准 / 拒绝 / 本会话不再询问）；批准动作 `POST /api/agent/approval`，origin 获取复用 `api-origins` |
 | 入口                        | 桌面端输入区新增 **Agent 模式开关**；云端口径不变                                                                                                      |

@@ -73,6 +73,44 @@ describe("validateChatRequest", () => {
     ).toThrow(ChatValidationError);
   });
 
+  it("accepts a valid baseUrl on the user-key path and echoes it back", () => {
+    const request = {
+      ...(validRequest() as object),
+      provider: "openai",
+      apiKey: "sk-" + "a".repeat(40),
+      model: "doubao-pro-32k",
+      baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    };
+
+    expect(validateChatRequest(request)).toMatchObject({
+      baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    });
+    // 不带 baseUrl 时不产生该键
+    const withoutBaseUrl = { ...request, baseUrl: undefined };
+    expect(validateChatRequest(withoutBaseUrl)).not.toHaveProperty("baseUrl");
+  });
+
+  it("rejects insecure, malformed, and oversized baseUrl values", () => {
+    const base = {
+      ...(validRequest() as object),
+      provider: "openai",
+      apiKey: "sk-" + "a".repeat(40),
+      model: "gpt-5.6-luna",
+    };
+
+    expect(() => validateChatRequest({ ...base, baseUrl: "http://api.example.com/v1" })).toThrow(
+      ChatValidationError,
+    );
+    expect(() => validateChatRequest({ ...base, baseUrl: "https://a b.example.com/" })).toThrow(
+      ChatValidationError,
+    );
+    expect(() => validateChatRequest({ ...base, baseUrl: "" })).toThrow(ChatValidationError);
+    expect(() => validateChatRequest({ ...base, baseUrl: "https://" + "a".repeat(2100) })).toThrow(
+      ChatValidationError,
+    );
+    expect(() => validateChatRequest({ ...base, baseUrl: 42 })).toThrow(ChatValidationError);
+  });
+
   it("accepts an optional boolean smartSearch flag on both return paths", () => {
     expect(
       validateChatRequest({ ...(validRequest() as object), smartSearch: true }),

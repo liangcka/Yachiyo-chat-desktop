@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ChatMessage, ChatSource, Conversation, Locale, StoredImage, TokenUsage, ToolStep } from "../domain/chat";
 import type { ActiveLlmConfig } from "../domain/llm";
 import type { SkillDefinition } from "../skills";
+import { desktopFileReader, expandFileReferences, hasFileReferences } from "../features/file-reference/expand-file-references";
 
 import { isDesktopApp } from "../services/app-platform";
 import {
@@ -46,7 +47,12 @@ export interface ChatRepository {
   getImage(id: string): Promise<StoredImage | undefined>;
   setLocale(locale: Locale): Promise<void>;
   getLocale(): Promise<Locale>;
+  deleteConversation?(id: string): Promise<void>;
   setConversationLocale(id: string, locale: Locale): Promise<void>;
+}
+
+function isDefaultTitle(title: string): boolean {
+  return title === "新的对话" || title === "新しい会話";
 }
 
 export type StreamChatFunction = (
@@ -397,6 +403,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const runTokenRef = useRef(0);
   const sendingRef = useRef(false);
+  const newConversationLockRef = useRef(false);
   const lastTimestampRef = useRef(0);
 
   const nextTimestamp = useCallback(() => {
@@ -467,6 +474,24 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         if (messages[index] !== storedMessages[index]) await queueMessage(messages[index]!);
       }
       if (locale !== latest.locale) await servicesRef.current.repository.setLocale(latest.locale);
+      if (conversations.length > 1 && servicesRef.current.repository.deleteConversation) {
+        const repo = servicesRef.current.repository;
+        void (async () => {
+          try {
+            for (let i = 1; i < conversations.length; i++) {
+              const item = conversations[i]!;
+              if (isDefaultTitle(item.title)) {
+                const count = await repo.listMessages(item.id, { limit: 1 });
+                if (count.length === 0) {
+                  await repo.deleteConversation!(item.id);
+                }
+              }
+            }
+          } catch {
+            // 静默自愈，不影响核心启动流程
+          }
+        })();
+      }
       return {
         conversation: latest,
         locale: latest.locale,
@@ -624,7 +649,14 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
               }
               return requestMessages;
             }
-            const requestMessage: StreamChatMessage = { role: message.role, text };
+            const requestMessage: StreamChatMessage = {
+              role: message.role,
+              // desktop 端 user 消息中的 @文件引用 在请求侧展开为文件内容块（存储与 UI 保留原文）
+              text:
+                message.role === "user" && isDesktopApp() && hasFileReferences(text)
+                  ? await expandFileReferences(text, desktopFileReader)
+                  : text,
+            };
             if (index === lastIndex && message.role === "user" && message.imageId !== undefined) {
               const image =
                 pendingImage?.id === message.imageId
@@ -727,6 +759,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       const activeConfig = activeLlmConfigRef.current;
       const currentProvider = activeConfig?.provider ?? "stepfun";
       const currentModel = activeConfig?.model ?? "step-3.7-flash";
+      const activeSkills = activeSkillsRef.current ?? [];
+      const currentSkillNames = activeSkills.map((s) => s.name);
       const assistant: ChatMessage = {
         conversationId: history.at(-1)?.conversationId ?? "",
         createdAt: nextTimestamp(),
@@ -736,6 +770,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         text: "",
         provider: currentProvider,
         model: currentModel,
+        ...(currentSkillNames.length > 0 ? { skills: currentSkillNames } : {}),
       };
 
       const run: ActiveRun = {
@@ -806,7 +841,14 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             messages: requestMessages,
             currentTime,
             ...(activeConfig !== undefined
-              ? { provider: activeConfig.provider, apiKey: activeConfig.apiKey, model: activeConfig.model }
+              ? {
+                  provider: activeConfig.provider,
+                  apiKey: activeConfig.apiKey,
+                  model: activeConfig.model,
+                  ...(activeConfig.baseUrl !== undefined
+                    ? { baseUrl: activeConfig.baseUrl }
+                    : {}),
+                }
               : {}),
             ...(webSearchEnabledRef.current === true ? { webSearch: true } : {}),
             ...(webSearchEnabledRef.current === true && webSearchSmartRef.current === true
@@ -1009,7 +1051,14 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             messages: requestMessages,
             mode: "summary",
             ...(activeConfig !== undefined
-              ? { provider: activeConfig.provider, apiKey: activeConfig.apiKey, model: activeConfig.model }
+              ? {
+                  provider: activeConfig.provider,
+                  apiKey: activeConfig.apiKey,
+                  model: activeConfig.model,
+                  ...(activeConfig.baseUrl !== undefined
+                    ? { baseUrl: activeConfig.baseUrl }
+                    : {}),
+                }
               : {}),
           },
           {
@@ -1336,21 +1385,6 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     await stop();
   }, [stop]);
 
-  const newConversation = useCallback(async (): Promise<void> => {
-    await stopAndWait();
-    try {
-      const loaded = await createConversation(stateRef.current.locale);
-      emit({
-        conversation: loaded.conversation,
-        messages: loaded.messages,
-        type: "conversation-selected",
-        ...(loaded.hasMoreHistory ? { hasMoreHistory: true } : {}),
-      });
-    } catch {
-      emit({ errorCode: "CONVERSATION_LIMIT", type: "load-failed" });
-    }
-  }, [createConversation, emit, stopAndWait]);
-
   const selectConversation = useCallback(
     async (id: string): Promise<void> => {
       await stopAndWait();
@@ -1376,6 +1410,65 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     },
     [emit, stopAndWait],
   );
+
+  const newConversation = useCallback(async (): Promise<void> => {
+    if (newConversationLockRef.current) return;
+    newConversationLockRef.current = true;
+    try {
+      await stopAndWait();
+
+      const currentActive = stateRef.current.activeConversation;
+      // 1. 防御：如果当前活跃会话无消息且未在发送中，复用当前会话，避免在空会话中无限繁殖新记录
+      if (currentActive !== undefined && stateRef.current.messages.length === 0 && !sendingRef.current) {
+        const currentStored = await servicesRef.current.repository.getConversation(currentActive.id);
+        if (currentStored !== undefined) {
+          const storedMsgs = await servicesRef.current.repository.listMessages(currentActive.id, { limit: 1 });
+          if (storedMsgs.length === 0) {
+            return;
+          }
+        }
+      }
+
+      // 2. 检查会话列表中是否已有未使用的空白会话（无消息且为默认标题），若有则直接复用
+      const existingList = await servicesRef.current.repository.listConversations();
+      const blankConversations: Conversation[] = [];
+      for (const conv of existingList) {
+        if (conv.id === currentActive?.id) continue;
+        if (isDefaultTitle(conv.title)) {
+          const msgs = await servicesRef.current.repository.listMessages(conv.id, { limit: 1 });
+          if (msgs.length === 0) {
+            blankConversations.push(conv);
+          }
+        }
+      }
+
+      if (blankConversations.length > 0) {
+        const [target, ...redundant] = blankConversations;
+        if (servicesRef.current.repository.deleteConversation) {
+          for (const extra of redundant) {
+            void servicesRef.current.repository.deleteConversation(extra.id).catch(() => undefined);
+          }
+        }
+        await selectConversation(target!.id);
+        return;
+      }
+
+      // 3. 所有已有会话均有消息（或无已有空会话），创建新的空白会话
+      try {
+        const loaded = await createConversation(stateRef.current.locale);
+        emit({
+          conversation: loaded.conversation,
+          messages: loaded.messages,
+          type: "conversation-selected",
+          ...(loaded.hasMoreHistory ? { hasMoreHistory: true } : {}),
+        });
+      } catch {
+        emit({ errorCode: "CONVERSATION_LIMIT", type: "load-failed" });
+      }
+    } finally {
+      newConversationLockRef.current = false;
+    }
+  }, [createConversation, emit, selectConversation, stopAndWait]);
 
   const loadEarlier = useCallback(async (): Promise<void> => {
     const snapshot = stateRef.current;

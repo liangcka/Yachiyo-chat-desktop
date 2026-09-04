@@ -1,0 +1,135 @@
+/* ═══════════════════════════════════════════════════════════════
+   阶段二编辑器三件套：工作区递归文件树样式
+   色板对齐 tokens.css 深海蓝星空玻璃体系
+   ═══════════════════════════════════════════════════════════════ */
+
+.file-tree {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.file-tree__empty {
+  padding: 14px 10px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-dimmed);
+  text-align: center;
+}
+
+.tree-node {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 折叠态隐藏子级（展开态由 .tree-node--expanded 覆盖） */
+.tree-node--dir > .tree-children {
+  display: none;
+}
+
+.tree-node--expanded > .tree-children {
+  display: flex;
+  flex-direction: column;
+}
+
+.tree-children {
+  padding-left: 13px;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-family: var(--ds-font-family-code);
+  color: var(--dsw-alias-label-secondary);
+  text-align: left;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition:
+    transform var(--motion-duration-press) var(--ease-out),
+    background var(--ds-transition-duration-fast) var(--ds-ease-hover),
+    color var(--ds-transition-duration-fast) var(--ds-ease-hover);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tree-row:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+    color: var(--dsw-alias-label-primary);
+  }
+}
+
+.tree-row:active {
+  transform: scale(var(--motion-scale-pressed));
+}
+
+.tree-row__chevron {
+  flex-shrink: 0;
+  color: var(--dsw-alias-label-dimmed);
+  transition: transform var(--motion-duration-fast) var(--ease-out);
+}
+
+.tree-node--expanded > .tree-row .tree-row__chevron {
+  transform: rotate(90deg);
+}
+
+.tree-row__folder {
+  flex-shrink: 0;
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.tree-row__file-icon {
+  flex-shrink: 0;
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.tree-row__label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-row--loading .tree-row__label {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.tree-row__spinner {
+  flex-shrink: 0;
+  color: var(--dsw-alias-label-dimmed);
+  animation: tree-spin 0.75s linear infinite;
+}
+
+@keyframes tree-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* @ 引用按钮：hover 时浮出，把文件路径注入对话输入框 */
+.tree-row__at {
+  display: none;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 3px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--dsw-alias-state-business-primary);
+  background: var(--yx-alias-interactive-bg-hover-accent);
+  flex-shrink: 0;
+}
+
+.tree-row__at:hover {
+  filter: brightness(1.15);
+}
+
+.tree-row--file:hover .tree-row__at {
+  display: grid;
+}

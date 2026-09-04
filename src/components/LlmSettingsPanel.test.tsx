@@ -37,14 +37,31 @@ describe("LlmSettingsPanel", () => {
     expect(screen.getByText("当前使用: Anthropic (Claude)")).toBeInTheDocument();
   });
 
-  it("renders the model management table with models and action controls", () => {
+  it("renders an empty state hint when no model is configured", () => {
     mount();
     expect(screen.getByText("模型管理")).toBeInTheDocument();
     expect(screen.getByText(/配置 API key 添加更多可用模型/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加模型" })).toBeInTheDocument();
-    expect(screen.getByText("DeepSeek-V4-Flash")).toBeInTheDocument();
-    expect(screen.getByText("阶跃星辰-3.7-flash")).toBeInTheDocument();
-    expect(screen.getByText("ox-alpha")).toBeInTheDocument();
+    expect(screen.getByText(/尚未配置模型/i)).toBeInTheDocument();
+  });
+
+  it("renders the management table from stored entries", () => {
+    mount({
+      entries: [
+        { provider: "deepseek", apiKey: VALID_KEY, model: "deepseek-v4-flash" },
+        {
+          provider: "openai",
+          apiKey: VALID_KEY,
+          model: "doubao-pro-32k",
+          baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+        },
+      ],
+    });
+
+    expect(screen.getByText("deepseek-v4-flash")).toBeInTheDocument();
+    expect(screen.getByText("doubao-pro-32k")).toBeInTheDocument();
+    expect(screen.getByText("自定义端点")).toBeInTheDocument();
+    expect(screen.queryByText(/尚未配置模型/i)).not.toBeInTheDocument();
   });
 
   it("opens add model modal with custom model and provider vendors", async () => {
@@ -78,7 +95,12 @@ describe("LlmSettingsPanel", () => {
     await user.type(keyInput, VALID_KEY);
     await user.click(screen.getByRole("button", { name: "保存并启用" }));
 
-    expect(onSave).toHaveBeenCalledWith("openai", VALID_KEY, "doubao-pro-32k");
+    expect(onSave).toHaveBeenCalledWith(
+      "openai",
+      VALID_KEY,
+      "doubao-pro-32k",
+      "https://ark.cn-beijing.volces.com/api/v3",
+    );
     expect(onActivate).toHaveBeenCalledWith("openai");
   });
 
@@ -98,15 +120,17 @@ describe("LlmSettingsPanel", () => {
     await user.type(keyInput, VALID_KEY);
     await user.click(screen.getByRole("button", { name: "保存并启用" }));
 
-    expect(onSave).toHaveBeenCalledWith("openai", VALID_KEY, "ox-alpha");
+    expect(onSave).toHaveBeenCalledWith("openai", VALID_KEY, "ox-alpha", "https://api.openai.com/v1");
     expect(onActivate).toHaveBeenCalledWith("openai");
   });
 
   it("opens edit config modal from table row", async () => {
     const user = userEvent.setup();
-    mount();
+    mount({
+      entries: [{ provider: "deepseek", apiKey: VALID_KEY, model: "deepseek-v4-flash" }],
+    });
 
-    const editBtn = screen.getByLabelText("编辑 DeepSeek-V4-Flash");
+    const editBtn = screen.getByLabelText("编辑 deepseek-v4-flash");
     await user.click(editBtn);
 
     expect(screen.getByRole("dialog", { name: "配置模型" })).toBeInTheDocument();
@@ -116,9 +140,13 @@ describe("LlmSettingsPanel", () => {
   it("toggles activate model via switch in table", async () => {
     const user = userEvent.setup();
     const onActivate = vi.fn(async () => undefined);
-    mount({ activeProvider: "openai", onActivate });
+    mount({
+      activeProvider: "openai",
+      entries: [{ provider: "deepseek", apiKey: VALID_KEY, model: "deepseek-v4-flash" }],
+      onActivate,
+    });
 
-    const toggleBtn = screen.getByLabelText("切换启用 DeepSeek-V4-Flash");
+    const toggleBtn = screen.getByLabelText("切换启用 deepseek-v4-flash");
     await user.click(toggleBtn);
 
     expect(onActivate).toHaveBeenCalledWith("deepseek");
@@ -132,7 +160,7 @@ describe("LlmSettingsPanel", () => {
       onClear,
     });
 
-    const deleteBtn = screen.getByLabelText("删除 阶跃星辰-3.7-flash");
+    const deleteBtn = screen.getByLabelText("删除 step-3.7-flash");
     await user.click(deleteBtn);
 
     expect(onClear).toHaveBeenCalledWith("stepfun");

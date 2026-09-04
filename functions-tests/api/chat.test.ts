@@ -700,6 +700,79 @@ describe("POST /api/chat", () => {
     expect(events.at(-1)).toEqual({ type: "done", truncated: false });
   });
 
+  it("routes non-whitelisted models to a custom base URL including the judge request", async () => {
+    const customBase = "https://ark.cn-beijing.volces.com/api/v3";
+    const customUrl = `${customBase}/chat/completions`;
+    const apiKey = "sk-" + "a".repeat(40);
+    const fetchUrls: string[] = [];
+    let upstreamBody: Record<string, unknown> | undefined;
+    let upstreamAuth: string | null | undefined;
+    providerFetch.mockImplementation(async (input, init) => {
+      const request = await toRequest(input, init);
+      fetchUrls.push(request.url);
+      if (isJudgeInit(init)) {
+        return judgeResponse("YES");
+      }
+      if (request.url.startsWith(bingUrlPrefix)) {
+        return new Response(bingRss(), { status: 200, headers: { "content-type": "text/xml" } });
+      }
+      upstreamAuth = request.headers.get("authorization");
+      upstreamBody = JSON.parse(await request.clone().text()) as Record<string, unknown>;
+      return new Response(providerSse("彩叶~火山引擎的回答"), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const response = await invoke(
+      await chatRequest(
+        {
+          locale: "zh-CN",
+          messages: [{ role: "user", text: "今天上海天气" }],
+          provider: "openai",
+          apiKey,
+          model: "doubao-pro-32k",
+          baseUrl: customBase,
+          webSearch: true,
+        },
+        "custom-baseurl-session",
+      ),
+    );
+    const events = await collectClientEvents(response.body!);
+
+    // 主调用与 judge 均命中自定义端点，模型名不再受白名单约束
+    expect(fetchUrls).toEqual([
+      customUrl,
+      bingSearchUrl("上海天气"),
+      "https://weather.example.cn/shanghai",
+      customUrl,
+    ]);
+    expect(upstreamBody).toMatchObject({ model: "doubao-pro-32k" });
+    expect(upstreamAuth).toBe(`Bearer ${apiKey}`);
+    expect(events[0]?.type).toBe("sources");
+    expect(events.at(-1)).toEqual({ type: "done", truncated: false });
+  });
+
+  it("rejects a custom base URL for providers without an OpenAI-compatible adapter", async () => {
+    const response = await invoke(
+      await chatRequest(
+        {
+          locale: "zh-CN",
+          messages: [{ role: "user", text: "你好" }],
+          provider: "claude",
+          apiKey: "sk-ant-" + "a".repeat(40),
+          model: "claude-sonnet-5",
+          baseUrl: "https://example.com/v1",
+        },
+        "claude-baseurl-session",
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST" } });
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
   it("prepends two fixed mock sources in mock mode with webSearch", async () => {
     const mockEnv: Env = { ...env, APP_MODE: "mock" };
     const response = await invoke(

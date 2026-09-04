@@ -24,6 +24,8 @@ export interface StreamChatRequest {
   provider?: ProviderId;
   apiKey?: string;
   model?: string;
+  /** 自定义 OpenAI 兼容端点；仅 OpenAI 兼容厂商有效，存在时模型名不再受白名单约束 */
+  baseUrl?: string;
   /** 开启后服务端先执行联网搜索并下发 sources 事件（仅普通聊天，summary 不携带） */
   webSearch?: boolean;
   /** 智能搜索：联网搜索开启时启用双市场并行检索（结果更多、带发布日期） */

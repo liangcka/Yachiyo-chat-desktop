@@ -170,6 +170,12 @@ export function extractOpenAIJudgeText(responseJson: string): string | null {
   return content;
 }
 
+/** 端点解析：自定义 baseUrl（剥掉尾部斜杠后拼 /chat/completions）覆盖厂商默认端点 */
+function resolveEndpoint(baseUrl: string | undefined, defaultEndpoint: string): string {
+  if (baseUrl === undefined) return defaultEndpoint;
+  return `${baseUrl.replace(/\/+$/u, "")}/chat/completions`;
+}
+
 export function buildOpenAICompatAdapter(
   id: ProviderAdapter["id"],
   config: OpenAICompatConfig,
@@ -189,7 +195,7 @@ export function buildOpenAICompatAdapter(
         config.reasoningEffort === true,
       );
       return {
-        url: config.endpoint,
+        url: resolveEndpoint(input.baseUrl, config.endpoint),
         headers: {
           accept: "text/event-stream",
           authorization: `Bearer ${input.apiKey}`,
@@ -212,7 +218,7 @@ export function buildOpenAICompatAdapter(
         ...(config.reasoningEffort === true ? { reasoning_effort: "low" as const } : {}),
       };
       return {
-        url: config.endpoint,
+        url: resolveEndpoint(input.baseUrl, config.endpoint),
         headers: {
           accept: "application/json",
           authorization: `Bearer ${input.apiKey}`,

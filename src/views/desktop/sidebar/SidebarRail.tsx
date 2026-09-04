@@ -2,7 +2,6 @@ import { FolderCode, Moon, PanelLeftOpen, Plus, Settings, Sun } from "lucide-rea
 import type { ReactNode } from "react";
 import type { UiCopy } from "../../../i18n/messages";
 import type { SettingsTabKey } from "../../../components/settings/SettingsModal";
-import type { DesktopRightTab } from "./types";
 
 interface RailButtonProps {
   active?: boolean;
@@ -37,36 +36,24 @@ function RailButton({
 }
 
 interface SidebarRailProps {
-  activeRightTab: DesktopRightTab;
   copy: UiCopy;
   onNewChat: () => Promise<void>;
   onOpenSettings?: (tab?: SettingsTabKey) => void;
-  onSelectRightTab: (tab: DesktopRightTab) => void;
   onToggleCollapse?: () => void;
   onToggleTheme?: () => void;
   resolvedTheme?: "light" | "dark";
 }
 
 export function SidebarRail({
-  activeRightTab,
   copy,
   onNewChat,
   onOpenSettings,
-  onSelectRightTab,
   onToggleCollapse,
   onToggleTheme,
   resolvedTheme = "dark",
 }: SidebarRailProps) {
-  const toggleRightTab = (tab: DesktopRightTab) => {
-    onSelectRightTab(activeRightTab === tab ? "none" : tab);
-  };
-
   const handleOpenGeneralSettings = () => {
-    if (onOpenSettings) {
-      onOpenSettings("general");
-    } else {
-      toggleRightTab("settings");
-    }
+    onOpenSettings?.("general");
   };
 
   return (
@@ -91,13 +78,12 @@ export function SidebarRail({
         />
       </div>
 
-      {/* 中部：工作区 */}
+      {/* 中部：项目快捷 */}
       <div className="desktop-sidebar__rail-tools">
         <RailButton
           icon={<FolderCode size={17} />}
           label={copy.workspaceEntry}
-          active={activeRightTab === "workspace"}
-          onClick={() => toggleRightTab("workspace")}
+          onClick={() => onOpenSettings?.("project")}
         />
       </div>
 
@@ -113,7 +99,6 @@ export function SidebarRail({
         <RailButton
           icon={<Settings size={17} />}
           label="设置"
-          active={activeRightTab === "settings" || activeRightTab === "skills" || activeRightTab === "memory"}
           onClick={handleOpenGeneralSettings}
         />
       </div>

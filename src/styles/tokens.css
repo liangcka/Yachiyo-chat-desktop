@@ -42,6 +42,13 @@
 
   --focus-ring: rgb(210 228 255 / 92%);
 
+  /* Yachiyo 角色动作与专属视觉 Tokens */
+  --yachiyo-emote-bg: rgba(168, 85, 247, 0.12);
+  --yachiyo-emote-color: #c084fc;
+  --yachiyo-emote-border: rgba(168, 85, 247, 0.25);
+  --yachiyo-brand-glow: 0 0 20px rgba(75, 139, 245, 0.35);
+  --yachiyo-card-blur: blur(20px);
+
   /* ─── 布局、圆角与安全区 ─── */
   --radius-card: 1.5rem;
   --radius-control: 999px;
@@ -52,36 +59,44 @@
   --safe-bottom: max(0.75rem, env(safe-area-inset-bottom));
   --safe-top: max(1rem, env(safe-area-inset-top));
 
+  /* ─── Emil Kowalski 权威缓动 Tokens ─── */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-hover: ease;
+
   /* ─── 动效与过渡 ─── */
-  --motion-duration-press: 80ms;
+  --motion-duration-press: 140ms;
   --motion-duration-fast: 120ms;
-  --motion-duration-base: 200ms;
-  --motion-duration-slow: 350ms;
-  --motion-duration-panel: 300ms;
-  --motion-duration-reveal: 500ms;
-  --motion-duration-scene: 750ms;
+  --motion-duration-base: 180ms;
+  --motion-duration-slow: 250ms;
+  --motion-duration-panel: 250ms;
+  --motion-duration-reveal: 350ms;
+  --motion-duration-scene: 500ms;
   --motion-duration-loop: 1.2s;
   --motion-duration-ambient: 18s;
-  --motion-ease-standard: cubic-bezier(0.32, 0.72, 0, 1);
-  --motion-ease-enter: cubic-bezier(0.25, 1, 0.5, 1);
+  --motion-ease-standard: var(--ease-out);
+  --motion-ease-enter: var(--ease-out);
   --motion-ease-emphasized: cubic-bezier(0.17, 0.89, 0.24, 1.15);
-  --motion-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --motion-ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
   --motion-ease-ambient: ease-in-out;
-  --motion-ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-ease-smooth: var(--ease-out);
   --motion-distance-sm: 0.45rem;
   --motion-distance-panel: 1.125rem;
   --motion-scale-pressed: 0.97;
-  --motion-stagger-step: 45ms;
+  --motion-stagger-step: 40ms;
 
   /* ─── 字体与系统过渡 ─── */
   --dsw-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   --ds-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas,
     'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
-  --ds-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
-  --ds-transition-duration: 0.2s;
-  --ds-transition-duration-fast: 0.1s;
-  --ds-transition-duration-slow: 0.3s;
+  --ds-ease-in-out: var(--ease-in-out);
+  --ds-ease-out: var(--ease-out);
+  --ds-ease-hover: var(--ease-hover);
+  --ds-transition-duration: 0.18s;
+  --ds-transition-duration-fast: 0.12s;
+  --ds-transition-duration-slow: 0.25s;
 
   --dsh-composer-card-max-width: 800px;
   --dsh-composer-side-clearance: 16px;
@@ -117,8 +132,9 @@
   --surface-input: #0b1a42;
   --shadow-elevated: 0 4px 24px rgba(0, 0, 0, 0.35);
 
-  --bubble-user-bg: #10366d;
-  --bubble-user-border: rgba(255, 255, 255, 0.16);
+  /* 用户胶囊：Yachiyo 蓝（原版 rgb(80 125 187 / 45%) 毛玻璃）在深蓝背景上的实底等效色 */
+  --bubble-user-bg: #294a7e;
+  --bubble-user-border: rgba(255, 255, 255, 0.14);
   --bubble-assistant-bg: #071436;
   --bubble-assistant-border: rgba(255, 255, 255, 0.09);
 
@@ -126,6 +142,11 @@
   --accent-brand-soft: rgba(75, 139, 245, 0.18);
 
   --focus-ring: rgb(210 228 255 / 92%);
+
+  /* 角色情绪与动作高亮色（深色） */
+  --yachiyo-emote-bg: rgba(168, 85, 247, 0.18);
+  --yachiyo-emote-color: #d8b4fe;
+  --yachiyo-emote-border: rgba(168, 85, 247, 0.32);
 
   /* ─── dsh 融合语义层：alias（深色） ─── */
   --yx-alias-bg-base: var(--space-0);
@@ -223,16 +244,16 @@
 [data-theme="light"] {
   color-scheme: light;
 
-  /* 桌面端经典白底与浅灰背景 */
-  --space-0: #ffffff;
-  --space-1: #f8fafc;
-  --space-2: #f1f5f9;
-  --space-3: #e2e8f0;
+  /* 桌面端经典白底与浅灰背景：融入极浅天青暮色，提升通透感与层次 */
+  --space-0: #f7f9fd;
+  --space-1: #ffffff;
+  --space-2: #f0f4fa;
+  --space-3: #e2e8f2;
 
-  --glass: #ffffff;
-  --glass-soft: #f8fafc;
-  --glass-strong: #ffffff;
-  --glass-border: rgba(0, 0, 0, 0.08);
+  --glass: rgba(255, 255, 255, 0.88);
+  --glass-soft: rgba(240, 244, 250, 0.75);
+  --glass-strong: rgba(255, 255, 255, 0.98);
+  --glass-border: rgba(16, 54, 109, 0.08);
 
   --text-primary: #0f172a;
   --text-muted: #475569;
@@ -241,25 +262,30 @@
 
   --interactive-hover: rgba(16, 54, 109, 0.05);
   --interactive-active: rgba(16, 54, 109, 0.09);
-  --border-l1: rgba(0, 0, 0, 0.06);
-  --border-l2: rgba(0, 0, 0, 0.10);
+  --border-l1: rgba(16, 54, 109, 0.06);
+  --border-l2: rgba(16, 54, 109, 0.11);
 
-  --surface-sidebar: #f8fafc;
+  --surface-sidebar: #f4f7fc;
   --surface-card: #ffffff;
   --surface-input: #ffffff;
-  --shadow-elevated: 0 4px 16px rgba(0, 0, 0, 0.06);
+  --shadow-elevated: 0 4px 20px rgba(16, 54, 109, 0.07);
 
-  /* Yachiyo 主题色气泡 */
-  --bubble-user-bg: #e2edfd;
+  /* Yachiyo 主题色气泡：用户微透清透冰晶蓝，助手纯净琉璃白卡片 */
+  --bubble-user-bg: #e5efff;
   --bubble-user-border: #bfdbfe;
-  --bubble-assistant-bg: #ffffff;
-  --bubble-assistant-border: rgba(0, 0, 0, 0.08);
+  --bubble-assistant-bg: rgba(255, 255, 255, 0.95);
+  --bubble-assistant-border: rgba(16, 54, 109, 0.08);
 
   /* Yachiyo 核心主题品牌蓝（#10366d 深海蓝） */
   --accent-brand: #10366d;
   --accent-brand-soft: rgba(16, 54, 109, 0.08);
 
   --focus-ring: #10366d;
+
+  /* 角色情绪与动作高亮色（浅色） */
+  --yachiyo-emote-bg: rgba(147, 51, 234, 0.08);
+  --yachiyo-emote-color: #7e22ce;
+  --yachiyo-emote-border: rgba(147, 51, 234, 0.2);
 
   /* ─── dsh 融合语义层：alias（浅色） ─── */
   --yx-alias-bg-base: #ffffff;

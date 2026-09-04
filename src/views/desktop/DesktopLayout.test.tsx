@@ -1,12 +1,14 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { useChatController } from "../../app/use-chat-controller";
 import type { Conversation } from "../../domain/chat";
 import { copyFor } from "../../i18n/messages";
 import { defaultWebSearchSettings } from "../../services/web-search-settings";
+import { projectManager } from "../../services/project-manager";
 import type { SharedViewProps } from "../layout-types";
 import { DesktopLayout } from "./DesktopLayout";
+
 
 describe("DesktopLayout", () => {
   const copy = copyFor("zh-CN");
@@ -160,7 +162,7 @@ describe("DesktopLayout", () => {
     expect(props.onRename).toHaveBeenCalledWith("conv-1", "重命名后的标题");
   });
 
-  it("handles desktop keyboard shortcuts Ctrl+N, Ctrl+B, Ctrl+,, and Ctrl+[", async () => {
+  it("handles desktop keyboard shortcuts Ctrl+N, Ctrl+1, Ctrl+2, Ctrl+,, and Ctrl+[", async () => {
     const user = userEvent.setup();
     const props = createMockProps();
     render(<DesktopLayout {...props} />);
@@ -168,11 +170,12 @@ describe("DesktopLayout", () => {
     await user.keyboard("{Control>}n{/Control}");
     expect(props.onNewChat).toHaveBeenCalled();
 
-    await user.keyboard("{Control>}b{/Control}");
-    expect(screen.getByRole("complementary", { name: "桌面多功能工具面板" })).toBeInTheDocument();
+    // 快捷键中栏视图切换 Ctrl+2 (编辑器) / Ctrl+1 (对话)
+    await user.keyboard("{Control>}2{/Control}");
+    expect(screen.getByRole("tab", { name: /编辑器/i })).toHaveAttribute("aria-selected", "true");
 
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("complementary", { name: "桌面多功能工具面板" })).not.toBeInTheDocument();
+    await user.keyboard("{Control>}1{/Control}");
+    expect(screen.getByRole("tab", { name: /对话/i })).toHaveAttribute("aria-selected", "true");
 
     // 快捷键打开设置中心 Ctrl+,
     await user.keyboard("{Control>},{/Control}");
@@ -228,17 +231,22 @@ describe("DesktopLayout", () => {
     }
   });
 
-  it("opens workspace pane when clicking context chip above composer", async () => {
+  it("opens project settings when clicking context chip above composer", async () => {
     const user = userEvent.setup();
+    await projectManager.switchProject("D:\\projects\\Yachiyo-chat-desktop");
     const props = createMockProps();
     render(<DesktopLayout {...props} />);
 
-    const contextChip = screen.getByTitle(/当前工作区：Yachiyo-chat-desktop/i);
+    const contextChip = screen.getByTitle(/当前项目：Yachiyo-chat-desktop/i);
     expect(contextChip).toBeInTheDocument();
 
     await user.click(contextChip);
-    expect(screen.getByRole("complementary", { name: "桌面多功能工具面板" })).toBeInTheDocument();
+    const gearBtn = screen.getByRole("button", { name: "项目配置" });
+    await user.click(gearBtn);
+    expect(screen.getByRole("dialog", { name: "设置中心" })).toBeInTheDocument();
   });
+
+
 
   it("renders composer centered inside hero in blank conversation and at bottom dock when messages exist", () => {
     const blankProps = createMockProps();
@@ -266,5 +274,38 @@ describe("DesktopLayout", () => {
     expect(activeContainer.querySelector(".desktop-hero")).not.toBeInTheDocument();
     const bottomComposer = activeContainer.querySelector(".desktop-composer-dock .dsh-composer-card");
     expect(bottomComposer).toBeInTheDocument();
+  });
+
+  it("opens SettingsModal on custom tab when clicking manage all skills in skill popover", async () => {
+    const user = userEvent.setup();
+    const props = createMockProps();
+    render(<DesktopLayout {...props} />);
+
+    // 点击技能胶囊打开 popover
+    const skillTrigger = screen.getByRole("button", { name: "技能快捷配置" });
+    await user.click(skillTrigger);
+
+    // 点击管理全部技能
+    const manageSkillsBtn = screen.getByRole("button", { name: /管理全部技能/i });
+    await user.click(manageSkillsBtn);
+
+    // 应唤起设置中心，且直达“自定义”标签页（技能与个性化记忆）
+    expect(screen.getByRole("dialog", { name: "设置中心" })).toBeInTheDocument();
+    expect(screen.getByText("技能与个性化记忆")).toBeInTheDocument();
+    expect(screen.getByText("技能扩展")).toBeInTheDocument();
+  });
+
+  it("does not render capture or settings buttons in top chat header", () => {
+    const props = createMockProps();
+    const { container } = render(<DesktopLayout {...props} />);
+
+    // 验证纯双栏架构：右侧多功能工具面板不存在
+    expect(screen.queryByRole("complementary", { name: "桌面多功能工具面板" })).not.toBeInTheDocument();
+
+    // 验证顶栏不再渲染设置与拍摄按钮
+    const header = container.querySelector(".desktop-chat-header");
+    expect(header).toBeInTheDocument();
+    expect(within(header as HTMLElement).queryByRole("button", { name: "设置与偏好" })).not.toBeInTheDocument();
+    expect(within(header as HTMLElement).queryByRole("button", { name: "拍摄" })).not.toBeInTheDocument();
   });
 });

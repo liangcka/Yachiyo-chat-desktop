@@ -174,13 +174,24 @@ async function handleUserKeyRequest(
   request: ClientChatRequest,
 ): Promise<Response> {
   const provider = getProvider(request.provider!);
-  if (!isAllowedModel(provider, request.model)) {
+  const hasBaseUrl = request.baseUrl !== undefined;
+  // 自定义端点仅支持 OpenAI 兼容协议（Claude/Gemini 为原生协议适配器）
+  if (hasBaseUrl && !provider.isOpenAICompat) {
+    return problemResponse("INVALID_REQUEST", 400);
+  }
+  // 自定义端点信任用户填写的模型名，跳过厂商白名单；原生路径维持白名单约束
+  if (!hasBaseUrl && !isAllowedModel(provider, request.model)) {
     return problemResponse("INVALID_REQUEST", 400);
   }
   if (!isValidApiKey(request.apiKey)) {
     return problemResponse("INVALID_REQUEST", 400);
   }
-  if (requestContainsImage(request) && !provider.imageModels.includes(request.model)) {
+  // 自定义模型的图片能力交由上游判定，仅对白名单模型做本地拦截
+  if (
+    !hasBaseUrl &&
+    requestContainsImage(request) &&
+    !provider.imageModels.includes(request.model!)
+  ) {
     return problemResponse("INVALID_REQUEST", 400);
   }
   const searchResults =
@@ -188,7 +199,14 @@ async function handleUserKeyRequest(
       ? undefined
       : await performWebSearchPipeline(request, {
           judge: (messages, signal) =>
-            judgeSearchNeed(provider, request.apiKey!, request.model!, messages, signal),
+            judgeSearchNeed(
+              provider,
+              request.apiKey!,
+              request.model!,
+              messages,
+              signal,
+              request.baseUrl,
+            ),
           signal: context.request.signal,
           env: context.env as unknown as Record<string, unknown>,
         });
@@ -196,6 +214,7 @@ async function handleUserKeyRequest(
     request: enrichRequest(request, searchResults),
     apiKey: request.apiKey!,
     model: request.model!,
+    ...(request.baseUrl !== undefined ? { baseUrl: request.baseUrl } : {}),
   });
   const handle = prepareUpstreamFetch(context);
   let upstream: Response;

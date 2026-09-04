@@ -11,12 +11,16 @@ export interface ProviderRequestInput {
   request: EnrichedChatRequest;
   apiKey: string;
   model: string;
+  /** 用户自定义 OpenAI 兼容端点；存在时覆盖厂商默认 endpoint */
+  baseUrl?: string;
 }
 
 /** 搜索意图判断请求的输入：简短 judge prompt + 最近若干轮纯文本消息 */
 export interface JudgeRequestInput {
   apiKey: string;
   model: string;
+  /** 用户自定义 OpenAI 兼容端点；与主请求保持同源，避免第三方 Key 发往默认端点 */
+  baseUrl?: string;
   systemPrompt: string;
   messages: ReadonlyArray<{ role: "user" | "assistant"; text: string }>;
 }

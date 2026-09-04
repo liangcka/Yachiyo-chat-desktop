@@ -129,6 +129,34 @@ describe("reference chat components", () => {
     expect(screen.queryByText("read_file")).not.toBeInTheDocument();
   });
 
+  it("assistant 消息展示生效技能标签", () => {
+    const message = makeAssistantMessage({
+      skills: ["深度思维", "Humanizer"],
+      text: "你好呀~",
+    });
+    render(<MessageBubble locale="zh-CN" message={message} />);
+    expect(screen.getByTitle("已生效技能：深度思维、Humanizer")).toBeInTheDocument();
+    expect(screen.getByText("深度思维 · Humanizer")).toBeInTheDocument();
+  });
+
+  it("ConversationView 展示已加载技能卡片", () => {
+    const skills = [
+      { id: "s1", name: "深度思维", description: "多步拆解与逻辑推理", content: "..." },
+      { id: "s2", name: "精准事实", description: "严谨事实核对与抗幻觉", content: "..." },
+    ];
+    render(
+      <ConversationView
+        activeSkills={skills}
+        locale="zh-CN"
+        messages={[]}
+      />,
+    );
+    expect(screen.getByText("已加载技能")).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getAllByText("深度思维")[0]).toBeInTheDocument();
+    expect(screen.getAllByText("精准事实")[0]).toBeInTheDocument();
+  });
+
   it("follows streaming updates only while the reader stays near the bottom", () => {
     const scrollIntoView = vi.mocked(Element.prototype.scrollIntoView);
     scrollIntoView.mockClear();

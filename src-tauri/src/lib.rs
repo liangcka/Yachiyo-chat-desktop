@@ -62,6 +62,37 @@ async fn execute_agent_tool(
     tools::execute_tool(&name, &arguments, &root, &state.http_client).await
 }
 
+/// UI 文件树懒加载：结构化目录条目（仅前端调用，不进 agent 工具 schema）
+#[tauri::command]
+fn list_workspace_entries(
+    state: State<DesktopState>,
+    path: Option<String>,
+) -> Result<Vec<tools::fs::WorkspaceEntry>, String> {
+    let root = state.workspace_manager.get_workspace_root();
+    tools::fs::list_workspace_entries(path.as_deref().unwrap_or("."), &root)
+}
+
+/// diff 审阅基线：读取文件在 HEAD 的内容
+#[tauri::command]
+async fn read_head_file(
+    state: State<'_, DesktopState>,
+    path: String,
+) -> Result<tools::git::HeadFile, String> {
+    let root = state.workspace_manager.get_workspace_root();
+    tools::git::read_head_file(&path, &root).await
+}
+
+/// 原生系统文件夹选择器（对标 "Open workspace" 对话框）
+#[tauri::command]
+async fn pick_folder(title: Option<String>) -> Result<Option<String>, String> {
+    let mut dialog = rfd::AsyncFileDialog::new();
+    if let Some(t) = title.as_deref() {
+        dialog = dialog.set_title(t);
+    }
+    let res = dialog.pick_folder().await;
+    Ok(res.map(|h| h.path().to_string_lossy().to_string()))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     info!("Starting Yachiyo Desktop App...");
@@ -161,6 +192,9 @@ pub fn run() {
             get_workspace_root,
             set_workspace_root,
             execute_agent_tool,
+            list_workspace_entries,
+            read_head_file,
+            pick_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

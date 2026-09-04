@@ -1,4 +1,4 @@
-import { Check, MessageSquare, Pencil, Pin, PinOff, Trash2, X } from "lucide-react";
+import { Check, MessageCircle, Pencil, Pin, PinOff, Trash2, X } from "lucide-react";
 import type { FormEvent, MouseEvent as ReactMouseEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { Conversation } from "../../../domain/chat";
@@ -115,7 +115,7 @@ export function SidebarConversationItem({
             className="desktop-sidebar__history-main"
             onClick={() => void onSelect(conversation.id)}
           >
-            <MessageSquare size={14} className="desktop-sidebar__history-icon" />
+            <MessageCircle size={14} className="desktop-sidebar__history-icon" />
             <span className="desktop-sidebar__history-title" title={conversation.title}>
               {conversation.title || copy.newChat}
             </span>

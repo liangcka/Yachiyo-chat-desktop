@@ -2,13 +2,12 @@ import {
   ArrowUp,
   Camera,
   Check,
-  FolderCode,
   Globe,
+
   PanelLeft,
   PanelLeftOpen,
   Pencil,
   Plus,
-  Settings,
   Sparkles,
   Square,
   Terminal,
@@ -16,31 +15,29 @@ import {
   X,
 } from "lucide-react";
 import type { FormEvent, KeyboardEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ContextMeter } from "../../components/ContextMeter";
 import { ConversationView } from "../../components/ConversationView";
 import { ModelSelect } from "../../components/desktop/ModelSelect";
+import { ProjectSelector } from "../../components/desktop/ProjectSelector";
 import { PermissionCard } from "../../components/tools/PermissionCard";
-import { CaptureButton } from "../../features/capture/CaptureButton";
 import { isRetryableChatErrorCode } from "../../services/chat-client";
-import { controllerErrorMessage, imageErrorMessage, type SharedViewProps } from "../layout-types";
-import type { DesktopRightTab } from "./DesktopSidebar";
+import { SKILLS } from "../../skills";
+
+import { controllerErrorMessage, type SharedViewProps } from "../layout-types";
 import type { SettingsTabKey } from "../../components/settings/SettingsModal";
 
 export interface DesktopChatAreaProps extends SharedViewProps {
-  activeRightTab: DesktopRightTab;
   onOpenSettings?: (tab?: SettingsTabKey) => void;
   onRenameConversation?: (id: string, title: string) => Promise<void>;
-  onSelectRightTab?: (tab: DesktopRightTab) => void;
   onToggleSidebar?: () => void;
-  onToggleWorkspace: () => void;
   resolvedTheme?: "light" | "dark";
   sidebarCollapsed?: boolean;
 }
 
 export function DesktopChatArea({
-  activeRightTab,
   activeProviderSupportsImage,
+  activeSkillIds = [],
   composerValue,
   controller,
   copy,
@@ -50,13 +47,14 @@ export function DesktopChatArea({
   llmEntries,
   onImage,
   onLlmActivate,
+  onNewChat,
   onOpenSettings,
   onRecall,
   onRegenerate,
   onRenameConversation,
   onSend,
+  onSkillToggle,
   onToggleSidebar,
-  onToggleWorkspace,
   pendingImageDataUrl,
   processImage,
   setComposerValue,
@@ -73,12 +71,40 @@ export function DesktopChatArea({
   const isBlank = controller.messages.length === 0 && !controller.activeConversation?.summary;
 
   // 顶栏标题即地编辑状态
+
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editingTitleDraft, setEditingTitleDraft] = useState("");
   const titleInputRef = useRef<HTMLInputElement>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 技能快捷面板状态
+  const [skillPopoverOpen, setSkillPopoverOpen] = useState(false);
+  const skillPopoverRef = useRef<HTMLDivElement>(null);
+
+  const activeSkills = useMemo(
+    () => SKILLS.filter((skill) => activeSkillIds.includes(skill.id)),
+    [activeSkillIds],
+  );
+
+  useEffect(() => {
+    if (!skillPopoverOpen) return;
+    const handlePointerDownDoc = (e: MouseEvent | PointerEvent) => {
+      if (skillPopoverRef.current && !skillPopoverRef.current.contains(e.target as Node)) {
+        setSkillPopoverOpen(false);
+      }
+    };
+    const handleKeyDownDoc = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setSkillPopoverOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDownDoc, true);
+    document.addEventListener("keydown", handleKeyDownDoc);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDownDoc, true);
+      document.removeEventListener("keydown", handleKeyDownDoc);
+    };
+  }, [skillPopoverOpen]);
 
   useEffect(() => {
     if (isEditingTitle) {
@@ -167,18 +193,15 @@ export function DesktopChatArea({
 
   const composerNode = (
     <div className="desktop-composer-dock__inner">
-      {/* 上下文标签 (Context Chip) 放置在输入框左上角外部 */}
+      {/* 项目选择与新建项目下拉菜单放置在输入框左上角外部 */}
       <div className="desktop-composer-context-row">
-        <button
-          type="button"
-          className="desktop-context-chip"
-          onClick={onToggleWorkspace}
-          title="当前工作区：Yachiyo-chat-desktop (点击切换/查看)"
-        >
-          <FolderCode size={13} />
-          <span>Yachiyo-chat-desktop</span>
-        </button>
+        <ProjectSelector
+          variant="composer"
+          onOpenSettings={() => onOpenSettings?.("project")}
+          onNewChat={onNewChat}
+        />
       </div>
+
 
       {isOffline ? <p className="status-banner">{copy.offline}</p> : null}
       {controller.phase === "error" &&
@@ -253,7 +276,7 @@ export function DesktopChatArea({
               title={copy.capture}
               aria-label={copy.capture}
               onClick={() => fileInputRef.current?.click()}
-              disabled={isOffline || isStreaming || isCompressing}
+              disabled={isOffline || isStreaming || isCompressing || !activeProviderSupportsImage}
             >
               <Plus size={15} />
             </button>
@@ -292,6 +315,90 @@ export function DesktopChatArea({
             >
               Agent
             </button>
+
+            {/* 技能快捷配置胶囊与浮窗 */}
+            <div className="dsh-skill-trigger-wrapper" ref={skillPopoverRef}>
+              <button
+                type="button"
+                className={`desktop-toggle ${activeSkillIds.length > 0 ? "desktop-toggle--active" : ""}`}
+                onClick={() => setSkillPopoverOpen((prev) => !prev)}
+                title={
+                  activeSkillIds.length > 0
+                    ? `已加载 ${activeSkillIds.length} 项技能 (点击展开配置)`
+                    : "加载技能 (点击配置)"
+                }
+                aria-label="技能快捷配置"
+                aria-expanded={skillPopoverOpen}
+              >
+                <Sparkles size={12} />
+                <span>技能</span>
+                {activeSkillIds.length > 0 ? (
+                  <span className="dsh-skill-count-badge">{activeSkillIds.length}</span>
+                ) : null}
+              </button>
+
+              {skillPopoverOpen ? (
+                <div className="dsh-skill-popover" role="dialog" aria-label="快捷加载技能">
+                  <div className="dsh-skill-popover__header">
+                    <div className="dsh-skill-popover__title">
+                      <Sparkles size={13} />
+                      <span>加载技能</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="dsh-skill-popover__close"
+                      onClick={() => setSkillPopoverOpen(false)}
+                      title="关闭"
+                      aria-label="关闭技能面板"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                  <ul className="dsh-skill-popover__list">
+                    {SKILLS.map((skill) => {
+                      const isActive = activeSkillIds.includes(skill.id);
+                      return (
+                        <li key={skill.id} className="dsh-skill-popover__item">
+                          <button
+                            type="button"
+                            role="checkbox"
+                            aria-checked={isActive}
+                            onClick={() => {
+                              if (onSkillToggle) {
+                                void onSkillToggle(skill.id, !isActive);
+                              }
+                            }}
+                            className="dsh-skill-popover__btn"
+                          >
+                            <span className={`dsh-skill-popover__checkbox-custom ${isActive ? "dsh-skill-popover__checkbox-custom--checked" : ""}`}>
+                              {isActive ? <Check size={11} strokeWidth={3} /> : null}
+                            </span>
+                            <div className="dsh-skill-popover__item-meta">
+                              <span className="dsh-skill-popover__item-name">{skill.name}</span>
+                              <span className="dsh-skill-popover__item-desc">{skill.description}</span>
+                            </div>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {onOpenSettings ? (
+                    <div className="dsh-skill-popover__footer">
+                      <button
+                        type="button"
+                        className="dsh-skill-popover__more-btn"
+                        onClick={() => {
+                          setSkillPopoverOpen(false);
+                          onOpenSettings("custom");
+                        }}
+                      >
+                        管理全部技能 &rarr;
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
           </div>
 
           <div className="dsh-composer-card__tools-right">
@@ -303,11 +410,7 @@ export function DesktopChatArea({
                 void onLlmActivate(provider);
               }}
               onOpenSettings={() => {
-                if (onOpenSettings) {
-                  onOpenSettings("models");
-                } else {
-                  onToggleWorkspace();
-                }
+                onOpenSettings?.("models");
               }}
               disabled={isOffline || isStreaming}
             />
@@ -436,39 +539,6 @@ export function DesktopChatArea({
             ) : null}
           </div>
         </div>
-
-        <div className="desktop-chat-header__actions">
-          <CaptureButton
-            copy={copy}
-            disabled={isOffline || isStreaming || isCompressing || !activeProviderSupportsImage}
-            onError={(code) => showToast(imageErrorMessage(code, copy), "error")}
-            onImage={onImage}
-            process={processImage}
-          />
-
-          <button
-            type="button"
-            className={`desktop-chat-header__btn ${activeRightTab === "workspace" ? "desktop-chat-header__btn--active" : ""}`}
-            onClick={onToggleWorkspace}
-            title={activeRightTab === "workspace" ? "收起右侧工作台 (Ctrl+B)" : "打开 IDE / 工作台 (Ctrl+B)"}
-          >
-            <FolderCode size={15} />
-            <span>工作区</span>
-            <kbd className="desktop-chat-header__kbd">^B</kbd>
-          </button>
-
-          {onOpenSettings ? (
-            <button
-              type="button"
-              className="desktop-chat-header__icon-btn"
-              onClick={() => onOpenSettings("general")}
-              title="设置与偏好 (Ctrl+,)"
-              aria-label="设置与偏好"
-            >
-              <Settings size={17} />
-            </button>
-          ) : null}
-        </div>
       </header>
 
       {/* 消息流与 Hero 区域 */}
@@ -477,6 +547,9 @@ export function DesktopChatArea({
           <div className="desktop-hero" role="region" aria-label="欢迎体验">
             {/* 极简大标题 */}
             <div className="desktop-hero__headline">
+              <span className="desktop-hero__icon-halo" aria-hidden="true">
+                <Sparkles size={20} />
+              </span>
               <span className="desktop-hero__title">
                 {controller.locale === "ja-JP" ? "月見八千代" : "月见八千代"}
               </span>
@@ -555,6 +628,7 @@ export function DesktopChatArea({
           </div>
         ) : (
           <ConversationView
+            activeSkills={activeSkills}
             hasMoreHistory={controller.hasMoreHistory}
             imageUrls={imageUrls}
             key={controller.activeConversation?.id}

@@ -628,6 +628,10 @@ describe("useChatController", () => {
       role: "user",
       text: "帮我改写这段话",
     });
+
+    const lastMessage = result.current.messages.at(-1);
+    expect(lastMessage?.role).toBe("assistant");
+    expect(lastMessage?.skills).toEqual(["Humanizer"]);
   });
 
   it("sends webSearch flag when enabled and persists sources received before deltas", async () => {
@@ -1297,5 +1301,95 @@ describe("useChatController", () => {
       }),
       expect.anything(),
     );
+  });
+
+  it("does not create a new conversation when the active conversation is already empty", async () => {
+    const emptyConv: Conversation = {
+      createdAt: 10,
+      id: "empty-conv",
+      locale: "zh-CN",
+      title: "新的对话",
+      updatedAt: 10,
+    };
+    const repository = repositoryWith({
+      createConversation: vi.fn(),
+      getConversation: vi.fn(async (id: string) => (id === "empty-conv" ? emptyConv : undefined)),
+      listConversations: vi.fn(async () => [emptyConv]),
+      listMessages: vi.fn(async () => []),
+    });
+    const { result } = renderHook(() =>
+      useChatController({
+        id: () => "msg-1",
+        repository,
+        streamChat: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    expect(result.current.activeConversation?.id).toBe("empty-conv");
+    expect(result.current.messages).toHaveLength(0);
+
+    await act(async () => {
+      await result.current.newConversation();
+    });
+
+    expect(repository.createConversation).not.toHaveBeenCalled();
+    expect(result.current.activeConversation?.id).toBe("empty-conv");
+  });
+
+  it("reuses existing blank conversation instead of creating another one", async () => {
+    const blankConv: Conversation = {
+      createdAt: 10,
+      id: "blank-conv",
+      locale: "zh-CN",
+      title: "新的对话",
+      updatedAt: 10,
+    };
+    const activeConv: Conversation = {
+      createdAt: 20,
+      id: "active-conv",
+      locale: "zh-CN",
+      title: "已有会话",
+      updatedAt: 20,
+    };
+    const activeMessage: ChatMessage = {
+      conversationId: "active-conv",
+      createdAt: 21,
+      id: "msg-active",
+      role: "user",
+      status: "complete",
+      text: "已有内容",
+    };
+
+    const repository = repositoryWith({
+      createConversation: vi.fn(),
+      getConversation: vi.fn(async (id: string) => {
+        if (id === "active-conv") return activeConv;
+        if (id === "blank-conv") return blankConv;
+        return undefined;
+      }),
+      listConversations: vi.fn(async () => [activeConv, blankConv]),
+      listMessages: vi.fn(async (id: string) => {
+        if (id === "active-conv") return [activeMessage];
+        return [];
+      }),
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        id: () => "msg-1",
+        repository,
+        streamChat: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    expect(result.current.activeConversation?.id).toBe("active-conv");
+
+    await act(async () => {
+      await result.current.newConversation();
+    });
+
+    expect(repository.createConversation).not.toHaveBeenCalled();
+    expect(result.current.activeConversation?.id).toBe("blank-conv");
   });
 });

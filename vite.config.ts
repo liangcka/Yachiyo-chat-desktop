@@ -65,6 +65,9 @@ export default defineConfig({
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [],
+        // Monaco 懒加载资源超 workbox precache 2MiB 上限，且仅在打开编辑器视图时才请求：
+        // 从 SW 预缓存排除（桌面端走 Tauri 本地资源，Web 端编辑器按需在线加载）
+        globIgnores: ["**/*worker*.js", "**/editor.api*.js"],
       },
     }),
   ],

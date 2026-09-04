@@ -7,6 +7,7 @@ import {
   getProviderMeta,
   isProviderId,
   isValidApiKey,
+  isValidBaseUrl,
 } from "../domain/llm";
 
 import { isDesktopApp } from "./app-platform";
@@ -78,6 +79,7 @@ export class LlmSettingsService {
       provider: record.provider,
       apiKey: record.apiKey.trim(),
       model: record.model,
+      ...(record.baseUrl !== undefined ? { baseUrl: record.baseUrl } : {}),
     };
   }
 
@@ -92,12 +94,13 @@ export class LlmSettingsService {
   /**
    * 保存某厂商配置并（可选）将其设为激活。
    * 若当前没有任何激活厂商且未显式指定 activate，则自动激活以便用户立即生效。
+   * 带 baseUrl（自定义 OpenAI 兼容端点）时跳过模型白名单，模型名交由上游校验。
    */
   async saveProvider(
     provider: ProviderId,
     apiKey: string,
     model: string,
-    options: { activate?: boolean } = {},
+    options: { activate?: boolean; baseUrl?: string } = {},
   ): Promise<LlmSettingsRecord> {
     const trimmedKey = apiKey.trim();
     if (isDesktopApp()) {
@@ -107,13 +110,25 @@ export class LlmSettingsService {
         body: JSON.stringify({ provider, key: trimmedKey }),
       }).catch(() => undefined);
     }
+    const baseUrl = options.baseUrl?.trim() || undefined;
+    if (baseUrl !== undefined && !isValidBaseUrl(baseUrl)) {
+      throw new Error("Invalid base URL");
+    }
     const meta = getProviderMeta(provider);
-    const validModel = meta.models.includes(model) ? model : meta.defaultModel;
+    const trimmedModel = model.trim();
+    // 无自定义端点时按厂商白名单收敛，防止静默保存错误模型名
+    const validModel =
+      baseUrl !== undefined
+        ? trimmedModel || meta.defaultModel
+        : meta.models.includes(trimmedModel)
+          ? trimmedModel
+          : meta.defaultModel;
     const record: LlmSettingsRecord = {
       provider,
       apiKey: trimmedKey,
       model: validModel,
       updatedAt: Date.now(),
+      ...(baseUrl !== undefined ? { baseUrl } : {}),
     };
     await this.db.transaction("rw", this.db.llmSettings, this.db.settings, async () => {
       const currentActive = await this.db.settings.get(ACTIVE_PROVIDER_KEY);

@@ -196,4 +196,40 @@ describe("buildOpenAICompatAdapter", () => {
     expect(body.model).toBe("gpt-5.6-luna");
     expect(body.stream).toBe(true);
   });
+
+  it("overrides the endpoint with a custom base URL for both request kinds", () => {
+    const baseUrl = "https://ark.cn-beijing.volces.com/api/v3";
+    const apiKey = "sk-" + "a".repeat(40);
+
+    const streamBuilt = adapter.buildRequest({
+      request: textRequest,
+      apiKey,
+      model: "doubao-pro-32k",
+      baseUrl,
+    });
+    expect(streamBuilt.url).toBe(`${baseUrl}/chat/completions`);
+    expect(JSON.parse(streamBuilt.body) as Record<string, unknown>).toMatchObject({
+      model: "doubao-pro-32k",
+    });
+
+    const judgeBuilt = adapter.buildJudgeRequest({
+      apiKey,
+      model: "doubao-pro-32k",
+      baseUrl,
+      systemPrompt: "judge",
+      messages: [{ role: "user", text: "上海天气" }],
+    });
+    expect(judgeBuilt.url).toBe(`${baseUrl}/chat/completions`);
+  });
+
+  it("strips trailing slashes from a custom base URL", () => {
+    const built = adapter.buildRequest({
+      request: textRequest,
+      apiKey: "sk-" + "a".repeat(40),
+      model: "gpt-5.6-luna",
+      baseUrl: "https://api.siliconflow.cn/v1/",
+    });
+
+    expect(built.url).toBe("https://api.siliconflow.cn/v1/chat/completions");
+  });
 });

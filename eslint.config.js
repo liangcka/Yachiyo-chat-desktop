@@ -12,6 +12,7 @@ export default tseslint.config(
       "**/.wrangler",
       "android",
       "coverage",
+      "design-preview",
       "dist",
       "functions/runtime-types.d.ts",
       "node_modules",

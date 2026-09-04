@@ -111,6 +111,39 @@ export interface UiCopy {
   readonly workspaceEntry: string;
   readonly workspaceTitle: string;
   readonly workspaceDescription: string;
+  /* 阶段二编辑器三件套（B1 编辑器 / B2 变更审阅 / B3 文件树与 @ 引用） */
+  readonly editorViewTab: string;
+  readonly editorTab: string;
+  readonly editorTabEmpty: string;
+  readonly editorSaving: string;
+  readonly editorModified: string;
+  readonly editorSaved: string;
+  readonly editorReadOnly: string;
+  readonly editorSaveHint: string;
+  readonly editorCloseTab: string;
+  readonly reviewTitle: string;
+  readonly reviewEmpty: string;
+  readonly reviewCards: string;
+  readonly reviewCompare: string;
+  readonly reviewAccept: string;
+  readonly reviewReject: string;
+  readonly reviewAccepted: string;
+  readonly reviewRejected: string;
+  readonly reviewPending: string;
+  readonly reviewApply: string;
+  readonly reviewResetAll: string;
+  readonly reviewAddedNote: string;
+  readonly reviewDeletedNote: string;
+  readonly reviewNoSelection: string;
+  readonly reviewDiffEmpty: string;
+  readonly reviewFilesLabel: string;
+  readonly reviewEntryButton: string;
+  readonly refreshFileTree: string;
+  readonly treeLoading: string;
+  readonly treeEmpty: string;
+  readonly treeLoadingDir: string;
+  readonly referenceToChat: string;
+  readonly referenceFileLabel: (name: string) => string;
   readonly themeLabel: string;
   readonly themeLight: string;
   readonly themeDark: string;
@@ -229,6 +262,38 @@ const chinese = Object.freeze({
   workspaceEntry: "工作区 & Agent",
   workspaceTitle: "工作区 & Agent 终端",
   workspaceDescription: "配置本地 Agent 工具的运行目录，支持安全文件读写与终端命令执行。",
+  editorViewTab: "对话",
+  editorTab: "编辑器",
+  editorTabEmpty: "从右侧文件树选择文件打开",
+  editorSaving: "保存中…",
+  editorModified: "● 已修改",
+  editorSaved: "已保存",
+  editorReadOnly: "只读（大文件）",
+  editorSaveHint: "Ctrl+S 保存（write_file + checkpoint）",
+  editorCloseTab: "关闭标签页",
+  reviewTitle: "变更审阅",
+  reviewEmpty: "工作区无未提交变更",
+  reviewCards: "卡片",
+  reviewCompare: "对比",
+  reviewAccept: "采纳",
+  reviewReject: "拒绝",
+  reviewAccepted: "已采纳",
+  reviewRejected: "已拒绝",
+  reviewPending: "待处理",
+  reviewApply: "应用采纳",
+  reviewResetAll: "全部重置",
+  reviewAddedNote: "新文件 · 仅查看",
+  reviewDeletedNote: "删除 · 不支持恢复",
+  reviewNoSelection: "选择左侧变更文件查看差异",
+  reviewDiffEmpty: "与 HEAD 无内容差异",
+  reviewFilesLabel: "变更文件",
+  reviewEntryButton: "审阅",
+  refreshFileTree: "刷新文件树",
+  treeLoading: "加载工作区…",
+  treeEmpty: "（空目录或未连接桌面运行时）",
+  treeLoadingDir: "加载中…",
+  referenceToChat: "引用到对话",
+  referenceFileLabel: (name) => `引用 ${name} 到对话`,
   themeLabel: "外观",
   themeLight: "浅色",
   themeDark: "深色",
@@ -348,6 +413,38 @@ const japanese = Object.freeze({
   workspaceEntry: "ワークスペース & Agent",
   workspaceTitle: "ワークスペース & Agent ターミナル",
   workspaceDescription: "ローカルAgentツールの実行ディレクトリを設定し、安全なファイル読み書きとターミナルコマンド実行をサポートします。",
+  editorViewTab: "チャット",
+  editorTab: "エディター",
+  editorTabEmpty: "右側のファイルツリーからファイルを開いてください",
+  editorSaving: "保存中…",
+  editorModified: "● 変更あり",
+  editorSaved: "保存済み",
+  editorReadOnly: "読み取り専用（大容量ファイル）",
+  editorSaveHint: "Ctrl+S 保存（write_file + checkpoint）",
+  editorCloseTab: "タブを閉じる",
+  reviewTitle: "変更レビュー",
+  reviewEmpty: "ワークスペースに未コミットの変更はありません",
+  reviewCards: "カード",
+  reviewCompare: "比較",
+  reviewAccept: "採用",
+  reviewReject: "拒否",
+  reviewAccepted: "採用済み",
+  reviewRejected: "拒否済み",
+  reviewPending: "未処理",
+  reviewApply: "採用を適用",
+  reviewResetAll: "すべてリセット",
+  reviewAddedNote: "新規ファイル · 閲覧のみ",
+  reviewDeletedNote: "削除 · 復元非対応",
+  reviewNoSelection: "左側の変更ファイルを選択して差分を確認",
+  reviewDiffEmpty: "HEAD との差分はありません",
+  reviewFilesLabel: "変更ファイル",
+  reviewEntryButton: "レビュー",
+  refreshFileTree: "ファイルツリーを更新",
+  treeLoading: "ワークスペースを読み込み中…",
+  treeEmpty: "（空のディレクトリまたはデスクトップランタイム未接続）",
+  treeLoadingDir: "読み込み中…",
+  referenceToChat: "チャットに引用",
+  referenceFileLabel: (name) => `${name} をチャットに引用`,
   themeLabel: "外観",
   themeLight: "ライト",
   themeDark: "ダーク",

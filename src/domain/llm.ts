@@ -130,6 +130,8 @@ export interface LlmSettingsRecord {
   readonly apiKey: string;
   readonly model: string;
   readonly updatedAt: number;
+  /** 自定义 OpenAI 兼容端点；存在时跳过模型白名单，模型名交由上游校验 */
+  readonly baseUrl?: string;
 }
 
 /** 发送聊天请求时携带的激活配置（未配置 Key 时为 undefined，走服务端 fallback） */
@@ -137,6 +139,7 @@ export interface ActiveLlmConfig {
   readonly provider: ProviderId;
   readonly apiKey: string;
   readonly model: string;
+  readonly baseUrl?: string;
 }
 
 /** 扩展供应商展示卡片模型（支持图 2 丰富的供应商选择列表） */
@@ -364,4 +367,10 @@ export function isValidApiKey(value: string): boolean {
   return /^[\x20-\x7E]+$/u.test(trimmed);
 }
 
+/** 前端 Base URL 校验：https 起始、无空白字符、≤2048（与后端校验对齐） */
+export function isValidBaseUrl(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > 2048) return false;
+  return /^https:\/\/\S+$/u.test(trimmed);
+}
 

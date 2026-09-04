@@ -59,6 +59,44 @@ describe("LlmSettingsService", () => {
     expect(record.model).toBe("gemini-3.7-flash");
   });
 
+  it("keeps an arbitrary model name when a base URL is configured", async () => {
+    const record = await service.saveProvider("openai", VALID_KEY, "doubao-pro-32k", {
+      baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    });
+
+    expect(record.model).toBe("doubao-pro-32k");
+    expect(record.baseUrl).toBe("https://ark.cn-beijing.volces.com/api/v3");
+    expect(await service.get("openai")).toMatchObject({ model: "doubao-pro-32k" });
+  });
+
+  it("normalizes an empty base URL to undefined and keeps the whitelist fallback", async () => {
+    const record = await service.saveProvider("openai", VALID_KEY, "gpt-5.6-luna", {
+      baseUrl: "   ",
+    });
+
+    expect(record.baseUrl).toBeUndefined();
+  });
+
+  it("rejects an invalid base URL", async () => {
+    await expect(
+      service.saveProvider("openai", VALID_KEY, "gpt-5.6-luna", { baseUrl: "http://insecure" }),
+    ).rejects.toThrow();
+  });
+
+  it("getActiveConfig carries the base URL of the active provider", async () => {
+    await service.saveProvider("openai", VALID_KEY, "qwen-max", {
+      baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    });
+
+    const config = await service.getActiveConfig();
+    expect(config).toEqual({
+      provider: "openai",
+      apiKey: VALID_KEY,
+      model: "qwen-max",
+      baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    });
+  });
+
   it("getActiveConfig returns undefined when active provider has no record", async () => {
     await service.saveProvider("openai", VALID_KEY, "gpt-5.6-luna");
     await service.clear("openai");

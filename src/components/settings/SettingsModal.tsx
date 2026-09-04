@@ -7,7 +7,6 @@ import {
   Globe,
   HelpCircle,
   Keyboard,
-  LogOut,
   MoreHorizontal,
   Palette,
   Sliders,
@@ -62,7 +61,6 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTabKey>(initialTab);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
 
   // 1. 排队消息策略 ('queue' | 'immediate')
   const [queuePolicy, setQueuePolicy] = useState<"queue" | "immediate">(() => {
@@ -738,43 +736,6 @@ export function SettingsModal({
                   </div>
                 </div>
               </div>
-
-              {/* 3. 退出登录操作 */}
-              <div className="settings-card-group" style={{ marginTop: 24 }}>
-                {showSignOutConfirm ? (
-                  <div className="settings-confirm-row">
-                    <span style={{ fontSize: 13, color: "var(--yx-alias-state-error)" }}>
-                      确认退出当前登录账号并清除本地 Session？
-                    </span>
-                    <button
-                      type="button"
-                      className="settings-btn settings-btn--danger"
-                      onClick={() => {
-                        setShowSignOutConfirm(false);
-                        void shared.onSignOut();
-                      }}
-                    >
-                      确认退出
-                    </button>
-                    <button
-                      type="button"
-                      className="settings-btn"
-                      onClick={() => setShowSignOutConfirm(false)}
-                    >
-                      取消
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className="settings-btn settings-btn--ghost"
-                    style={{ padding: "8px 18px", fontSize: 13 }}
-                    onClick={() => setShowSignOutConfirm(true)}
-                  >
-                    退出登录
-                  </button>
-                )}
-              </div>
             </div>
           ) : null}
 
@@ -879,6 +840,7 @@ export function SettingsModal({
                       return saved;
                     }}
                     open={true}
+                    embedded={true}
                   />
                 </div>
 
@@ -893,6 +855,8 @@ export function SettingsModal({
                     open={true}
                     skills={SKILLS}
                     webSearchSettings={shared.webSearchSettings}
+                    embedded={true}
+                    hideWebSearch={true}
                   />
                 </div>
               </div>
@@ -914,8 +878,10 @@ export function SettingsModal({
                 onToggle={(id, next) => void shared.onSkillToggle(id, next)}
                 onWebSearchSettingsChange={shared.onWebSearchSettingsChange}
                 open={true}
-                skills={SKILLS.filter((s) => s.id === "web_search" || s.id === "dsh_terminal")}
+                skills={[]}
                 webSearchSettings={shared.webSearchSettings}
+                embedded={true}
+                onlyWebSearch={true}
               />
             </div>
           ) : null}
@@ -999,17 +965,16 @@ export function SettingsModal({
 
                 <div className="settings-item-card">
                   <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">退出登录并清除凭据</strong>
-                    <span className="settings-item-card__desc">清除当前会话鉴权 Session Cookie 并返回验证网关。</span>
+                    <strong className="settings-item-card__name">清除服务端凭据</strong>
+                    <span className="settings-item-card__desc">清除当前设备在服务端保存的会话 Session Cookie。</span>
                   </div>
                   <div className="settings-item-card__action">
                     <button
                       type="button"
-                      className="settings-btn settings-btn--danger"
+                      className="settings-btn settings-btn--ghost"
                       onClick={() => void shared.onSignOut()}
                     >
-                      <LogOut size={13} style={{ display: "inline", marginRight: 4 }} />
-                      退出登录
+                      清除凭据
                     </button>
                   </div>
                 </div>

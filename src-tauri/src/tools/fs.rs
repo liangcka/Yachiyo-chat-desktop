@@ -79,6 +79,46 @@ pub fn write_file(path_str: &str, content: &str, workspace_root: &Path) -> Resul
         .map_err(|e| format!("Failed to write file '{}': {}", path_str, e))
 }
 
+/// UI 文件树专用：结构化目录条目（替代 list_directory 的 `/` 后缀字符串协议）
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceEntry {
+    pub name: String,
+    pub is_dir: bool,
+}
+
+pub fn list_workspace_entries(
+    path_str: &str,
+    workspace_root: &Path,
+) -> Result<Vec<WorkspaceEntry>, String> {
+    let target = if path_str.is_empty() || path_str == "." {
+        workspace_root.to_path_buf()
+    } else {
+        resolve_in_workspace(path_str, workspace_root)?
+    };
+
+    if !is_path_inside_workspace(&target, workspace_root) {
+        return Err(format!("Access denied: Path '{}' is outside workspace boundary", path_str));
+    }
+
+    let entries = fs::read_dir(&target).map_err(|e| format!("Failed to read directory: {}", e))?;
+    let mut results: Vec<WorkspaceEntry> = entries
+        .flatten()
+        .map(|entry| WorkspaceEntry {
+            name: entry.file_name().to_string_lossy().to_string(),
+            is_dir: entry.file_type().map(|t| t.is_dir()).unwrap_or(false),
+        })
+        .collect();
+
+    // 目录在前、同类按名称排序，保证树结构展示稳定
+    results.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.cmp(&b.name),
+    });
+    Ok(results)
+}
+
 pub fn list_directory(path_str: &str, workspace_root: &Path) -> Result<Vec<String>, String> {
     let target = if path_str.is_empty() || path_str == "." {
         workspace_root.to_path_buf()

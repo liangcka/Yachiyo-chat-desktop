@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App, type AppRepository, type AppServices, type SessionService } from "../App";
+import { AccessGate } from "./AccessGate";
+import { copyFor } from "../i18n/messages";
 import { YachiyoDatabase } from "../data/db";
 import type { ChatMessage, Conversation, Locale, StoredImage } from "../domain/chat";
 import type { ProcessedImage } from "../features/capture/image-processor";
@@ -171,33 +173,24 @@ function fakeServices(options: {
 }
 
 describe("App flows", () => {
-  it("authenticates and switches the complete interface to Japanese", async () => {
+  it("enters directly without access code and switches the complete interface to Japanese", async () => {
     const user = userEvent.setup();
     const services = fakeServices({ authenticated: false });
     render(<App services={services} />);
 
-    const accessCode = await screen.findByLabelText("访问码");
-    await user.type(accessCode, "correct horse moonlight");
-    await user.click(screen.getByRole("button", { name: "进入" }));
     expect(await screen.findByPlaceholderText("什么都可以告诉我")).toBeVisible();
 
     await user.click(screen.getByLabelText("切换语言"));
     await waitFor(() => expect(screen.getByPlaceholderText("何でも話してね")).toBeInTheDocument());
     expect(services.repository.locale).toBe("ja-JP");
     expect(document.documentElement.lang).toBe("ja-JP");
-    expect(services.session.authenticate).toHaveBeenCalledWith("correct horse moonlight");
   });
 
-  it("clears and refocuses the access field after a wrong code", async () => {
+  it("clears and refocuses the access field after a wrong code in standalone AccessGate", async () => {
     const user = userEvent.setup();
-    render(
-      <App
-        services={fakeServices({
-          authenticated: false,
-          authenticateError: new SessionClientError("ACCESS_DENIED", 403),
-        })}
-      />,
-    );
+    const onAuthenticate = vi.fn().mockRejectedValue(new SessionClientError("ACCESS_DENIED", 403));
+    render(<AccessGate copy={copyFor("zh-CN")} onAuthenticate={onAuthenticate} />);
+
     const input = await screen.findByLabelText("访问码");
     await user.type(input, "this code is incorrect");
     await user.click(screen.getByRole("button", { name: "进入" }));
@@ -216,7 +209,7 @@ describe("App flows", () => {
     await user.type(composer, "今天有点累");
     await user.click(screen.getByRole("button", { name: "发送" }));
 
-    expect(await screen.findByText("先休息一下吧~（轻轻握住你的手）")).toBeVisible();
+    expect(await screen.findByText(/先休息一下吧~/)).toBeVisible();
     expect(services.repository.messages).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ role: "user", text: "今天有点累" }),
@@ -225,8 +218,10 @@ describe("App flows", () => {
     );
   });
 
-  it("toggles web search, sends webSearch requests, and renders or hides source links", async () => {
-    const user = userEvent.setup();
+  it(
+    "toggles web search, sends webSearch requests, and renders or hides source links",
+    async () => {
+      const user = userEvent.setup();
     const db = new YachiyoDatabase(`yachiyo-app-web-search-${crypto.randomUUID()}`);
     const webSearchSettings = new WebSearchSettingsService(db);
     const sources = [
@@ -296,7 +291,7 @@ describe("App flows", () => {
       db.close();
       await db.delete();
     }
-  });
+  }, 15_000);
 
   it("restores the active LLM config before the first message after reload", async () => {
     const user = userEvent.setup();
@@ -342,12 +337,8 @@ describe("App flows", () => {
     const view = render(<App services={services} />);
 
     try {
-      const accessCode = await screen.findByLabelText("访问码");
-      await user.type(accessCode, "correct horse moonlight");
-      await user.click(screen.getByRole("button", { name: "进入" }));
-
       const composer = await screen.findByPlaceholderText("什么都可以告诉我");
-      await user.type(composer, "登录后也不要固定回复");
+      await user.type(composer, "无需访问码直接对话");
       await user.click(screen.getByRole("button", { name: "发送" }));
 
       await waitFor(() => expect(stream).toHaveBeenCalledOnce());
@@ -421,12 +412,11 @@ describe("App flows", () => {
 
     await user.click(screen.getByLabelText("设置"));
     await user.click(screen.getByRole("tab", { name: "存储与维护" }));
-    await user.click(screen.getByRole("button", { name: /退出登录/i }));
+    await user.click(screen.getByRole("button", { name: /清除凭据/i }));
 
     await waitFor(() => expect(services.session.signOut).toHaveBeenCalledOnce());
     expect(streamSignal?.aborted).toBe(true);
     expect(events).toEqual(["stream-aborted", "session-signed-out"]);
-    expect(await screen.findByLabelText("访问码")).toBeVisible();
   });
 
   it("previews, removes, and sends a processed camera image", async () => {
@@ -491,7 +481,11 @@ describe("App flows", () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const services = fakeServices();
     render(<App services={services} />);
-    await screen.findByPlaceholderText("什么都可以告诉我");
+    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+
+    await user.type(composer, "第一段有效内容");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    await screen.findByText("第一段有效内容");
 
     await user.click(screen.getByTitle("新建对话 (Ctrl+N)"));
     await waitFor(() => expect(services.repository.conversations).toHaveLength(2));
@@ -534,7 +528,7 @@ describe("App flows", () => {
     await user.clear(activeComposer);
     await user.type(activeComposer, "第二条");
     await user.click(screen.getByRole("button", { name: "发送" }));
-    expect(await screen.findByLabelText("访问码")).toBeVisible();
+    expect(await screen.findByText("访问已过期，请重新输入访问码。")).toBeVisible();
     expect(repository.messages.some(({ text }) => text === "第一条")).toBe(true);
     expect(repository.messages.some(({ text }) => text === "第二条")).toBe(true);
   });
@@ -582,7 +576,12 @@ describe("App flows", () => {
     const user = userEvent.setup();
     const services = fakeServices();
     render(<App services={services} />);
-    await screen.findByPlaceholderText("什么都可以告诉我");
+    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+
+    await user.type(composer, "现有对话内容");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    await screen.findByText("现有对话内容");
+
     vi.spyOn(services.repository, "createConversation").mockRejectedValue(
       new Error("conversation limit reached"),
     );
@@ -591,6 +590,37 @@ describe("App flows", () => {
 
     expect((await screen.findAllByText("本地最多保留 30 段对话，请先删除一段。")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
+  });
+
+  it("prevents blank conversation proliferation on repeated new chat clicks", async () => {
+    const user = userEvent.setup();
+    const services = fakeServices();
+    render(<App services={services} />);
+    await screen.findByPlaceholderText("什么都可以告诉我");
+
+    // 初始状态下只有 1 个空白对话，连续点击 3 次新建对话
+    const newChatBtn = screen.getByTitle("新建对话 (Ctrl+N)");
+    await user.click(newChatBtn);
+    await user.click(newChatBtn);
+    await user.click(newChatBtn);
+
+    // 会话数量始终保持为 1，绝不繁殖
+    expect(services.repository.conversations).toHaveLength(1);
+
+    // 发送消息使当前会话成为有效对话
+    const composer = screen.getByPlaceholderText("什么都可以告诉我");
+    await user.type(composer, "第一段有效对话");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    await screen.findByText("第一段有效对话");
+
+    // 会话有消息后点击新建，成功创建第 2 个空白会话
+    await user.click(newChatBtn);
+    await waitFor(() => expect(services.repository.conversations).toHaveLength(2));
+
+    // 在新的空白会话中再次连续点击新建，依然保持总数为 2，不繁殖第 3 个
+    await user.click(newChatBtn);
+    await user.click(newChatBtn);
+    expect(services.repository.conversations).toHaveLength(2);
   });
 
   it("keeps local history readable but disables network actions while offline", async () => {

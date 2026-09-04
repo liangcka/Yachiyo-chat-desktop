@@ -19,6 +19,7 @@ import {
   PROVIDER_METADATA,
   getProviderMeta,
   isValidApiKey,
+  isValidBaseUrl,
   type ModelVendorItem,
   type ProviderId,
 } from "../domain/llm";
@@ -28,6 +29,7 @@ export interface LlmProviderEntry {
   provider: ProviderId;
   apiKey: string;
   model: string;
+  baseUrl?: string;
 }
 
 export interface LlmSettingsPanelProps {
@@ -36,7 +38,7 @@ export interface LlmSettingsPanelProps {
   activeProvider?: ProviderId;
   entries: readonly LlmProviderEntry[];
   onClose: () => void;
-  onSave: (provider: ProviderId, apiKey: string, model: string) => Promise<void>;
+  onSave: (provider: ProviderId, apiKey: string, model: string, baseUrl?: string) => Promise<void>;
   onClear: (provider: ProviderId) => Promise<void>;
   onActivate: (provider: ProviderId) => Promise<void>;
 }
@@ -164,7 +166,7 @@ export function LlmSettingsPanel({
     const entry = entries.find((item) => item.provider === providerId);
     setApiKeyInput(entry?.apiKey ?? "");
     setModelInput(currentModelName || entry?.model || vendor.defaultModel);
-    setCustomBaseUrl(vendor.defaultBaseUrl ?? "");
+    setCustomBaseUrl(entry?.baseUrl ?? vendor.defaultBaseUrl ?? "");
     setModalMode("config");
   };
 
@@ -172,9 +174,11 @@ export function LlmSettingsPanel({
     const finalModel = isCustomModel
       ? customModelName.trim() || "custom-model"
       : modelInput.trim();
+    // Base URL 仅在自定义模型或带默认端点的厂商配置中采集，其余保持 undefined 走原生端点
+    const finalBaseUrl = customBaseUrl.trim() || undefined;
     await runAction(
       async () => {
-        await onSave(selectedProvider, apiKeyInput, finalModel);
+        await onSave(selectedProvider, apiKeyInput, finalModel, finalBaseUrl);
         await onActivate(selectedProvider);
       },
       copy.llmSaved,
@@ -201,87 +205,28 @@ export function LlmSettingsPanel({
     }, copy.llmCleared);
   };
 
-  // 生成展示在模型管理列表里的行项目
-  // 结合预置的重点模型与用户当前配置的 entry
+  // 管理列表直接渲染用户实际保存的配置条目（每厂商一行）
   const displayRows: Array<{
     id: string;
     modelName: string;
     providerLabel: string;
     providerId: ProviderId;
-    isCustom?: boolean;
-    hasKey: boolean;
+    baseUrl?: string;
     isActive: boolean;
-  }> = [
-    {
-      id: "row-ox-alpha",
-      modelName: "ox-alpha",
-      providerLabel: "自定义(OpenAI Compatible)",
-      providerId: "openai",
-      isCustom: true,
-      hasKey: !!entries.find((e) => e.provider === "openai")?.apiKey,
-      isActive: activeProvider === "openai",
-    },
-    {
-      id: "row-deepseek-v4-flash",
-      modelName: "DeepSeek-V4-Flash",
-      providerLabel: "DeepSeek",
-      providerId: "deepseek",
-      hasKey: !!entries.find((e) => e.provider === "deepseek")?.apiKey,
-      isActive: activeProvider === "deepseek",
-    },
-    {
-      id: "row-stepfun-router",
-      modelName: "阶跃星辰-router-v1",
-      providerLabel: "自定义(OpenAI Compatible)",
-      providerId: "stepfun",
-      isCustom: true,
-      hasKey: !!entries.find((e) => e.provider === "stepfun")?.apiKey,
-      isActive: activeProvider === "stepfun",
-    },
-    {
-      id: "row-stepfun-3.7-flash",
-      modelName: "阶跃星辰-3.7-flash",
-      providerLabel: "阶跃星辰 StepFun",
-      providerId: "stepfun",
-      hasKey: !!entries.find((e) => e.provider === "stepfun")?.apiKey,
-      isActive: activeProvider === "stepfun",
-    },
-    {
-      id: "row-deepseek-v4-pro",
-      modelName: "DeepSeek-V4-Pro",
-      providerLabel: "DeepSeek",
-      providerId: "deepseek",
-      hasKey: !!entries.find((e) => e.provider === "deepseek")?.apiKey,
-      isActive: activeProvider === "deepseek",
-    },
-    {
-      id: "row-glm-5.3-flash",
-      modelName: "GLM-5.3-flash",
-      providerLabel: "智谱 GLM",
-      providerId: "glm",
-      hasKey: !!entries.find((e) => e.provider === "glm")?.apiKey,
-      isActive: activeProvider === "glm",
-    },
-    {
-      id: "row-claude-sonnet-5",
-      modelName: "claude-sonnet-5",
-      providerLabel: "Anthropic (Claude)",
-      providerId: "claude",
-      hasKey: !!entries.find((e) => e.provider === "claude")?.apiKey,
-      isActive: activeProvider === "claude",
-    },
-    {
-      id: "row-gemini-3.7-flash",
-      modelName: "gemini-3.7-flash",
-      providerLabel: "Google (Gemini)",
-      providerId: "gemini",
-      hasKey: !!entries.find((e) => e.provider === "gemini")?.apiKey,
-      isActive: activeProvider === "gemini",
-    },
-  ];
+  }> = entries.map((entry) => ({
+    id: `row-${entry.provider}`,
+    modelName: entry.model || getProviderMeta(entry.provider).defaultModel,
+    providerLabel: PROVIDER_METADATA[entry.provider].label,
+    providerId: entry.provider,
+    ...(entry.baseUrl !== undefined ? { baseUrl: entry.baseUrl } : {}),
+    isActive: activeProvider === entry.provider,
+  }));
 
   const currentMeta = getProviderMeta(selectedProvider);
   const isKeyValid = isValidApiKey(apiKeyInput);
+  // Base URL 允许留空（走厂商原生端点），填写时必须是合法 https 地址
+  const trimmedBaseUrl = customBaseUrl.trim();
+  const isBaseUrlValid = trimmedBaseUrl.length === 0 || isValidBaseUrl(trimmedBaseUrl);
 
   return (
     <div className={`model-mgmt-container ${closing ? "model-mgmt-container--closing" : ""}`}>
@@ -343,10 +288,21 @@ export function LlmSettingsPanel({
           ))}
         </select>
 
+        <label htmlFor="llm-baseurl-hidden">API 端点</label>
+        <input
+          id="llm-baseurl-hidden"
+          placeholder="API 端点"
+          type="text"
+          value={customBaseUrl}
+          onChange={(e) => setCustomBaseUrl(e.target.value)}
+        />
+
         <button
           type="button"
           disabled={busy || !isKeyValid}
-          onClick={() => void onSave(selectedProvider, apiKeyInput, modelInput)}
+          onClick={() =>
+            void onSave(selectedProvider, apiKeyInput, modelInput, customBaseUrl.trim() || undefined)
+          }
         >
           保存
         </button>
@@ -409,58 +365,71 @@ export function LlmSettingsPanel({
             </tr>
           </thead>
           <tbody>
-            {displayRows.map((row) => (
-              <tr key={row.id} className="model-mgmt-row">
-                <td className="model-mgmt-cell model-mgmt-cell--name">
-                  <div className="model-mgmt-model-badge">
-                    {row.isCustom ? (
-                      <Boxes size={15} className="model-mgmt-model-icon" />
-                    ) : (
-                      <Server size={15} className="model-mgmt-model-icon" />
-                    )}
-                    <span className="model-mgmt-model-title">{row.modelName}</span>
-                  </div>
-                </td>
-                <td className="model-mgmt-cell model-mgmt-cell--vendor">
-                  <span className="model-mgmt-vendor-label">{row.providerLabel}</span>
-                </td>
-                <td className="model-mgmt-cell model-mgmt-cell--actions">
-                  <div className="model-mgmt-actions-group">
-                    <button
-                      type="button"
-                      className="model-mgmt-action-btn"
-                      title="编辑模型配置"
-                      aria-label={`编辑 ${row.modelName}`}
-                      onClick={() => handleEditEntry(row.providerId, row.modelName)}
-                    >
-                      <Edit3 size={14} />
-                    </button>
-
-                    <button
-                      type="button"
-                      className="model-mgmt-action-btn model-mgmt-action-btn--delete"
-                      title="清空或删除此模型"
-                      aria-label={`删除 ${row.modelName}`}
-                      onClick={() => handleClearEntry(row.providerId)}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={row.isActive}
-                      className={`settings-toggle-switch ${row.isActive ? "settings-toggle-switch--active" : ""}`}
-                      onClick={() => handleToggleActivate(row.providerId)}
-                      title={row.isActive ? "当前已启用" : "点击设为当前使用模型"}
-                      aria-label={`切换启用 ${row.modelName}`}
-                    >
-                      <span className="settings-toggle-knob" />
-                    </button>
-                  </div>
+            {displayRows.length === 0 ? (
+              <tr>
+                <td colSpan={3} className="model-mgmt-empty">
+                  尚未配置模型，点击右上角「添加模型」开始
                 </td>
               </tr>
-            ))}
+            ) : (
+              displayRows.map((row) => (
+                <tr key={row.id} className="model-mgmt-row">
+                  <td className="model-mgmt-cell model-mgmt-cell--name">
+                    <div className="model-mgmt-model-badge">
+                      {row.baseUrl !== undefined ? (
+                        <Boxes size={15} className="model-mgmt-model-icon" />
+                      ) : (
+                        <Server size={15} className="model-mgmt-model-icon" />
+                      )}
+                      <span className="model-mgmt-model-title">{row.modelName}</span>
+                      {row.baseUrl !== undefined && (
+                        <span className="model-tag-pill model-mgmt-endpoint-pill" title={row.baseUrl}>
+                          自定义端点
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="model-mgmt-cell model-mgmt-cell--vendor">
+                    <span className="model-mgmt-vendor-label">{row.providerLabel}</span>
+                  </td>
+                  <td className="model-mgmt-cell model-mgmt-cell--actions">
+                    <div className="model-mgmt-actions-group">
+                      <button
+                        type="button"
+                        className="model-mgmt-action-btn"
+                        title="编辑模型配置"
+                        aria-label={`编辑 ${row.modelName}`}
+                        onClick={() => handleEditEntry(row.providerId, row.modelName)}
+                      >
+                        <Edit3 size={14} />
+                      </button>
+
+                      <button
+                        type="button"
+                        className="model-mgmt-action-btn model-mgmt-action-btn--delete"
+                        title="清空或删除此模型"
+                        aria-label={`删除 ${row.modelName}`}
+                        onClick={() => handleClearEntry(row.providerId)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={row.isActive}
+                        className={`settings-toggle-switch ${row.isActive ? "settings-toggle-switch--active" : ""}`}
+                        onClick={() => handleToggleActivate(row.providerId)}
+                        title={row.isActive ? "当前已启用" : "点击设为当前使用模型"}
+                        aria-label={`切换启用 ${row.modelName}`}
+                      >
+                        <span className="settings-toggle-knob" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
@@ -660,7 +629,12 @@ export function LlmSettingsPanel({
                 <button
                   type="button"
                   className="settings-btn settings-btn--primary"
-                  disabled={busy || !isValidApiKey(apiKeyInput)}
+                  disabled={busy || !isValidApiKey(apiKeyInput) || !isBaseUrlValid}
+                  title={
+                    !isBaseUrlValid && trimmedBaseUrl.length > 0
+                      ? "API 端点需为 https:// 开头且不含空格"
+                      : undefined
+                  }
                   onClick={() => void handleSaveModal()}
                 >
                   保存并启用

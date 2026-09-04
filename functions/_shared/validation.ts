@@ -30,6 +30,8 @@ export interface ClientChatRequest {
   provider?: ProviderId;
   apiKey?: string;
   model?: string;
+  /** 自定义 OpenAI 兼容端点；仅用户自带 Key 路径有效 */
+  baseUrl?: string;
   webSearch?: boolean;
   /** 智能搜索：联网搜索开启时的双市场并行检索（结果更多、带发布日期） */
   smartSearch?: boolean;
@@ -60,6 +62,7 @@ const allowedTopLevelKeys = new Set([
   "provider",
   "apiKey",
   "model",
+  "baseUrl",
   "webSearch",
   "smartSearch",
   "currentTime",
@@ -260,6 +263,20 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
     return invalid();
   }
 
+  // 自定义端点：https 起始、无空白、≤2048；与前端 isValidBaseUrl 对齐
+  if (value.baseUrl !== undefined) {
+    if (
+      typeof value.baseUrl !== "string" ||
+      value.baseUrl.length === 0 ||
+      value.baseUrl.length > 2048 ||
+      !value.baseUrl.startsWith("https://") ||
+      /\s/u.test(value.baseUrl)
+    ) {
+      return invalid();
+    }
+  }
+  const baseUrl = value.baseUrl as string | undefined;
+
   return {
     locale: value.locale,
     messages,
@@ -270,6 +287,7 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
     provider: value.provider,
     apiKey: value.apiKey,
     model: value.model,
+    ...(baseUrl !== undefined ? { baseUrl } : {}),
   };
 }
 

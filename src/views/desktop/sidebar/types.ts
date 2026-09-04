@@ -14,7 +14,7 @@ export interface ConversationGroup {
 
 export interface DesktopSidebarProps {
   activeConversationId?: string;
-  activeRightTab: DesktopRightTab;
+  activeRightTab?: DesktopRightTab;
   collapsed?: boolean;
   conversations: Conversation[];
   copy: UiCopy;
@@ -27,7 +27,7 @@ export interface DesktopSidebarProps {
   onOpenSettings?: (tab?: SettingsTabKey) => void;
   onRenameConversation: (id: string, title: string) => Promise<void>;
   onSelectConversation: (id: string) => Promise<void>;
-  onSelectRightTab: (tab: DesktopRightTab) => void;
+  onSelectRightTab?: (tab: DesktopRightTab) => void;
   onSignOut?: () => Promise<void>;
   onToggleCollapse?: () => void;
   onTogglePinConversation?: (id: string) => void;

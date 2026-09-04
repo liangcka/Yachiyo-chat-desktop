@@ -92,6 +92,7 @@ export async function judgeSearchNeed(
   model: string,
   messages: readonly ClientHistoryMessage[],
   signal: AbortSignal | undefined,
+  baseUrl?: string,
 ): Promise<boolean | null> {
   const judgeMessages = buildJudgeMessages(messages);
   if (judgeMessages === null) {
@@ -101,6 +102,7 @@ export async function judgeSearchNeed(
   const built = provider.buildJudgeRequest({
     apiKey,
     model,
+    ...(baseUrl !== undefined ? { baseUrl } : {}),
     systemPrompt: judgeSystemPrompt,
     messages: judgeMessages,
   });

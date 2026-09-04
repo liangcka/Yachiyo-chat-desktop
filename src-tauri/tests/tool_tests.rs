@@ -106,3 +106,77 @@ fn test_resolve_in_workspace() {
     assert!(resolved.starts_with(&root));
     assert!(resolved.ends_with("sub\\a.txt") || resolved.ends_with("sub/a.txt"));
 }
+
+#[test]
+fn test_list_workspace_entries_structured() {
+    use yachiyo_desktop_lib::tools::fs::list_workspace_entries;
+
+    let temp_dir = std::env::temp_dir().join("yachiyo_entries_test");
+    fs::remove_dir_all(&temp_dir).ok();
+    fs::create_dir_all(temp_dir.join("sub")).unwrap();
+    fs::write(temp_dir.join("zeta.txt"), "z").unwrap();
+    fs::write(temp_dir.join("alpha.txt"), "a").unwrap();
+
+    let entries = list_workspace_entries(".", &temp_dir).expect("entries listed");
+    let names: Vec<(&str, bool)> = entries.iter().map(|e| (e.name.as_str(), e.is_dir)).collect();
+
+    // 目录优先 + 名称升序，结构化字段替代 `/` 后缀协议
+    assert_eq!(names, vec![("sub", true), ("alpha.txt", false), ("zeta.txt", false)]);
+
+    // 越界路径拒绝
+    let err = list_workspace_entries("..", &temp_dir).expect_err("escape rejected");
+    assert!(err.contains("Access denied"));
+
+    fs::remove_dir_all(&temp_dir).ok();
+}
+
+#[tokio::test]
+async fn test_read_head_file_lifecycle() {
+    use yachiyo_desktop_lib::tools::git::read_head_file;
+
+    let temp_dir = std::env::temp_dir().join("yachiyo_head_test");
+    fs::remove_dir_all(&temp_dir).ok();
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    // 无 git 仓库：git show 失败 → absent（而非 Err）
+    let outside = read_head_file("a.txt", &temp_dir).await.expect("no repo degrades");
+    assert!(!outside.present);
+
+    // 空仓库（有 .git 无 HEAD）→ absent
+    let git_init = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(&temp_dir)
+        .output()
+        .expect("git init");
+    assert!(git_init.status.success());
+    let empty = read_head_file("a.txt", &temp_dir).await.expect("empty repo degrades");
+    assert!(!empty.present);
+
+    // 提交文件后 → present 且内容一致；未提交路径 → absent
+    fs::write(temp_dir.join("a.txt"), "head content").unwrap();
+    let add = std::process::Command::new("git")
+        .args(["-c", "user.email=t@t", "-c", "user.name=t", "add", "."])
+        .current_dir(&temp_dir)
+        .output()
+        .expect("git add");
+    assert!(add.status.success());
+    let commit = std::process::Command::new("git")
+        .args(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init"])
+        .current_dir(&temp_dir)
+        .output()
+        .expect("git commit");
+    assert!(commit.status.success());
+
+    let present = read_head_file("a.txt", &temp_dir).await.expect("head read");
+    assert!(present.present);
+    assert_eq!(present.content, "head content");
+
+    let missing = read_head_file("not_in_head.txt", &temp_dir).await.expect("missing degrades");
+    assert!(!missing.present);
+
+    // Windows 反斜杠路径归一化为 git 的 `/`
+    let nested = read_head_file("sub\\a.txt", &temp_dir).await.expect("nested degrades");
+    assert!(!nested.present);
+
+    fs::remove_dir_all(&temp_dir).ok();
+}

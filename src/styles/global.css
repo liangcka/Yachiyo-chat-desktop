@@ -2,6 +2,8 @@
 @import "./animations.css";
 @import "./chat.css";
 @import "./desktop.css";
+@import "./editor.css";
+@import "./file-tree.css";
 
 *,
 *::before,

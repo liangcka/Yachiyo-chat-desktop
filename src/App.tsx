@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useChatController, type ChatRepository, type StreamChatFunction } from "./app/use-chat-controller";
-import { AccessGate } from "./components/AccessGate";
 import { ToastRegion } from "./components/ToastRegion";
 import { ConversationRepository } from "./data/conversation-repository";
 import { YachiyoDatabase } from "./data/db";
@@ -77,7 +76,7 @@ interface ToastState {
   tone: "info" | "error";
 }
 
-type AuthenticationState = "checking" | "authenticated" | "unauthenticated";
+type AuthenticationState = "checking" | "authenticated";
 
 function imageErrorMessage(code: ImageProcessingErrorCode, copy: UiCopy): string {
   if (code === "IMAGE_INVALID") return copy.imageInvalid;
@@ -104,14 +103,14 @@ export function App({ services }: AppProps) {
   const { isOnline } = useOnlineStatus();
   const pwa = usePwaUpdate();
 
-  const [authentication, setAuthentication] = useState<AuthenticationState>(() =>
-    isDesktopApp() ? "authenticated" : navigator.onLine ? "checking" : "authenticated",
-  );
+  const [authentication, setAuthentication] = useState<AuthenticationState>("authenticated");
   const [composerValue, setComposerValue] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [imageUrls, setImageUrls] = useState<ReadonlyMap<string, string>>(new Map());
   const [llmActiveProvider, setLlmActiveProvider] = useState<ProviderId>();
-  const [llmEntries, setLlmEntries] = useState<readonly { provider: ProviderId; apiKey: string; model: string }[]>([]);
+  const [llmEntries, setLlmEntries] = useState<
+    readonly { provider: ProviderId; apiKey: string; model: string; baseUrl?: string }[]
+  >([]);
   const [pendingImageDataUrl, setPendingImageDataUrl] = useState<string>();
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [webSearchSettings, setWebSearchSettings] = useState<WebSearchSettings>(defaultWebSearchSettings);
@@ -125,6 +124,7 @@ export function App({ services }: AppProps) {
       provider: entry.provider,
       apiKey: entry.apiKey,
       model: entry.model,
+      ...(entry.baseUrl !== undefined ? { baseUrl: entry.baseUrl } : {}),
     };
   }, [llmActiveProvider, llmEntries]);
 
@@ -170,6 +170,7 @@ export function App({ services }: AppProps) {
         provider: record.provider,
         apiKey: record.apiKey,
         model: record.model,
+        ...(record.baseUrl !== undefined ? { baseUrl: record.baseUrl } : {}),
       })),
     };
   }, [llmService]);
@@ -183,69 +184,40 @@ export function App({ services }: AppProps) {
   }, [webSearchService]);
 
   useEffect(() => {
-    if (isDesktopApp()) {
-      let cancelled = false;
-      const initDesktop = async () => {
-        try {
-          const llmSettings = await readLlmSettings();
-          if (!cancelled) {
-            setLlmEntries(llmSettings.entries);
-            setLlmActiveProvider(llmSettings.active);
-            setActiveSkillIds(await skillService.getActiveSkillIds().catch(() => []));
-            await syncWebSearchSettings();
-          }
-        } catch {
-          // ignore desktop initialization errors
-        }
-        if (!cancelled) {
-          setAuthentication("authenticated");
-        }
-      };
-      void initDesktop();
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    if (!isOnline) {
-      const timeout = setTimeout(() => {
-        setAuthentication((current) => (current === "checking" ? "authenticated" : current));
-      }, 0);
-      return () => clearTimeout(timeout);
-    }
-    const abortController = new AbortController();
     let cancelled = false;
-    void activeServices.session
-      .check(abortController.signal)
-      .then(async (authenticated) => {
-        let llmSettings: Awaited<ReturnType<typeof readLlmSettings>> | undefined;
-        if (authenticated) {
-          try {
-            llmSettings = await readLlmSettings();
-          } catch {
-            if (!cancelled) showSessionFailure();
-          }
-          setActiveSkillIds(await skillService.getActiveSkillIds().catch(() => []));
-          if (!cancelled) {
-            await syncWebSearchSettings();
-          }
-        }
-        if (cancelled) return;
-        if (llmSettings !== undefined) {
+    const initApp = async () => {
+      try {
+        const llmSettings = await readLlmSettings();
+        if (!cancelled) {
           setLlmEntries(llmSettings.entries);
           setLlmActiveProvider(llmSettings.active);
+          setActiveSkillIds(await skillService.getActiveSkillIds().catch(() => []));
+          await syncWebSearchSettings();
         }
-        setAuthentication(authenticated ? "authenticated" : "unauthenticated");
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setAuthentication("unauthenticated");
-          showSessionFailure();
+      } catch {
+        if (!cancelled) showSessionFailure();
+      }
+
+      // 若处于联网环境且存在 session 服务，后台静默建立或维持 session
+      if (isOnline && activeServices.session) {
+        try {
+          const authenticated = await activeServices.session.check();
+          if (!authenticated) {
+            await activeServices.session.authenticate("yachiyo-local-access").catch(() => undefined);
+          }
+        } catch {
+          // 忽略静默鉴权异常，保持界面直接可用
         }
-      });
+      }
+
+      if (!cancelled) {
+        setAuthentication("authenticated");
+      }
+    };
+
+    void initApp();
     return () => {
       cancelled = true;
-      abortController.abort();
     };
   }, [activeServices, isOnline, readLlmSettings, skillService, syncWebSearchSettings]);
 
@@ -284,8 +256,8 @@ export function App({ services }: AppProps) {
   }, [copy.genericFailure, readLlmSettings, showToast]);
 
   const handleLlmSave = useCallback(
-    async (provider: ProviderId, apiKey: string, model: string) => {
-      await llmService.saveProvider(provider, apiKey, model);
+    async (provider: ProviderId, apiKey: string, model: string, baseUrl?: string) => {
+      await llmService.saveProvider(provider, apiKey, model, baseUrl !== undefined ? { baseUrl } : {});
       await refreshLlm();
     },
     [llmService, refreshLlm],
@@ -343,6 +315,7 @@ export function App({ services }: AppProps) {
   }, [activeServices, authentication, controller.activeConversation?.id]);
 
   const blobUrlsRef = useRef<Map<string, string>>(new Map());
+  const creatingChatRef = useRef(false);
 
   // 稳定签名：只有 imageId 集合变化时才触发 Blob 加载 effect
   const messageImageIdsKey = useMemo(
@@ -413,25 +386,13 @@ export function App({ services }: AppProps) {
     if (handledErrorRef.current === errorCode) return;
     handledErrorRef.current = errorCode;
     const timeout = setTimeout(() => {
-      if (errorCode === "SESSION_REQUIRED") setAuthentication("unauthenticated");
+      if (errorCode === "SESSION_REQUIRED" && activeServices.session) {
+        void activeServices.session.authenticate("yachiyo-local-access").catch(() => undefined);
+      }
       showToast(controllerErrorMessage(errorCode, copy), "error");
     }, 0);
     return () => clearTimeout(timeout);
-  }, [controller.errorCode, copy, showToast]);
-
-  const handleAuthenticate = async (accessCode: string) => {
-    await activeServices.session.authenticate(accessCode);
-    try {
-      const llmSettings = await readLlmSettings();
-      setLlmEntries(llmSettings.entries);
-      setLlmActiveProvider(llmSettings.active);
-      setActiveSkillIds(await skillService.getActiveSkillIds());
-      await syncWebSearchSettings();
-    } catch {
-      showToast(copy.genericFailure, "error");
-    }
-    setAuthentication("authenticated");
-  };
+  }, [activeServices.session, controller.errorCode, copy, showToast]);
 
   const handleImage = useCallback(
     (image: ProcessedImage) => {
@@ -500,10 +461,16 @@ export function App({ services }: AppProps) {
   };
 
   const handleNewChat = async () => {
-    await controller.newConversation();
-    setComposerValue("");
-    setPendingImageDataUrl(undefined);
-    await refreshHistory();
+    if (creatingChatRef.current) return;
+    creatingChatRef.current = true;
+    try {
+      await controller.newConversation();
+      setComposerValue("");
+      setPendingImageDataUrl(undefined);
+      await refreshHistory();
+    } finally {
+      creatingChatRef.current = false;
+    }
   };
 
   const handleRename = async (id: string, title: string) => {
@@ -546,11 +513,13 @@ export function App({ services }: AppProps) {
   const handleSignOut = async () => {
     await controller.stop();
     await activeServices.session.signOut();
-    setAuthentication("unauthenticated");
+    showToast("服务端凭据已清除", "info");
   };
 
+  // 自定义端点的模型图片能力交由上游判定，此处仅对原生厂商白名单做限制
   const activeProviderSupportsImage =
     activeLlmConfig === undefined ||
+    activeLlmConfig.baseUrl !== undefined ||
     PROVIDER_METADATA[activeLlmConfig.provider].imageModels.includes(activeLlmConfig.model);
 
   useEffect(() => {
@@ -678,22 +647,18 @@ export function App({ services }: AppProps) {
             <span />
             <span />
           </div>
-        ) : authentication === "unauthenticated" ? (
-          <>
-            <AccessGate copy={copy} onAuthenticate={handleAuthenticate} />
-            <div className="access-gate__prompt">
-              <UpdatePrompt
-                copy={copy}
-                needRefresh={pwa.needRefresh}
-                offlineReady={pwa.offlineReady}
-                onConfirmOfflineReady={() => pwa.setOfflineReady(false)}
-                onDismissUpdate={() => pwa.setNeedRefresh(false)}
-                onUpdate={() => void pwa.updateServiceWorker(true)}
-              />
-            </div>
-          </>
         ) : (
-          authenticatedContent
+          <>
+            {authenticatedContent}
+            <UpdatePrompt
+              copy={copy}
+              needRefresh={pwa.needRefresh}
+              offlineReady={pwa.offlineReady}
+              onConfirmOfflineReady={() => pwa.setOfflineReady(false)}
+              onDismissUpdate={() => pwa.setNeedRefresh(false)}
+              onUpdate={() => void pwa.updateServiceWorker(true)}
+            />
+          </>
         )}
         <ToastRegion
           announcementId={toast?.id}

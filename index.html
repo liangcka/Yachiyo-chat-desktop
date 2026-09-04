@@ -12,7 +12,7 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <!-- MyGO!!!!! Live2D 看板娘：本地静态挂件（public/live2d/），参数经 query 传入，position=right 悬浮于右下角 -->
-    <script src="/live2d/autoload.js?position=right"></script>
+    <!-- MyGO!!!!! Live2D 看板娘改由 React 侧动态注入（src/components/desktop/Live2DWaifu.tsx），
+         随桌面布局生命周期加载，层叠与定位经 desktop.css 覆盖（视口右下角悬浮） -->
   </body>
 </html>

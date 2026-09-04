@@ -15,9 +15,10 @@ export function SidebarBrandHeader({ onNewChat, onToggleCollapse }: SidebarBrand
         title="月见八千代 (Tsukimi Yachiyo)"
       >
         <span className="desktop-sidebar__brand-icon-wrap">
-          <Sparkles size={15} className="desktop-sidebar__brand-icon" />
+          <Sparkles size={14} className="desktop-sidebar__brand-icon" />
         </span>
         <span className="desktop-sidebar__brand-title">月见八千代</span>
+        <span className="desktop-sidebar__brand-pill" aria-hidden="true">IDE</span>
       </button>
       {onToggleCollapse ? (
         <button

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { useAndroidBack } from "../../app/use-android-back";
 import { Composer } from "../../components/Composer";
@@ -58,6 +58,11 @@ export function MobileLayout({
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+
+  const activeSkills = useMemo(
+    () => SKILLS.filter((skill) => activeSkillIds?.includes(skill.id)),
+    [activeSkillIds],
+  );
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
@@ -164,6 +169,7 @@ export function MobileLayout({
       ) : null}
 
       <ConversationView
+        activeSkills={activeSkills}
         hasMoreHistory={controller.hasMoreHistory}
         imageUrls={imageUrls}
         key={controller.activeConversation?.id}

@@ -1,7 +1,8 @@
-import { Copy, RotateCcw, RotateCw } from "lucide-react";
+import { Copy, RotateCcw, RotateCw, Sparkles } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import type { ChatMessage, Locale } from "../domain/chat";
 import { copyFor } from "../i18n/messages";
+import { MarkdownContent } from "./chat/MarkdownContent";
 import { ToolCard } from "./tools/ToolCard";
 
 export interface MessageBubbleProps {
@@ -184,6 +185,61 @@ export const MessageBubble = memo(function MessageBubble({
         }
       }}
     >
+      {message.role === "assistant" ? (
+        <div className="assistant-identity-header">
+          <div className="assistant-identity-header__lead">
+            <span className="assistant-identity-header__avatar" aria-hidden="true">
+              <Sparkles size={13} />
+            </span>
+            <span className="assistant-identity-header__name">
+              {locale === "ja-JP" ? "月見八千代" : "月见八千代"}
+            </span>
+            {message.skills !== undefined && message.skills.length > 0 ? (
+              <span
+                className="assistant-identity-header__skills-tag"
+                title={
+                  locale === "ja-JP"
+                    ? `適用スキル: ${message.skills.join("、")}`
+                    : `已生效技能：${message.skills.join("、")}`
+                }
+              >
+                <Sparkles size={10} className="assistant-identity-header__skills-icon" />
+                <span>{message.skills.join(" · ")}</span>
+              </span>
+            ) : null}
+            {message.status === "streaming" ? (
+              <span className="assistant-identity-header__status assistant-identity-header__status--streaming">
+                <span className="assistant-identity-header__pulse" />
+                思考中...
+              </span>
+            ) : null}
+          </div>
+          <div className="assistant-identity-header__actions">
+            {hasText ? (
+              <button
+                type="button"
+                className="assistant-identity-header__action-btn"
+                onClick={handleCopy}
+                title={copyFor(locale).copyText}
+                aria-label={copyFor(locale).copyText}
+              >
+                <Copy size={12} />
+              </button>
+            ) : null}
+            {onRegenerate !== undefined && message.status !== "streaming" ? (
+              <button
+                type="button"
+                className="assistant-identity-header__action-btn"
+                onClick={handleRegenerateAction}
+                title={copyFor(locale).regenerate}
+                aria-label={copyFor(locale).regenerate}
+              >
+                <RotateCw size={12} />
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       {hasImage ? (
         imageUrl !== undefined ? (
           <img alt="" className="message-bubble__image" onLoad={onImageLoad} src={imageUrl} />
@@ -213,7 +269,7 @@ export const MessageBubble = memo(function MessageBubble({
         </span>
       ) : hasText ? (
         <>
-          <p>{displayText}</p>
+          <MarkdownContent text={displayText} isAssistant={message.role === "assistant"} />
           {message.truncated === true ? (
             <span className="message-bubble__truncated">{copyFor(locale).truncated}</span>
           ) : null}

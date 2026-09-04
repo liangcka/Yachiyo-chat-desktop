@@ -1,62 +1,59 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Folder, FolderGit2, Play, RefreshCw, Terminal, X } from "lucide-react";
-import { useClosing } from "../../app/use-closing";
+import { Folder, FolderGit2, FolderPlus, GitCompareArrows, Play, RefreshCw, Terminal, X } from "lucide-react";
 import type { UiCopy } from "../../i18n/messages";
-import { executeDesktopAgentTool, getDesktopWorkspaceRoot, setDesktopWorkspaceRoot } from "../../services/desktop-bridge";
+import { executeDesktopAgentTool, getDesktopWorkspaceRoot } from "../../services/desktop-bridge";
+import { projectManager } from "../../services/project-manager";
+import { FileTree } from "./FileTree";
 
 export interface WorkspacePanelProps {
   copy?: UiCopy;
   open?: boolean;
   onClose?: () => void;
+  /** 点击文件树文件：交由上层在编辑器中打开（切到编辑器视图） */
+  onOpenFile?: (path: string) => void;
+  /** @ 引用文件到对话输入框 */
+  onReferenceFile?: (path: string) => void;
+  /** 打开 diff 审阅（编辑器视图的变更审阅 tab） */
+  onOpenReview?: () => void;
 }
 
-export function WorkspacePanel({ copy, open = true, onClose }: WorkspacePanelProps) {
+export function WorkspacePanel({ copy, open = true, onClose, onOpenFile, onReferenceFile, onOpenReview }: WorkspacePanelProps) {
   const [workspaceRoot, setWorkspaceRoot] = useState<string>("");
-  const [fileList, setFileList] = useState<string[]>([]);
   const [terminalOutput, setTerminalOutput] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [commandInput, setCommandInput] = useState("");
+  /** 递增以强制 FileTree 全树重载 */
+  const [treeRefreshKey, setTreeRefreshKey] = useState(0);
   const closeRef = useRef<HTMLButtonElement>(null);
-
-  const { render, closing } = useClosing(open, 300);
-
-  const refreshWorkspace = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const root = await getDesktopWorkspaceRoot();
-      if (root) {
-        setWorkspaceRoot(root);
-        const res = await executeDesktopAgentTool("list_directory", { path: "." });
-        if (!res.isError && res.output) {
-          try {
-            const parsed = JSON.parse(res.output) as string[];
-            setFileList(parsed);
-          } catch {
-            setFileList([]);
-          }
-        }
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
 
   useEffect(() => {
     if (open) {
       queueMicrotask(() => {
-        void refreshWorkspace();
+        void getDesktopWorkspaceRoot().then((root) => {
+          if (root) setWorkspaceRoot(root);
+        });
       });
       closeRef.current?.focus();
     }
-  }, [open, refreshWorkspace]);
+  }, [open]);
 
-  if (!render) return null;
+  const refreshWorkspace = useCallback(() => {
+    setTreeRefreshKey((key) => key + 1);
+  }, []);
 
   const handleSetRoot = async () => {
     if (!workspaceRoot) return;
-    const success = await setDesktopWorkspaceRoot(workspaceRoot);
+    const success = await projectManager.switchProject(workspaceRoot);
     if (success) {
-      void refreshWorkspace();
+      refreshWorkspace();
+    }
+  };
+
+  const handlePickFolder = async () => {
+    const picked = await projectManager.pickAndOpenProject("Open workspace");
+    if (picked) {
+      setWorkspaceRoot(picked);
+      refreshWorkspace();
     }
   };
 
@@ -72,7 +69,7 @@ export function WorkspacePanel({ copy, open = true, onClose }: WorkspacePanelPro
     const res = await executeDesktopAgentTool("run_command", { command: cmd });
     setTerminalOutput((prev) => `${prev}${res.output}\n`);
     setIsLoading(false);
-    void refreshWorkspace();
+    refreshWorkspace();
   };
 
   const handleGitStatus = async () => {
@@ -83,15 +80,21 @@ export function WorkspacePanel({ copy, open = true, onClose }: WorkspacePanelPro
     setIsLoading(false);
   };
 
-  const handleGitDiff = async () => {
-    setIsLoading(true);
-    setTerminalOutput((prev) => `${prev}\n$ git diff\n`);
-    const res = await executeDesktopAgentTool("git_diff", {});
-    setTerminalOutput((prev) => `${prev}${res.output}\n`);
-    setIsLoading(false);
-  };
+  const handleOpenFile = useCallback(
+    (path: string) => {
+      onOpenFile?.(path);
+    },
+    [onOpenFile],
+  );
 
-  const content = (
+  const handleReferenceFile = useCallback(
+    (path: string) => {
+      onReferenceFile?.(path);
+    },
+    [onReferenceFile],
+  );
+
+  return (
     <div className="workspace-panel">
       <div className="workspace-panel__header">
         <div className="workspace-panel__title-group">
@@ -102,8 +105,8 @@ export function WorkspacePanel({ copy, open = true, onClose }: WorkspacePanelPro
           <button
             type="button"
             className="workspace-panel__btn workspace-panel__btn--icon"
-            onClick={() => void refreshWorkspace()}
-            title="刷新工作区"
+            onClick={refreshWorkspace}
+            title={copy?.refreshFileTree ?? "刷新文件树"}
             disabled={isLoading}
           >
             <RefreshCw size={14} className={isLoading ? "workspace-panel__spin" : ""} />
@@ -144,21 +147,26 @@ export function WorkspacePanel({ copy, open = true, onClose }: WorkspacePanelPro
           >
             设置
           </button>
+          <button
+            type="button"
+            className="workspace-panel__btn"
+            onClick={() => void handlePickFolder()}
+            title="选择工作区文件夹 (Open workspace)"
+          >
+            <FolderPlus size={13} />
+            浏览...
+          </button>
         </div>
       </div>
 
-      <div className="workspace-panel__section">
-        <span className="workspace-panel__label">工作区文件（{fileList.length} 项）：</span>
-        <div className="workspace-panel__file-list">
-          {fileList.map((file) => (
-            <div key={file} className="workspace-panel__file-item">
-              <span>{file}</span>
-            </div>
-          ))}
-          {fileList.length === 0 ? (
-            <p className="workspace-panel__empty">（空目录或未连接桌面运行时）</p>
-          ) : null}
-        </div>
+      <div className="workspace-panel__section workspace-panel__section--tree">
+        {/* key 递增 = 全树重挂载：缓存、展开态与加载进度一并重置 */}
+        <FileTree
+          key={treeRefreshKey}
+          copy={copy}
+          onOpenFile={handleOpenFile}
+          onReferenceFile={onReferenceFile ? handleReferenceFile : undefined}
+        />
       </div>
 
       <div className="workspace-panel__section workspace-panel__section--terminal">
@@ -175,13 +183,16 @@ export function WorkspacePanel({ copy, open = true, onClose }: WorkspacePanelPro
             >
               <FolderGit2 size={12} /> Status
             </button>
-            <button
-              type="button"
-              className="workspace-panel__btn workspace-panel__btn--xs"
-              onClick={() => void handleGitDiff()}
-            >
-              Diff
-            </button>
+            {onOpenReview ? (
+              <button
+                type="button"
+                className="workspace-panel__btn workspace-panel__btn--xs"
+                onClick={onOpenReview}
+                title={copy?.reviewTitle ?? "打开 diff 审阅"}
+              >
+                <GitCompareArrows size={12} /> {copy?.reviewEntryButton ?? "审阅"}
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -205,19 +216,6 @@ export function WorkspacePanel({ copy, open = true, onClose }: WorkspacePanelPro
           </button>
         </form>
       </div>
-    </div>
-  );
-
-  return (
-    <div className={`overlay overlay--history ${closing ? "overlay--closing" : ""}`}>
-      <section
-        aria-label={copy?.workspaceTitle || "工作区 & Agent 终端"}
-        aria-modal="true"
-        className={`skills-panel ${closing ? "skills-panel--closing" : ""}`}
-        role="dialog"
-      >
-        {content}
-      </section>
     </div>
   );
 }

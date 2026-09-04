@@ -3,6 +3,7 @@ import { Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
 import type { ChatMessage, Locale } from "../domain/chat";
 import { copyFor } from "../i18n/messages";
+import type { SkillDefinition } from "../skills";
 import { MessageBubble } from "./MessageBubble";
 
 const FOLLOW_THRESHOLD_PX = 80;
@@ -44,9 +45,12 @@ export interface ConversationViewProps {
   hasMoreHistory?: boolean;
   onToast?: (message: string) => void;
   onScrolledFromTopChange?: (scrolledFromTop: boolean) => void;
+  /** 当前激活的技能定义列表 */
+  activeSkills?: readonly SkillDefinition[];
 }
 
 export function ConversationView({
+  activeSkills,
   imageUrls,
   locale,
   messages,
@@ -157,6 +161,42 @@ export function ConversationView({
     [handleImageLoad, imageUrls, lastAssistantMessageIndex, lastUserMessageIndex, locale, onRecall, onRegenerate, onToast, showSources],
   );
 
+  const skillsCard =
+    activeSkills !== undefined && activeSkills.length > 0 ? (
+      <li className="message-list__item message-list__item--skills" key="context-skills">
+        <details className="skills-card">
+          <summary className="skills-card__summary">
+            <div className="skills-card__summary-main">
+              <Sparkles aria-hidden="true" size={14} className="skills-card__icon" />
+              <span className="skills-card__title">
+                {locale === "ja-JP" ? "有効化されたスキル" : "已加载技能"}
+              </span>
+              <span className="skills-card__badge">{activeSkills.length}</span>
+            </div>
+            <div className="skills-card__pill-row">
+              {activeSkills.map((s) => (
+                <span key={s.id} className="skills-card__pill" title={s.description}>
+                  {s.name}
+                </span>
+              ))}
+            </div>
+          </summary>
+          <div className="skills-card__body">
+            <ul className="skills-card__list">
+              {activeSkills.map((s) => (
+                <li key={s.id} className="skills-card__item">
+                  <div className="skills-card__item-meta">
+                    <strong className="skills-card__item-name">{s.name}</strong>
+                    <span className="skills-card__item-desc">{s.description}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </details>
+      </li>
+    ) : null;
+
   const memoryCard = summary ? (
     <li className="message-list__item message-list__item--memory" key="context-memory">
       <details className="memory-card">
@@ -193,6 +233,7 @@ export function ConversationView({
       }}
     >
       <ol aria-live="polite" aria-relevant="additions text" className="message-list" role="log">
+        {skillsCard}
         {memoryCard}
         {loadEarlierEntry}
         {virtualizationEnabled ? (

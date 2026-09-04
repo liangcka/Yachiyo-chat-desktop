@@ -67,6 +67,8 @@ export interface ChatMessage {
   interrupted?: boolean;
   /** Agent 模式下该消息内的工具调用步骤序列 */
   toolSteps?: ReadonlyArray<ToolStep>;
+  /** 生成该消息时生效的技能列表（名称快照） */
+  skills?: ReadonlyArray<string>;
 }
 
 export type StoredImageMimeType = "image/jpeg" | "image/png" | "image/webp";

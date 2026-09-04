@@ -34,25 +34,25 @@
 
 ### A. Agent 内核层
 
-| #  | 严重度 | 差距                                                                                                                           | 证据                                                                      |
-| :- | :-- | :--------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------- |
-| A1 | ✅  | **无多步 Agent 循环**。当前仅支持"流结束后解析单个工具调用 → 执行一次 → 第二轮汇报"，无法链式完成多步任务 —— **已实施（2026-09-02 阶段一落地，`src-tauri/src/gateway/agent/runtime.rs` 多步循环）**                                                               | `src-tauri/src/gateway/mod.rs` L361-L393                                |
-| A2 | ✅  | **非原生 function calling**。工具调用依赖正则解析  ` ```tool_call`  ` 文本协议；`get\_agent\_tools\_schema()`生成了标准 schema 却未通过 API`tools\` 字段下发 —— **已实施（2026-09-02 阶段一落地，全 Provider 原生 function calling）** | `src-tauri/src/gateway/mod.rs` L23-L54、`src-tauri/src/tools/mod.rs` L54 |
-| A3 | ✅  | **工具结果走四层手写协议**（Rust 塞 markdown 代码块 → SSE → 前端正则解析渲染），契约脆弱，任一层变动全链路断裂 —— **已实施（2026-09-02 阶段一落地，`ChatMessage.toolSteps` 结构化渲染）**                                                        | `src/components/MessageBubble.tsx` L29                                  |
-| A4 | ✅  | **无权限确认门 / 无 checkpoint 回滚**。写文件、执行命令前无人工审批；无法回滚 Agent 破坏性操作 —— **已实施（2026-09-02 阶段一落地，`ApprovalRegistry` + `CheckpointStore`）**                                                                 | `src-tauri/src/tools/mod.rs`（`execute_tool` 直通执行）                       |
-| A5 | 🟠  | **无任务规划与待办体系**。对标 Claude Code plan 模式 / Trae Work 任务面板，缺少可暂停、可审阅的任务结构                                                        | 全局缺失                                                                    |
-| A6 | 🟠  | **云端路径零工具能力**。请求模型无 tool 字段，Web/移动端为纯聊天                                                                                      | `functions/_shared/validation.ts` L26-L38                               |
+| #  | 严重度 | 差距                                                                                                                                                                                             | 证据                                                                      |
+| :- | :-- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------- |
+| A1 | ✅   | **无多步 Agent 循环**。当前仅支持"流结束后解析单个工具调用 → 执行一次 → 第二轮汇报"，无法链式完成多步任务 —— **已实施（2026-09-02 阶段一落地，`src-tauri/src/gateway/agent/runtime.rs`** **多步循环）**                                                  | `src-tauri/src/gateway/mod.rs` L361-L393                                |
+| A2 | ✅   | **非原生 function calling**。工具调用依赖正则解析     ` ```tool_call`     ` 文本协议；`get\_agent\_tools\_schema()`生成了标准 schema 却未通过 API`tools\` 字段下发 —— **已实施（2026-09-02 阶段一落地，全 Provider 原生 function calling）** | `src-tauri/src/gateway/mod.rs` L23-L54、`src-tauri/src/tools/mod.rs` L54 |
+| A3 | ✅   | **工具结果走四层手写协议**（Rust 塞 markdown 代码块 → SSE → 前端正则解析渲染），契约脆弱，任一层变动全链路断裂 —— **已实施（2026-09-02 阶段一落地，`ChatMessage.toolSteps`** **结构化渲染）**                                                           | `src/components/MessageBubble.tsx` L29                                  |
+| A4 | ✅   | **无权限确认门 / 无 checkpoint 回滚**。写文件、执行命令前无人工审批；无法回滚 Agent 破坏性操作 —— **已实施（2026-09-02 阶段一落地，`ApprovalRegistry`** **+** **`CheckpointStore`）**                                                       | `src-tauri/src/tools/mod.rs`（`execute_tool` 直通执行）                       |
+| A5 | 🟠  | **无任务规划与待办体系**。对标 Claude Code plan 模式 / Trae Work 任务面板，缺少可暂停、可审阅的任务结构                                                                                                                          | 全局缺失                                                                    |
+| A6 | 🟠  | **云端路径零工具能力**。请求模型无 tool 字段，Web/移动端为纯聊天                                                                                                                                                        | `functions/_shared/validation.ts` L26-L38                               |
 
 ### B. IDE UI 层
 
-| #  | 严重度 | 差距                                                                            | 证据                                              |
-| :- | :-- | :---------------------------------------------------------------------------- | :---------------------------------------------- |
-| B1 | 🔴  | **无代码编辑器**。全项目无 Monaco/CodeMirror，无文件打开/查看/编辑 UI；`write_file` 只能模型盲写，用户无法审阅修改 | `src/components/desktop/` 仅 2 个组件               |
-| B2 | 🔴  | **无 diff 审阅**。`git_diff` 原始文本倒入日志区；无行级 diff、无逐块 accept/reject                 | `WorkspacePanel.tsx` L86-L92                    |
-| B3 | 🟠  | **文件浏览仅一层平铺**。只列根目录，无递归树、无工作区搜索、无 `@` 文件引用                                    | `WorkspacePanel.tsx` L29                        |
-| B4 | 🟠  | **终端非 PTY**。为"日志窗 + 单命令输入"，交互式命令不可用，无会话保持与命令历史                                | `WorkspacePanel.tsx` L63-L76                    |
-| B5 | 🟠  | **布局是聊天应用三栏，非 IDE 骨架**。缺活动栏、面板 dock 体系、状态栏、命令面板（Ctrl+K/Ctrl+P）                | `src/views/desktop/DesktopLayout.tsx` L196-L281 |
-| B6 | 🟡  | **Live2D 看板娘零集成**。`index.html` 静态脚本注入、固定右侧定位，与 React 布局无通信，无法随任务状态联动          | `index.html` L15-L16                            |
+| #  | 严重度 | 差距                                                                                                                                                                                 | 证据                                              |
+| :- | :-- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------- |
+| B1 | ✅   | **无代码编辑器**。全项目无 Monaco/CodeMirror，无文件打开/查看/编辑 UI；`write_file` 只能模型盲写，用户无法审阅修改 —— **已实施（2026-09-02 阶段二落地，Monaco 多文件 Tab + Ctrl+S 保存 + 状态栏，`src/components/editor/EditorView.tsx`）** | `src/components/desktop/` 仅 2 个组件               |
+| B2 | ✅   | **无 diff 审阅**。`git_diff` 原始文本倒入日志区；无行级 diff、无逐块 accept/reject —— **已实施（2026-09-02 阶段二落地，hunk 卡片流逐块采纳 + Monaco DiffEditor 对比，`src/components/editor/DiffReviewPanel.tsx`）**         | `WorkspacePanel.tsx` L86-L92                    |
+| B3 | ✅   | **文件浏览仅一层平铺**。只列根目录，无递归树、无工作区搜索、无 `@` 文件引用 —— **已实施（2026-09-02 阶段二落地，递归懒加载文件树 + @ 引用注入对话，`src/components/desktop/FileTree.tsx`）**（工作区搜索仍缺，归阶段三增强）                                  | `WorkspacePanel.tsx` L29                        |
+| B4 | 🟠  | **终端非 PTY**。为"日志窗 + 单命令输入"，交互式命令不可用，无会话保持与命令历史                                                                                                                                     | `WorkspacePanel.tsx` L63-L76                    |
+| B5 | 🟠  | **布局是聊天应用三栏，非 IDE 骨架**。缺活动栏、面板 dock 体系、状态栏、命令面板（Ctrl+K/Ctrl+P）                                                                                                                     | `src/views/desktop/DesktopLayout.tsx` L196-L281 |
+| B6 | 🔶  | **Live2D 看板娘零集成**。`index.html` 静态脚本注入、固定右侧定位，与 React 布局无通信，无法随任务状态联动 —— **部分实施（2026-09-02 落地 React 接入第一步：`Live2DWaifu`** **组件随桌面布局动态注入 + 视口右下角悬浮层叠策略；任务状态联动仍缺）**                   | `src/components/desktop/Live2DWaifu.tsx`        |
 
 ### C. 架构债（IDE 化的承载瓶颈）
 
