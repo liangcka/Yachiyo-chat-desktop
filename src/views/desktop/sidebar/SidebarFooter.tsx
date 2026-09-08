@@ -1,76 +1,85 @@
-import { Globe, Moon, Settings, Sun } from "lucide-react";
+import { User } from "lucide-react";
+import { useState } from "react";
 import type { Locale } from "../../../domain/chat";
 import type { SettingsTabKey } from "../../../components/settings/SettingsModal";
+import { useLocalUserSettings } from "../../../services/user-settings";
+import { SidebarUserPopover } from "./SidebarUserPopover";
 
-interface SidebarFooterProps {
+export interface SidebarFooterProps {
   locale?: Locale;
+  onCloseApp?: () => Promise<void> | void;
   onLocale?: (locale: Locale) => Promise<void>;
   onOpenSettings?: (tab?: SettingsTabKey) => void;
+  onSignOut?: () => Promise<void>;
   onToggleTab?: (tab: "llm" | "settings") => void;
   onToggleTheme?: () => void;
   resolvedTheme?: "light" | "dark";
+  showToast?: (message: string, tone?: "info" | "error") => void;
 }
 
 export function SidebarFooter({
   locale = "zh-CN",
+  onCloseApp,
   onLocale,
   onOpenSettings,
-  onToggleTab,
+  onSignOut,
   onToggleTheme,
   resolvedTheme = "dark",
+  showToast,
 }: SidebarFooterProps) {
-  const handleOpenGeneralSettings = () => {
-    if (onOpenSettings) {
-      onOpenSettings("general");
-    } else if (onToggleTab) {
-      onToggleTab("settings");
-    }
-  };
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [userSettings] = useLocalUserSettings();
 
-  const handleToggleLocale = () => {
-    if (onLocale) {
-      const nextLocale = locale === "zh-CN" ? "ja-JP" : "zh-CN";
-      void onLocale(nextLocale);
-    }
-  };
+  const username = userSettings.username || "酒寄彩叶";
+  const currentBadge = userSettings.badge || "Lite";
 
   return (
     <div className="desktop-sidebar__footer-root">
-      {/* 底部快捷工具坞 (主题、语言、设置) */}
-      <div className="desktop-sidebar__footer-actions">
-        {onToggleTheme ? (
-          <button
-            type="button"
-            className="desktop-sidebar__footer-action"
-            onClick={onToggleTheme}
-            title={resolvedTheme === "dark" ? "切换至浅色主题" : "切换至深色主题"}
-            aria-label="切换主题"
-          >
-            {resolvedTheme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
-          </button>
-        ) : null}
+      {/* 向上展开的用户资料与设置浮层菜单 */}
+      <SidebarUserPopover
+        isOpen={popoverOpen}
+        locale={locale}
+        onClose={() => setPopoverOpen(false)}
+        onCloseApp={onCloseApp}
+        onLocale={onLocale}
+        onOpenSettings={onOpenSettings}
+        onSignOut={onSignOut}
+        onToggleTheme={onToggleTheme}
+        resolvedTheme={resolvedTheme}
+        showToast={showToast}
+        userSettings={userSettings}
+      />
 
-        {onLocale ? (
-          <button
-            type="button"
-            className="desktop-sidebar__footer-action desktop-sidebar__footer-action--lang"
-            onClick={handleToggleLocale}
-            title={locale === "zh-CN" ? "切换为日本語" : "切换为中文"}
-            aria-label="切换语言"
-          >
-            <Globe size={15} />
-            <span className="desktop-sidebar__footer-lang-text">{locale === "ja-JP" ? "JA" : "ZH"}</span>
-          </button>
-        ) : null}
-
+      {/* 底部常驻用户卡片条 */}
+      <div
+        className={`desktop-sidebar__user-bar ${popoverOpen ? "desktop-sidebar__user-bar--active" : ""}`}
+      >
         <button
           type="button"
-          className="desktop-sidebar__footer-action"
-          onClick={handleOpenGeneralSettings}
-          title="系统设置与偏好"
-          aria-label="设置"
+          className="desktop-sidebar__user-bar-main"
+          onClick={() => setPopoverOpen((prev) => !prev)}
+          aria-label="用户资料与菜单"
+          aria-haspopup="dialog"
+          aria-expanded={popoverOpen}
+          title={`当前用户：${username} [${currentBadge}]（点击展开菜单）`}
         >
-          <Settings size={15} />
+          <div className="desktop-sidebar__user-bar-avatar">
+            {userSettings.avatar ? (
+              <img src={userSettings.avatar} alt={username} />
+            ) : (
+              <div className="desktop-sidebar__user-bar-avatar-placeholder">
+                <User size={16} />
+              </div>
+            )}
+          </div>
+          <span className="desktop-sidebar__user-bar-name" title={username}>
+            {username}
+          </span>
+          <span
+            className={`desktop-sidebar__user-bar-badge desktop-sidebar__user-bar-badge--${currentBadge.toLowerCase()}`}
+          >
+            {currentBadge}
+          </span>
         </button>
       </div>
     </div>

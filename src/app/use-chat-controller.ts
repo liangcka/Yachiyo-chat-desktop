@@ -5,6 +5,7 @@ import type { SkillDefinition } from "../skills";
 import { desktopFileReader, expandFileReferences, hasFileReferences } from "../features/file-reference/expand-file-references";
 
 import { isDesktopApp } from "../services/app-platform";
+import { projectManager } from "../services/project-manager";
 import {
   ChatClientError,
   isRetryableChatErrorCode,
@@ -21,11 +22,18 @@ import {
   type ChatAction,
   type ChatState,
 } from "./chat-reducer";
+import {
+  buildTitleRequestMessages,
+  cleanAiGeneratedTitle,
+  generateConversationTitle,
+  isDefaultTitle,
+} from "./conversation-title";
 
 export interface ChatRepository {
   createConversation(locale: Locale, now?: number): Promise<Conversation>;
   listConversations(): Promise<Conversation[]>;
   getConversation(id: string): Promise<Conversation | undefined>;
+  renameConversation?(id: string, title: string): Promise<void>;
   listMessages(
     conversationId: string,
     options?: { beforeCreatedAt?: number; limit?: number },
@@ -51,10 +59,6 @@ export interface ChatRepository {
   setConversationLocale(id: string, locale: Locale): Promise<void>;
 }
 
-function isDefaultTitle(title: string): boolean {
-  return title === "新的对话" || title === "新しい会話";
-}
-
 export type StreamChatFunction = (
   request: StreamChatRequest,
   options: StreamChatOptions,
@@ -70,6 +74,10 @@ export interface ChatControllerOptions {
   webSearchEnabled?: boolean;
   /** 智能搜索开关，开启后普通聊天请求携带 smartSearch: true（需联网搜索同时开启） */
   webSearchSmart?: boolean;
+  /** 是否在首轮对话完成后自动调用大模型生成自定义标题（默认 false，由外部或设置开启） */
+  autoAiTitle?: boolean;
+  /** 会话元数据（标题/时间/自愈）变更外部通知，便于顶层同步刷新列表 */
+  onConversationUpdated?: () => void;
   now?: () => number;
   id?: () => string;
 }
@@ -89,6 +97,11 @@ export interface ChatController extends ChatState {
   updateUserMemory(memory: string): Promise<boolean>;
   newConversation(): Promise<void>;
   selectConversation(id: string): Promise<void>;
+  renameConversation(id: string, title: string): Promise<void>;
+  generateAiTitle(
+    conversationId?: string,
+    overrideMessages?: readonly ChatMessage[],
+  ): Promise<string | undefined>;
   /** 向上翻页：加载当前窗口之前更早的历史消息（UI 窗口化） */
   loadEarlier(): Promise<void>;
   setLocale(locale: Locale): Promise<void>;
@@ -222,7 +235,20 @@ function blobToDataUrl(image: StoredImage): Promise<string> {
 }
 
 function isHistoryMessage(message: ChatMessage): boolean {
-  return message.status === "complete" || message.status === "stopped";
+  if (message.status === "complete" || message.status === "stopped") {
+    return true;
+  }
+  // 核心契约：如果消息包含已执行的工具步骤（Agent 模式），这是客观发生的操作记录，
+  // 即使消息末尾发生网络抖动或断流（failed），也必须作为有效历史带入上下文，防止重试或重连时丢失已查验的事实
+  if (
+    message.status === "failed" &&
+    message.role === "assistant" &&
+    message.toolSteps !== undefined &&
+    message.toolSteps.length > 0
+  ) {
+    return true;
+  }
+  return false;
 }
 
 const weekdaysZh = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"] as const;
@@ -385,13 +411,60 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   useEffect(() => {
     webSearchSmartRef.current = options.webSearchSmart ?? false;
   }, [options.webSearchSmart]);
-  // Agent 开关只存在于本地（ref 供请求闭包读取最新值，state 驱动 UI）
-  const agentEnabledRef = useRef(false);
-  const [agentEnabled, setAgentEnabled] = useState(false);
+  const autoAiTitleRef = useRef<boolean>(options.autoAiTitle ?? true);
+  useEffect(() => {
+    autoAiTitleRef.current = options.autoAiTitle ?? true;
+  }, [options.autoAiTitle]);
+  // Agent 开关：桌面端有项目或未显式关闭时默认开启，并持久化到本地存储
+  const STORAGE_KEY_AGENT_ENABLED = "yachiyo_desktop_agent_enabled";
+  const [agentEnabled, setAgentEnabled] = useState<boolean>(() => {
+    if (!isDesktopApp()) return false;
+    try {
+      const stored = typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY_AGENT_ENABLED) : null;
+      if (stored !== null) {
+        return stored === "true";
+      }
+    } catch {
+      // 容错降级
+    }
+    // 桌面端默认开启 Agent 模式（只要有关联工作区或首次进入）
+    return true;
+  });
+  const agentEnabledRef = useRef(agentEnabled);
+  useEffect(() => {
+    agentEnabledRef.current = agentEnabled;
+  }, [agentEnabled]);
+
+  // 监听活跃项目切换：当选定项目且此前未显式禁用 Agent 时，确保自动就绪
+  useEffect(() => {
+    if (!isDesktopApp()) return;
+    const unsub = projectManager.subscribe((projState) => {
+      if (projState.activeProject) {
+        try {
+          const stored = localStorage.getItem(STORAGE_KEY_AGENT_ENABLED);
+          if (stored !== "false") {
+            setAgentEnabled(true);
+            agentEnabledRef.current = true;
+          }
+        } catch {
+          setAgentEnabled(true);
+          agentEnabledRef.current = true;
+        }
+      }
+    });
+    return unsub;
+  }, []);
+
   const toggleAgent = useCallback(() => {
     setAgentEnabled((prev) => {
-      agentEnabledRef.current = !prev;
-      return !prev;
+      const next = !prev;
+      agentEnabledRef.current = next;
+      try {
+        localStorage.setItem(STORAGE_KEY_AGENT_ENABLED, String(next));
+      } catch {
+        // 容错降级
+      }
+      return next;
     });
   }, []);
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
@@ -405,6 +478,10 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   const sendingRef = useRef(false);
   const newConversationLockRef = useRef(false);
   const lastTimestampRef = useRef(0);
+  const onConversationUpdatedRef = useRef(options.onConversationUpdated);
+  useEffect(() => {
+    onConversationUpdatedRef.current = options.onConversationUpdated;
+  }, [options.onConversationUpdated]);
 
   const nextTimestamp = useCallback(() => {
     const timestamp = Math.max(servicesRef.current.now(), lastTimestampRef.current + 1);
@@ -456,7 +533,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         servicesRef.current.repository.listConversations(),
         servicesRef.current.repository.getUserMemory().catch(() => ""),
       ]);
-      const latest = conversations[0];
+      let latest = conversations[0];
       if (latest === undefined) {
         return { ...(await createConversation(locale)), userMemory };
       }
@@ -474,18 +551,38 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         if (messages[index] !== storedMessages[index]) await queueMessage(messages[index]!);
       }
       if (locale !== latest.locale) await servicesRef.current.repository.setLocale(latest.locale);
-      if (conversations.length > 1 && servicesRef.current.repository.deleteConversation) {
+      if (isDefaultTitle(latest.title)) {
+        const autoTitle = generateConversationTitle(messages, latest.locale);
+        if (!isDefaultTitle(autoTitle)) {
+          latest = { ...latest, title: autoTitle };
+          void servicesRef.current.repository.renameConversation?.(latest.id, autoTitle);
+        }
+      }
+      if (conversations.length > 0) {
         const repo = servicesRef.current.repository;
         void (async () => {
           try {
-            for (let i = 1; i < conversations.length; i++) {
+            let updatedAny = false;
+            for (let i = 0; i < conversations.length; i++) {
               const item = conversations[i]!;
               if (isDefaultTitle(item.title)) {
-                const count = await repo.listMessages(item.id, { limit: 1 });
+                const count = await repo.listMessages(item.id, { limit: 5 });
                 if (count.length === 0) {
-                  await repo.deleteConversation!(item.id);
+                  if (i > 0 && repo.deleteConversation) {
+                    await repo.deleteConversation(item.id);
+                    updatedAny = true;
+                  }
+                } else {
+                  const autoTitle = generateConversationTitle(count, item.locale);
+                  if (!isDefaultTitle(autoTitle)) {
+                    await repo.renameConversation?.(item.id, autoTitle);
+                    updatedAny = true;
+                  }
                 }
               }
+            }
+            if (updatedAny) {
+              onConversationUpdatedRef.current?.();
             }
           } catch {
             // 静默自愈，不影响核心启动流程
@@ -609,7 +706,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         : 0;
 
       const reservedPrefixMessages =
-        (hasSkills ? 2 : 0) + (hasUserMemory ? 2 : 0) + (hasSummary ? 2 : 0);
+        (hasSkills ? 2 : 0) +
+        (hasUserMemory ? 2 : 0) +
+        (hasSummary ? 2 : 0);
       const maxHistoryMessages = maximumRequestMessages - reservedPrefixMessages;
       const history = requestHistory(
         messages,
@@ -631,7 +730,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
               const requestMessages: StreamChatMessage[] = [
                 {
                   role: "assistant",
-                  text,
+                  text: "",
                   toolCalls: message.toolSteps.map((step) => ({
                     id: step.id,
                     name: step.name,
@@ -647,12 +746,18 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
                   toolName: step.name,
                 });
               }
+              if (text.trim().length > 0) {
+                requestMessages.push({
+                  role: "assistant",
+                  text: text.trim(),
+                });
+              }
               return requestMessages;
             }
             const requestMessage: StreamChatMessage = {
               role: message.role,
               // desktop 端 user 消息中的 @文件引用 在请求侧展开为文件内容块（存储与 UI 保留原文）
-              text:
+            text:
                 message.role === "user" && isDesktopApp() && hasFileReferences(text)
                   ? await expandFileReferences(text, desktopFileReader)
                   : text,
@@ -689,7 +794,79 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         );
       }
 
-      return [...prefixMessages, ...chatMessages];
+      const allMessages = [...prefixMessages, ...chatMessages];
+      // 当历史末尾是 assistant 角色时（例如 retry 上一条已有实质产出的失败消息），
+      // 运行时请求追加接续指令以符合大模型接口末尾必须是 user 的契约，同时 100% 继承上文全部工作事实
+      if (allMessages.at(-1)?.role === "assistant") {
+        const continuationText =
+          stateRef.current.locale === "ja-JP"
+            ? "（接続が一時切断されました。上記に続けてタスクを完了してください）"
+            : "（连接曾中断，请接续上文继续完成任务）";
+        allMessages.push({ role: "user", text: continuationText });
+      }
+
+      return allMessages;
+    },
+    [],
+  );
+
+  const generateAiTitle = useCallback(
+    async (
+      targetConversationId?: string,
+      overrideMessages?: readonly ChatMessage[],
+    ): Promise<string | undefined> => {
+      const convId = targetConversationId ?? stateRef.current.activeConversation?.id;
+      if (!convId) return undefined;
+
+      const targetConv =
+        stateRef.current.activeConversation?.id === convId
+          ? stateRef.current.activeConversation
+          : await servicesRef.current.repository.getConversation(convId);
+      if (!targetConv) return undefined;
+
+      const messages =
+        overrideMessages ??
+        (stateRef.current.activeConversation?.id === convId
+          ? stateRef.current.messages
+          : await servicesRef.current.repository.listMessages(convId));
+      if (messages.length === 0) return undefined;
+
+      const requestMessages = buildTitleRequestMessages(messages, targetConv.locale);
+      const activeConfig = activeLlmConfigRef.current;
+
+      console.info("[AutoAiTitle] generateAiTitle called for conversationId:", convId);
+      let generatedText = "";
+      try {
+        await servicesRef.current.streamChat(
+          {
+            locale: targetConv.locale,
+            messages: requestMessages,
+            mode: "title",
+            ...(activeConfig !== undefined
+              ? {
+                  provider: activeConfig.provider,
+                  apiKey: activeConfig.apiKey,
+                  model: activeConfig.model,
+                  ...(activeConfig.baseUrl !== undefined
+                    ? { baseUrl: activeConfig.baseUrl }
+                    : {}),
+                }
+              : {}),
+          },
+          {
+            onDelta: (text) => {
+              generatedText += text;
+            },
+          },
+        );
+      } catch (err) {
+        console.warn("[autoAiTitle] streamChat failed:", err);
+        return undefined;
+      }
+
+      const cleaned = cleanAiGeneratedTitle(generatedText, targetConv.locale);
+      console.info("[AutoAiTitle] Result for", convId, "raw:", JSON.stringify(generatedText), "cleaned:", JSON.stringify(cleaned));
+      return cleaned;
     },
     [],
   );
@@ -744,10 +921,72 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         await queueMessage(message).catch(() => {
           if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
         });
+
+        const conversationId = run.assistant.conversationId;
+        const activeConv = stateRef.current.activeConversation;
+        if (
+          conversationId &&
+          (status === "complete" || (status === "stopped" && run.text.trim().length > 0))
+        ) {
+          const targetConv =
+            activeConv?.id === conversationId
+              ? activeConv
+              : await servicesRef.current.repository.getConversation(conversationId);
+
+          if (targetConv !== undefined) {
+            const allMessages =
+              activeConv?.id === conversationId
+                ? [...stateRef.current.messages, message]
+                : await servicesRef.current.repository.listMessages(conversationId);
+            const autoTitle = generateConversationTitle(allMessages, targetConv.locale);
+            const shouldSetHeuristic = isDefaultTitle(targetConv.title);
+
+            if (shouldSetHeuristic && !isDefaultTitle(autoTitle)) {
+              await servicesRef.current.repository.renameConversation?.(conversationId, autoTitle);
+              if (mountedRef.current && stateRef.current.activeConversation?.id === conversationId) {
+                emit({ conversationId, title: autoTitle, type: "conversation-renamed" });
+              }
+              onConversationUpdatedRef.current?.();
+            }
+
+            // 阶段二：当开启 autoAiTitle 且对话正常完成时，异步向大模型请求智能概括标题并平滑升级
+            // 条件：当前会话标题为默认标题或由启发式生成的标题（即用户未手动自定义更名）
+            const canUpgradeToAi = shouldSetHeuristic || targetConv.title === autoTitle;
+            console.info("[AutoAiTitle] Candidate check for convId:", conversationId, {
+              status,
+              autoAiTitle: autoAiTitleRef.current,
+              canUpgradeToAi,
+              originalTitle: targetConv.title,
+              heuristicTitle: autoTitle,
+            });
+            if (status === "complete" && autoAiTitleRef.current && canUpgradeToAi) {
+              void (async () => {
+                try {
+                  console.info("[AutoAiTitle] Initiating AI title upgrade for convId:", conversationId);
+                  const aiTitle = await generateAiTitle(conversationId, allMessages);
+                  if (aiTitle) {
+                    const latest = await servicesRef.current.repository.getConversation(conversationId);
+                    if (latest && (latest.title === autoTitle || isDefaultTitle(latest.title))) {
+                      await servicesRef.current.repository.renameConversation?.(conversationId, aiTitle);
+                      if (mountedRef.current && stateRef.current.activeConversation?.id === conversationId) {
+                        emit({ conversationId, title: aiTitle, type: "conversation-renamed" });
+                      }
+                      onConversationUpdatedRef.current?.();
+                      console.info("[AutoAiTitle] Successfully upgraded conversation title to:", aiTitle);
+                    }
+                  }
+                } catch (err) {
+                  console.warn("[AutoAiTitle] Failed to upgrade title:", err);
+                }
+              })();
+            }
+          }
+        }
+        onConversationUpdatedRef.current?.();
       })();
       return run.finishing;
     },
-    [emit, queueMessage],
+    [emit, generateAiTitle, queueMessage],
   );
 
   const startAssistant = useCallback(
@@ -854,7 +1093,14 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             ...(webSearchEnabledRef.current === true && webSearchSmartRef.current === true
               ? { smartSearch: true }
               : {}),
-            ...(agentEnabledRef.current && isDesktopApp() ? { agent: { enabled: true } } : {}),
+            ...(agentEnabledRef.current && isDesktopApp()
+              ? {
+                  agent: {
+                    enabled: true,
+                    workspace: projectManager.getState().activeProject ?? undefined,
+                  },
+                }
+              : {}),
           },
           {
             onDelta(text) {
@@ -1397,9 +1643,41 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         });
         const hasMoreHistory = stored.length > historyWindowSize;
         const messages = hasMoreHistory ? stored.slice(1) : stored;
-        await servicesRef.current.repository.setLocale(conversation.locale);
+        let currentConv = conversation;
+        const autoTitle = generateConversationTitle(messages, currentConv.locale);
+        if (isDefaultTitle(currentConv.title)) {
+          if (!isDefaultTitle(autoTitle)) {
+            currentConv = { ...currentConv, title: autoTitle };
+            void servicesRef.current.repository.renameConversation?.(id, autoTitle);
+            onConversationUpdatedRef.current?.();
+          }
+        }
+        if (
+          autoAiTitleRef.current &&
+          messages.length >= 2 &&
+          (currentConv.title === autoTitle || isDefaultTitle(currentConv.title))
+        ) {
+          void (async () => {
+            try {
+              const aiTitle = await generateAiTitle(id, messages);
+              if (aiTitle) {
+                const latest = await servicesRef.current.repository.getConversation(id);
+                if (latest && (latest.title === autoTitle || isDefaultTitle(latest.title))) {
+                  await servicesRef.current.repository.renameConversation?.(id, aiTitle);
+                  if (mountedRef.current && stateRef.current.activeConversation?.id === id) {
+                    emit({ conversationId: id, title: aiTitle, type: "conversation-renamed" });
+                  }
+                  onConversationUpdatedRef.current?.();
+                }
+              }
+            } catch {
+              // 静默自愈
+            }
+          })();
+        }
+        await servicesRef.current.repository.setLocale(currentConv.locale);
         emit({
-          conversation,
+          conversation: currentConv,
           messages,
           type: "conversation-selected",
           ...(hasMoreHistory ? { hasMoreHistory: true } : {}),
@@ -1408,7 +1686,20 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
       }
     },
-    [emit, stopAndWait],
+    [emit, generateAiTitle, stopAndWait],
+  );
+
+  const renameConversation = useCallback(
+    async (id: string, title: string): Promise<void> => {
+      const normalized = title.trim();
+      if (!normalized) return;
+      await servicesRef.current.repository.renameConversation?.(id, normalized);
+      if (mountedRef.current && stateRef.current.activeConversation?.id === id) {
+        emit({ conversationId: id, title: normalized, type: "conversation-renamed" });
+      }
+      onConversationUpdatedRef.current?.();
+    },
+    [emit],
   );
 
   const newConversation = useCallback(async (): Promise<void> => {
@@ -1556,6 +1847,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     regenerate,
     retry,
     selectConversation,
+    renameConversation,
+    generateAiTitle,
     send,
     compressConversation,
     toggleAgent,

@@ -83,7 +83,8 @@ export type ChatAction =
       toolName: string;
       argumentsJson: string;
     }
-  | { type: "permission-resolved"; requestId: string; approved: boolean };
+  | { type: "permission-resolved"; requestId: string; approved: boolean }
+  | { type: "conversation-renamed"; conversationId: string; title: string };
 
 export const initialChatState: ChatState = {
   locale: "zh-CN",
@@ -257,6 +258,20 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         phase: "idle",
         streaming: undefined,
         hasMoreHistory: action.hasMoreHistory,
+      };
+    case "conversation-renamed":
+      if (
+        state.activeConversation === undefined ||
+        state.activeConversation.id !== action.conversationId
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        activeConversation: {
+          ...state.activeConversation,
+          title: action.title,
+        },
       };
     case "locale-changed":
       return {

@@ -1,31 +1,45 @@
 import {
-  ChevronDown,
+  Camera,
+  Check,
   Cpu,
   Database,
-  ExternalLink,
   Folder,
+  FolderPlus,
+  FolderX,
   Globe,
   HelpCircle,
   Keyboard,
-  MoreHorizontal,
   Palette,
+  Play,
   Sliders,
   Sparkles,
+  Terminal,
   Trash2,
+  Upload,
   User,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LlmSettingsPanel } from "../LlmSettingsPanel";
 import { SkillsPanel } from "../SkillsPanel";
 import { UserMemoryPanel } from "../UserMemoryPanel";
 import { WorkspacePanel } from "../desktop/WorkspacePanel";
 import { SKILLS } from "../../skills";
 import { PROVIDER_METADATA } from "../../domain/llm";
+import {
+  getProjectDisplayName,
+  projectManager,
+  useProjectState,
+} from "../../services/project-manager";
+import {
+  PRESET_USER_BADGES,
+  useLocalUserSettings,
+} from "../../services/user-settings";
+import { AvatarCropModal } from "./AvatarCropModal";
+import { openExternalUrl } from "../../services/desktop-bridge";
 import type { SharedViewProps } from "../../views/layout-types";
 
 export type SettingsTabKey =
-  | "account"
   | "general"
   | "app"
   | "appearance"
@@ -33,7 +47,8 @@ export type SettingsTabKey =
   | "custom"
   | "browser"
   | "project"
-  | "shortcuts";
+  | "shortcuts"
+  | "user";
 
 export interface SettingsModalProps {
   initialTab?: SettingsTabKey;
@@ -45,9 +60,6 @@ export interface SettingsModalProps {
   shared: SharedViewProps;
 }
 
-const STORAGE_QUEUE_POLICY = "yachiyo-settings-queue-policy";
-const STORAGE_SECURITY_PRESET = "yachiyo-settings-security-preset";
-const STORAGE_ARTIFACT_POLICY = "yachiyo-settings-artifact-policy";
 const STORAGE_PRIVACY_MODE = "yachiyo-settings-privacy-mode";
 
 export function SettingsModal({
@@ -61,40 +73,91 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTabKey>(initialTab);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [copiedPath, setCopiedPath] = useState(false);
+  const [copiedRule, setCopiedRule] = useState(false);
+  const [showDetachConfirm, setShowDetachConfirm] = useState(false);
+  const [showWorkspaceTerminal, setShowWorkspaceTerminal] = useState(false);
 
-  // 1. 排队消息策略 ('queue' | 'immediate')
-  const [queuePolicy, setQueuePolicy] = useState<"queue" | "immediate">(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_QUEUE_POLICY);
-      return stored === "queue" ? "queue" : "immediate";
-    } catch {
-      return "immediate";
+  // 本地用户设置（纯本地 LocalStorage）
+  const [userSettings, saveUserSettings] = useLocalUserSettings();
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  const [usernameDraft, setUsernameDraft] = useState(userSettings.username);
+  const [usernameSavedToast, setUsernameSavedToast] = useState(false);
+  const [prevUsername, setPrevUsername] = useState(userSettings.username);
+  if (userSettings.username !== prevUsername) {
+    setPrevUsername(userSettings.username);
+    setUsernameDraft(userSettings.username);
+  }
+
+  const handleSaveUsername = () => {
+    const trimmed = usernameDraft.trim();
+    saveUserSettings({ username: trimmed });
+    setUsernameDraft(trimmed || "酒寄彩叶");
+    setUsernameSavedToast(true);
+    shared.showToast(
+      trimmed ? `用户名已更新为「${trimmed}」（本地保存）` : "用户名已恢复默认（酒寄彩叶）",
+      "info",
+    );
+    setTimeout(() => setUsernameSavedToast(false), 2000);
+  };
+
+  // 称号设置状态与实时同步
+  const [badgeDraft, setBadgeDraft] = useState(userSettings.badge || "Lite");
+  const [prevBadge, setPrevBadge] = useState(userSettings.badge || "Lite");
+  if ((userSettings.badge || "Lite") !== prevBadge) {
+    setPrevBadge(userSettings.badge || "Lite");
+    setBadgeDraft(userSettings.badge || "Lite");
+  }
+
+  const handleSaveBadge = (newBadge: string) => {
+    const trimmed = newBadge.trim();
+    const finalBadge = trimmed ? trimmed.slice(0, 10) : "Lite";
+    saveUserSettings({ badge: finalBadge });
+    setBadgeDraft(finalBadge);
+    shared.showToast(`身份称号已更新为「${finalBadge}」（本地保存）`, "info");
+  };
+
+  const [cropModalOpen, setCropModalOpen] = useState(false);
+  const [rawAvatarSrc, setRawAvatarSrc] = useState<string>("");
+
+  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      shared.showToast("请选择图片格式文件", "error");
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+      return;
     }
-  });
+    const reader = new FileReader();
+    reader.onload = () => {
+      setRawAvatarSrc(reader.result as string);
+      setCropModalOpen(true);
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+    };
+    reader.onerror = () => {
+      shared.showToast("读取图片文件失败", "error");
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+    };
+    reader.readAsDataURL(file);
+  };
 
-  // 2. 安全预设 ('fast' | 'standard' | 'strict')
-  const [securityPreset, setSecurityPreset] = useState<"fast" | "standard" | "strict">(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_SECURITY_PRESET);
-      if (stored === "standard" || stored === "strict" || stored === "fast") return stored;
-      return "fast";
-    } catch {
-      return "fast";
-    }
-  });
+  const handleConfirmCropAvatar = (croppedDataUrl: string) => {
+    setCropModalOpen(false);
+    setRawAvatarSrc("");
+    saveUserSettings({ avatar: croppedDataUrl });
+    shared.showToast("头像已裁剪并保存至本地", "info");
+  };
 
-  // 3. 产物审核策略 ('always_ask' | 'auto_approve' | 'read_only')
-  const [artifactPolicy, setArtifactPolicy] = useState<"always_ask" | "auto_approve" | "read_only">(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_ARTIFACT_POLICY);
-      if (stored === "auto_approve" || stored === "read_only" || stored === "always_ask") return stored;
-      return "always_ask";
-    } catch {
-      return "always_ask";
-    }
-  });
+  const handleRemoveAvatar = () => {
+    saveUserSettings({ avatar: "" });
+    shared.showToast("已恢复默认头像", "info");
+  };
 
-  // 4. 隐私模式 (boolean)
+  // 接入全局真实项目状态
+  const { activeProject, recentProjects } = useProjectState();
+
+  // 隐私模式持久化
   const [privacyMode, setPrivacyMode] = useState<boolean>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_PRIVACY_MODE);
@@ -103,33 +166,6 @@ export function SettingsModal({
       return true;
     }
   });
-
-  const handleSetQueuePolicy = (policy: "queue" | "immediate") => {
-    setQueuePolicy(policy);
-    try {
-      localStorage.setItem(STORAGE_QUEUE_POLICY, policy);
-    } catch {
-      /* ignore storage failure */
-    }
-  };
-
-  const handleSetSecurityPreset = (preset: "fast" | "standard" | "strict") => {
-    setSecurityPreset(preset);
-    try {
-      localStorage.setItem(STORAGE_SECURITY_PRESET, preset);
-    } catch {
-      /* ignore storage failure */
-    }
-  };
-
-  const handleSetArtifactPolicy = (policy: "always_ask" | "auto_approve" | "read_only") => {
-    setArtifactPolicy(policy);
-    try {
-      localStorage.setItem(STORAGE_ARTIFACT_POLICY, policy);
-    } catch {
-      /* ignore storage failure */
-    }
-  };
 
   const handleTogglePrivacyMode = () => {
     setPrivacyMode((prev) => {
@@ -141,6 +177,57 @@ export function SettingsModal({
       }
       return next;
     });
+  };
+
+  const handleCopyPath = async (path: string) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(path);
+      }
+      setCopiedPath(true);
+      setTimeout(() => setCopiedPath(false), 2000);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleCopyRuleContract = async () => {
+    const contract = `# Yachiyo Chat 权威 Agent 运行守则\n1. 遵守工作区边界与文件读写隔离\n2. 先读后改，防御性写入\n3. 终端命令沙盒化执行与质量门禁自动闭环`;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(contract);
+      }
+      setCopiedRule(true);
+      setTimeout(() => setCopiedRule(false), 2000);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handlePickWorkspace = async () => {
+    const picked = await projectManager.pickAndOpenProject("选择工作区目录");
+    if (picked) {
+      setActiveTab("project");
+      shared.showToast(`已切换工作区至 ${getProjectDisplayName(picked)}`, "info");
+    }
+  };
+
+  const handleQuickStartWorkspace = async () => {
+    const picked = await projectManager.quickStart();
+    if (picked) {
+      setActiveTab("project");
+      shared.showToast("已通过快速开始进入工作区", "info");
+    }
+  };
+
+  const handleDetachProject = async () => {
+    setShowDetachConfirm(false);
+    const target = activeProject;
+    await projectManager.switchProject(null);
+    if (target) {
+      projectManager.removeRecentProject(target);
+    }
+    shared.showToast("已分离当前工作区，返回独立会话模式", "info");
   };
 
   const [prevInitialTab, setPrevInitialTab] = useState(initialTab);
@@ -170,7 +257,11 @@ export function SettingsModal({
 
   const currentProviderLabel = shared.llmActiveProvider
     ? PROVIDER_METADATA[shared.llmActiveProvider]?.label ?? shared.llmActiveProvider
-    : "默认服务 (System Default)";
+    : "系统默认 Provider (未单独配置)";
+
+  const otherRecentProjects = recentProjects.filter(
+    (p) => !activeProject || p.toLowerCase() !== activeProject.toLowerCase(),
+  );
 
   return (
     <div className="settings-modal-overlay" role="dialog" aria-modal="true" aria-label="设置中心">
@@ -276,63 +367,76 @@ export function SettingsModal({
               </button>
             </div>
 
-            {/* 2. 项目分组 (Projects) */}
+            {/* 2. 工作区项目分组 (真实与 projectManager 对齐) */}
             <div className="settings-modal__nav-group">
-              <div className="settings-modal__nav-section-title">项目</div>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === "project"}
-                className={`settings-modal__nav-item ${activeTab === "project" ? "settings-modal__nav-item--active" : ""}`}
-                onClick={() => setActiveTab("project")}
-              >
-                <Folder size={15} className="settings-modal__nav-icon" />
-                <span className="settings-modal__nav-item-text">Yachiyo-chat-desktop</span>
-              </button>
+              <div className="settings-modal__nav-section-title">工作区项目</div>
+              {activeProject ? (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === "project"}
+                  className={`settings-modal__nav-item ${activeTab === "project" ? "settings-modal__nav-item--active" : ""}`}
+                  onClick={() => setActiveTab("project")}
+                  title={activeProject}
+                >
+                  <Folder size={15} className="settings-modal__nav-icon" />
+                  <span className="settings-modal__nav-item-text">
+                    {getProjectDisplayName(activeProject)}
+                  </span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === "project"}
+                  className={`settings-modal__nav-item ${activeTab === "project" ? "settings-modal__nav-item--active" : ""}`}
+                  onClick={() => setActiveTab("project")}
+                >
+                  <FolderX size={15} className="settings-modal__nav-icon" />
+                  <span className="settings-modal__nav-item-text">未绑定工作区</span>
+                </button>
+              )}
 
-              <button
-                type="button"
-                className="settings-modal__nav-item settings-modal__nav-item--sub"
-                onClick={() => setActiveTab("project")}
-              >
-                <span className="settings-modal__project-dot" />
-                <span className="settings-modal__nav-item-text">Yachiyo chat</span>
-              </button>
-
-              <button
-                type="button"
-                className="settings-modal__nav-item settings-modal__nav-item--sub"
-                onClick={() => setActiveTab("project")}
-              >
-                <span className="settings-modal__project-dot" />
-                <span className="settings-modal__nav-item-text">281990</span>
-              </button>
+              {otherRecentProjects.slice(0, 3).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  className="settings-modal__nav-item settings-modal__nav-item--sub"
+                  onClick={async () => {
+                    await projectManager.switchProject(p);
+                    setActiveTab("project");
+                  }}
+                  title={`切换至项目：${p}`}
+                >
+                  <span className="settings-modal__project-dot" />
+                  <span className="settings-modal__nav-item-text">{getProjectDisplayName(p)}</span>
+                </button>
+              ))}
 
               <button
                 type="button"
                 className="settings-modal__nav-item settings-modal__nav-item--link"
-                onClick={() => setActiveTab("project")}
+                onClick={handlePickWorkspace}
               >
-                <span className="settings-modal__nav-item-text">显示全部</span>
+                <FolderPlus size={13} style={{ marginRight: 6 }} />
+                <span className="settings-modal__nav-item-text">打开其他工作区...</span>
               </button>
             </div>
 
-            {/* 3. 未在项目中 */}
+            {/* 3. 快速导航 */}
             <div className="settings-modal__nav-group">
-              <div className="settings-modal__nav-section-title">未在项目中</div>
+              <div className="settings-modal__nav-section-title">快捷入口</div>
               <button
                 type="button"
                 className="settings-modal__nav-item"
-                onClick={() => {
-                  onClose();
-                }}
+                onClick={onClose}
               >
-                <span className="settings-modal__nav-item-text">对话</span>
+                <span className="settings-modal__nav-item-text">返回当前会话</span>
               </button>
             </div>
           </div>
 
-          {/* 4. 底部快捷操作与用户信息条 */}
+          {/* 4. 底部快捷操作与真实客户端信息 */}
           <div className="settings-modal__sidebar-footer">
             <button
               type="button"
@@ -342,34 +446,48 @@ export function SettingsModal({
               onClick={() => setActiveTab("shortcuts")}
             >
               <Keyboard size={14} />
-              <span>快捷键</span>
+              <span>快捷键速查</span>
             </button>
 
             <button
               type="button"
               className="settings-modal__sidebar-footer-link"
-              onClick={() => window.open("https://github.com/liangcka/Yachiyo-chat-desktop/issues", "_blank")}
+              onClick={() => {
+                void openExternalUrl("https://github.com/liangcka/Yachiyo-chat-desktop");
+              }}
             >
               <HelpCircle size={14} />
-              <span>提供反馈</span>
-              <ExternalLink size={12} style={{ marginLeft: "auto", opacity: 0.6 }} />
+              <span>问题反馈</span>
             </button>
 
-            {/* 底部用户卡片 (点击直达账号页) */}
+            {/* 左下角用户设置（纯本地保存） */}
             <button
               type="button"
               role="tab"
-              aria-selected={activeTab === "account"}
-              className={`settings-modal__user-bar ${activeTab === "account" ? "settings-modal__user-bar--active" : ""}`}
-              onClick={() => setActiveTab("account")}
-              title="查看与管理账号信息"
+              aria-label="用户设置"
+              aria-selected={activeTab === "user"}
+              className={`settings-modal__client-bar settings-modal__user-bar ${activeTab === "user" ? "settings-modal__user-bar--active" : ""}`}
+              onClick={() => setActiveTab("user")}
+              title="用户设置（纯本地偏好）"
             >
-              <div className="settings-modal__user-avatar">
-                <User size={16} />
+              <div className="settings-modal__client-icon settings-modal__user-icon">
+                {userSettings.avatar ? (
+                  <img
+                    src={userSettings.avatar}
+                    alt={userSettings.username || "用户头像"}
+                    className="settings-modal__user-avatar-thumb"
+                  />
+                ) : (
+                  <User size={14} />
+                )}
               </div>
-              <div className="settings-modal__user-info">
-                <span className="settings-modal__user-name">anon chihaya</span>
-                <span className="settings-modal__user-email">xychunliang@gmail.com</span>
+              <div className="settings-modal__client-info">
+                <span className="settings-modal__client-title">
+                  {userSettings.username || "酒寄彩叶"}
+                </span>
+                <span className="settings-modal__client-subtitle">
+                  本地专属 · 个人资料
+                </span>
               </div>
             </button>
           </div>
@@ -377,349 +495,24 @@ export function SettingsModal({
 
         {/* ─── 右侧内容区域 ─────────────────────────────── */}
         <main className="settings-modal__content" role="tabpanel">
-          {/* TAB: 常规 (General - 图 2 风格) */}
+          {/* TAB: 常规 (General) */}
           {activeTab === "general" ? (
             <div className="settings-panel-view">
               <div className="settings-panel-view__header">
                 <h3 className="settings-panel-view__title">常规</h3>
                 <p className="settings-panel-view__desc">
-                  配置智能体执行、排队消息发送以及权限。速览当前客户端运行状态、活跃模型与快捷操作。
+                  速览客户端运行环境、隐私保护策略与各项服务连接状态。
                 </p>
               </div>
 
-              {/* 1. 执行 (Execution) */}
+              {/* 1. 隐私与数据安全 */}
               <div className="settings-card-group">
-                <h4 className="settings-card-group__title">执行</h4>
+                <h4 className="settings-card-group__title">隐私保护与数据策略</h4>
                 <div className="settings-item-card">
                   <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">排队消息</strong>
+                    <strong className="settings-item-card__name">本地隐私保护模式</strong>
                     <span className="settings-item-card__desc">
-                      配置何时发送后续消息。
-                    </span>
-                    <button
-                      type="button"
-                      className="settings-link-inline"
-                      onClick={() => setActiveTab("shortcuts")}
-                    >
-                      键盘快捷键 ⓘ
-                    </button>
-                  </div>
-                  <div className="settings-item-card__action">
-                    <div className="settings-segmented-control" role="group" aria-label="排队消息设置">
-                      <button
-                        type="button"
-                        className={`settings-segmented-btn ${queuePolicy === "queue" ? "settings-segmented-btn--active" : ""}`}
-                        onClick={() => handleSetQueuePolicy("queue")}
-                      >
-                        排队
-                      </button>
-                      <button
-                        type="button"
-                        className={`settings-segmented-btn ${queuePolicy === "immediate" ? "settings-segmented-btn--active" : ""}`}
-                        onClick={() => handleSetQueuePolicy("immediate")}
-                      >
-                        立即发送
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* 2. Agent 设置 */}
-              <div className="settings-card-group">
-                <h4 className="settings-card-group__title">Agent 设置</h4>
-                <div className="settings-item-card">
-                  <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">安全预设</strong>
-                    <span className="settings-item-card__desc">
-                      为智能体选择预设安全策略。它会控制终端自动执行策略和文件访问策略。
-                    </span>
-                    <button
-                      type="button"
-                      className="settings-link-inline"
-                      onClick={() => setActiveTab("project")}
-                    >
-                      了解更多 about 极速模式 ⓘ
-                    </button>
-                  </div>
-                  <div className="settings-item-card__action">
-                    <div className="settings-select-wrapper">
-                      <select
-                        className="settings-select"
-                        value={securityPreset}
-                        onChange={(e) =>
-                          handleSetSecurityPreset(e.target.value as "fast" | "standard" | "strict")
-                        }
-                        aria-label="安全预设"
-                      >
-                        <option value="fast">极速模式</option>
-                        <option value="standard">标准模式</option>
-                        <option value="strict">严格模式</option>
-                      </select>
-                      <ChevronDown size={14} className="settings-select-chevron" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* 3. 智能体行为 */}
-              <div className="settings-card-group">
-                <h4 className="settings-card-group__title">智能体行为</h4>
-                <div className="settings-item-card">
-                  <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">产物审核策略</strong>
-                    <span className="settings-item-card__desc">
-                      指定智能体在请求审核产物时的行为。产物是智能体创建的文档，用于提供更丰富的对话体验。
-                    </span>
-                  </div>
-                  <div className="settings-item-card__action">
-                    <div className="settings-select-wrapper">
-                      <select
-                        className="settings-select"
-                        value={artifactPolicy}
-                        onChange={(e) =>
-                          handleSetArtifactPolicy(
-                            e.target.value as "always_ask" | "auto_approve" | "read_only"
-                          )
-                        }
-                        aria-label="产物审核策略"
-                      >
-                        <option value="always_ask">始终询问</option>
-                        <option value="auto_approve">自动批准</option>
-                        <option value="read_only">仅只读</option>
-                      </select>
-                      <ChevronDown size={14} className="settings-select-chevron" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* 4. 文件权限 */}
-              <div className="settings-card-group">
-                <h4 className="settings-card-group__title">文件权限</h4>
-                <div className="settings-item-card">
-                  <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">文件访问规则</strong>
-                    <span className="settings-item-card__desc">配置允许和拒绝读写的文件路径。</span>
-                  </div>
-                  <div className="settings-item-card__action">
-                    <button
-                      type="button"
-                      className="settings-btn settings-btn--ghost"
-                      onClick={() => setActiveTab("project")}
-                    >
-                      打开
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* 5. 网络权限 */}
-              <div className="settings-card-group">
-                <h4 className="settings-card-group__title">网络权限</h4>
-                <div className="settings-item-card">
-                  <div className="settings-item-card__lead">
-                    <div className="settings-item-title-with-badge">
-                      <strong className="settings-item-card__name">网络访问规则</strong>
-                      <span className="settings-count-badge">6</span>
-                    </div>
-                    <span className="settings-item-card__desc">配置允许和拒绝读取的 URL。</span>
-                  </div>
-                  <div className="settings-item-card__action">
-                    <button
-                      type="button"
-                      className="settings-btn settings-btn--ghost"
-                      onClick={() => setActiveTab("browser")}
-                    >
-                      打开
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* 6. 终端与工具权限 */}
-              <div className="settings-card-group">
-                <h4 className="settings-card-group__title">终端与工具权限</h4>
-                <div className="settings-item-card">
-                  <div className="settings-item-card__lead">
-                    <div className="settings-item-title-with-badge">
-                      <strong className="settings-item-card__name">终端命令</strong>
-                      <span className="settings-count-badge">32</span>
-                    </div>
-                    <span className="settings-item-card__desc">配置允许的终端命令。</span>
-                  </div>
-                  <div className="settings-item-card__action">
-                    <button
-                      type="button"
-                      className="settings-btn settings-btn--ghost"
-                      onClick={() => setActiveTab("project")}
-                    >
-                      打开
-                    </button>
-                  </div>
-                </div>
-
-                <div className="settings-item-card">
-                  <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">沙盒外命令</strong>
-                    <span className="settings-item-card__desc">配置允许在沙盒外运行的命令。</span>
-                  </div>
-                  <div className="settings-item-card__action">
-                    <button
-                      type="button"
-                      className="settings-btn settings-btn--ghost"
-                      onClick={() => setActiveTab("project")}
-                    >
-                      打开
-                    </button>
-                  </div>
-                </div>
-
-                <div className="settings-item-card">
-                  <div className="settings-item-card__lead">
-                    <div className="settings-item-title-with-badge">
-                      <strong className="settings-item-card__name">MCP 工具</strong>
-                      <span className="settings-count-badge">3</span>
-                    </div>
-                    <span className="settings-item-card__desc">
-                      配置通过 模型上下文协议 (MCP) 使用的外部工具。
-                    </span>
-                  </div>
-                  <div className="settings-item-card__action">
-                    <button
-                      type="button"
-                      className="settings-btn settings-btn--ghost"
-                      onClick={() => setActiveTab("custom")}
-                    >
-                      打开
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* 7. 运行状态 */}
-              <div className="settings-card-group">
-                <h4 className="settings-card-group__title">系统状态</h4>
-                <div className="settings-item-card">
-                  <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">当前活跃大模型</strong>
-                    <span className="settings-item-card__desc">
-                      已启用 Provider: {currentProviderLabel}
-                    </span>
-                  </div>
-                  <div className="settings-item-card__action">
-                    <button
-                      type="button"
-                      className="settings-btn"
-                      onClick={() => setActiveTab("models")}
-                    >
-                      切换模型
-                    </button>
-                  </div>
-                </div>
-
-                <div className="settings-item-card">
-                  <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">本地持久化存储</strong>
-                    <span className="settings-item-card__desc">
-                      IndexedDB 数据库正常运行，当前共保存 {shared.conversations.length} 组历史会话。
-                    </span>
-                  </div>
-                  <div className="settings-item-card__action">
-                    <button
-                      type="button"
-                      className="settings-btn"
-                      onClick={() => setActiveTab("app")}
-                    >
-                      数据管理
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          {/* TAB: 账号 (Account - 图 1 风格) */}
-          {activeTab === "account" ? (
-            <div className="settings-panel-view">
-              <div className="settings-panel-view__header">
-                <h3 className="settings-panel-view__title">账号</h3>
-                <p className="settings-panel-view__desc">管理您的账户信息、会员订阅权限以及数据隐私保护策略。</p>
-              </div>
-
-              {/* 1. 账户信息 */}
-              <div className="settings-card-group">
-                <h4 className="settings-card-group__title">账户信息</h4>
-                <div className="settings-item-card">
-                  <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">安魂曲</strong>
-                    <span className="settings-item-card__desc">152*******49</span>
-                  </div>
-                  <div className="settings-item-card__action">
-                    <button
-                      type="button"
-                      className="settings-btn settings-btn--ghost"
-                      onClick={() => window.open("https://github.com/liangcka/Yachiyo-chat-desktop", "_blank")}
-                    >
-                      <span>管理账号</span>
-                      <ExternalLink size={12} style={{ marginLeft: 4 }} />
-                    </button>
-                    <button
-                      type="button"
-                      className="settings-btn settings-btn--icon"
-                      title="更多选项"
-                      aria-label="更多选项"
-                    >
-                      <MoreHorizontal size={14} />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="settings-item-card">
-                  <div className="settings-item-card__lead">
-                    <div className="settings-item-title-with-badge">
-                      <strong className="settings-item-card__name">会员 Lite</strong>
-                      <span className="settings-lite-badge">Lite</span>
-                    </div>
-                    <span className="settings-item-card__desc">单次购买 · 到期时间 2026/09/22</span>
-                  </div>
-                  <div className="settings-item-card__action">
-                    <button
-                      type="button"
-                      className="settings-btn settings-btn--ghost"
-                      onClick={() => window.open("https://github.com/liangcka/Yachiyo-chat-desktop", "_blank")}
-                    >
-                      <span>管理订阅</span>
-                      <ExternalLink size={12} style={{ marginLeft: 4 }} />
-                    </button>
-                    <button
-                      type="button"
-                      className="settings-btn settings-btn--primary"
-                      onClick={() => window.open("https://github.com/liangcka/Yachiyo-chat-desktop", "_blank")}
-                    >
-                      升级权益
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* 2. 隐私模式 */}
-              <div className="settings-card-group">
-                <h4 className="settings-card-group__title">隐私模式</h4>
-                <div className="settings-item-card">
-                  <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">隐私模式</strong>
-                    <span className="settings-item-card__desc">
-                      当启用隐私模式时，Yachiyo不会将您的信息（如您的聊天互动，包括相关代码片段和AI生成的输出）用于分析、产品改进和模型训练。更多详情请见{" "}
-                      <a
-                        href="https://github.com/liangcka/Yachiyo-chat-desktop"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="settings-link-inline-text"
-                      >
-                        隐私模式
-                      </a>
-                      。
+                      启用后，您的对话内容、代码修改与工作区文件交互仅安全保存在当前设备的本地存储中，绝不上传至任何遥测分析或第三方日志服务器。
                     </span>
                   </div>
                   <div className="settings-item-card__action">
@@ -736,10 +529,108 @@ export function SettingsModal({
                   </div>
                 </div>
               </div>
+
+              {/* 2. 当前工作区状态 */}
+              <div className="settings-card-group">
+                <h4 className="settings-card-group__title">工作区与项目环境</h4>
+                <div className="settings-item-card">
+                  <div className="settings-item-card__lead">
+                    <strong className="settings-item-card__name">活跃工作区目录</strong>
+                    <span className="settings-item-card__desc">
+                      {activeProject
+                        ? `当前已关联本地项目：${activeProject}`
+                        : "尚未关联本地工程目录，当前处于无工作区的独立对话模式。"}
+                    </span>
+                  </div>
+                  <div className="settings-item-card__action">
+                    {activeProject ? (
+                      <button
+                        type="button"
+                        className="settings-btn"
+                        onClick={() => setActiveTab("project")}
+                      >
+                        工作区配置
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="settings-btn settings-btn--primary"
+                        onClick={handlePickWorkspace}
+                      >
+                        选择工作区
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. 系统运行状态速览 */}
+              <div className="settings-card-group">
+                <h4 className="settings-card-group__title">核心系统状态</h4>
+                <div className="settings-item-card">
+                  <div className="settings-item-card__lead">
+                    <strong className="settings-item-card__name">大语言模型服务 (LLM)</strong>
+                    <span className="settings-item-card__desc">
+                      当前活跃 Provider: <strong>{currentProviderLabel}</strong>
+                    </span>
+                  </div>
+                  <div className="settings-item-card__action">
+                    <button
+                      type="button"
+                      className="settings-btn"
+                      onClick={() => setActiveTab("models")}
+                    >
+                      管理模型供应商
+                    </button>
+                  </div>
+                </div>
+
+                <div className="settings-item-card">
+                  <div className="settings-item-card__lead">
+                    <strong className="settings-item-card__name">联网检索能力 (Web Search)</strong>
+                    <span className="settings-item-card__desc">
+                      当前状态：
+                      <strong>
+                        {shared.webSearchSettings.enabled
+                          ? "已启用（支持多搜索引擎级联容灾）"
+                          : "已停用（纯离线模型知识）"}
+                      </strong>
+                    </span>
+                  </div>
+                  <div className="settings-item-card__action">
+                    <button
+                      type="button"
+                      className="settings-btn"
+                      onClick={() => setActiveTab("browser")}
+                    >
+                      配置检索
+                    </button>
+                  </div>
+                </div>
+
+                <div className="settings-item-card">
+                  <div className="settings-item-card__lead">
+                    <strong className="settings-item-card__name">本地数据库 (IndexedDB)</strong>
+                    <span className="settings-item-card__desc">
+                      本地持久化数据库正常运行，当前共保存{" "}
+                      <strong>{shared.conversations.length}</strong> 组历史会话。
+                    </span>
+                  </div>
+                  <div className="settings-item-card__action">
+                    <button
+                      type="button"
+                      className="settings-btn"
+                      onClick={() => setActiveTab("app")}
+                    >
+                      数据管理
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           ) : null}
 
-          {/* TAB 2: 外观与语言 (Appearance) */}
+          {/* TAB: 外观与语言 (Appearance) */}
           {activeTab === "appearance" ? (
             <div className="settings-panel-view">
               <div className="settings-panel-view__header">
@@ -792,13 +683,13 @@ export function SettingsModal({
             </div>
           ) : null}
 
-          {/* TAB 3: 模型配置 (Models) */}
+          {/* TAB: 模型配置 (Models) */}
           {activeTab === "models" ? (
             <div className="settings-panel-view">
               <div className="settings-panel-view__header">
                 <h3 className="settings-panel-view__title">大模型供应商与 Key 管理</h3>
                 <p className="settings-panel-view__desc">
-                  配置各 LLM Provider 厂商 API Key 与默认模型（StepFun、DeepSeek、GLM、Claude、OpenAI、Gemini）。已与桌面安全密钥库打通。
+                  配置各 LLM Provider 厂商 API Key 与默认模型（StepFun、DeepSeek、GLM、Claude、OpenAI、Gemini）。与系统安全凭据库安全打通。
                 </p>
               </div>
 
@@ -815,7 +706,7 @@ export function SettingsModal({
             </div>
           ) : null}
 
-          {/* TAB 4: 技能与记忆 (Skills & Memory) */}
+          {/* TAB: 技能与记忆 (Custom) */}
           {activeTab === "custom" ? (
             <div className="settings-panel-view">
               <div className="settings-panel-view__header">
@@ -863,7 +754,7 @@ export function SettingsModal({
             </div>
           ) : null}
 
-          {/* TAB 5: 联网检索 (Browser / Search) */}
+          {/* TAB: 联网检索 (Browser) */}
           {activeTab === "browser" ? (
             <div className="settings-panel-view">
               <div className="settings-panel-view__header">
@@ -886,19 +777,212 @@ export function SettingsModal({
             </div>
           ) : null}
 
-          {/* TAB 6: 工作区 (Project / Workspace) */}
+          {/* TAB: 工作区与项目 (Project - 真实对接真实环境) */}
           {activeTab === "project" ? (
-            <div className="settings-panel-view">
-              <div className="settings-panel-view__header">
-                <h3 className="settings-panel-view__title">工作区与本地目录</h3>
-                <p className="settings-panel-view__desc">管理桌面端绑定的本地工作区根目录、文件安全边界与工具执行。</p>
+            <div className="settings-panel-view settings-panel-view--project">
+              <div className="settings-project-header">
+                <div className="settings-project-header__title-row">
+                  <div className="settings-project-title-container">
+                    <h3 className="settings-panel-view__title settings-project-title">
+                      {activeProject ? getProjectDisplayName(activeProject) : "工作区与项目管理"}
+                    </h3>
+                  </div>
+
+                  {activeProject ? (
+                    <button
+                      type="button"
+                      className={`settings-terminal-toggle-btn ${showWorkspaceTerminal ? "settings-terminal-toggle-btn--active" : ""}`}
+                      onClick={() => setShowWorkspaceTerminal((prev) => !prev)}
+                      title="切换高级工作区与终端面板"
+                    >
+                      <Terminal size={14} />
+                      <span>{showWorkspaceTerminal ? "返回项目概览" : "打开终端与文件树"}</span>
+                    </button>
+                  ) : null}
+                </div>
+                <p className="settings-panel-view__desc settings-project-desc">
+                  {activeProject
+                    ? "当前工作区已启用文件系统观察守卫、Monaco 编辑器差异审阅与终端执行环境。"
+                    : "打开本地代码目录即可启用 Agent 工具调用、工程文件读取修改与代码审阅。"}
+                </p>
               </div>
 
-              <WorkspacePanel copy={shared.copy} open={true} onClose={onClose} />
+              {showWorkspaceTerminal ? (
+                <div className="settings-workspace-embedded">
+                  <WorkspacePanel copy={shared.copy} open={true} onClose={onClose} />
+                </div>
+              ) : (
+                <>
+                  {/* 1. 当前工作区信息卡片 */}
+                  <div className="settings-card-group">
+                    <h4 className="settings-card-group__title">工作区路径</h4>
+                    {activeProject ? (
+                      <div className="settings-item-card">
+                        <div className="settings-item-card__lead">
+                          <strong className="settings-item-card__name">
+                            {getProjectDisplayName(activeProject)}
+                          </strong>
+                          <span className="settings-item-card__desc" style={{ fontFamily: "monospace", wordBreak: "break-all" }}>
+                            {activeProject}
+                          </span>
+                        </div>
+                        <div className="settings-item-card__action">
+                          <button
+                            type="button"
+                            className="settings-btn settings-btn--ghost"
+                            onClick={() => void handleCopyPath(activeProject)}
+                          >
+                            {copiedPath ? (
+                              <>
+                                <Check size={13} style={{ color: "#10b981", marginRight: 4 }} />
+                                已复制
+                              </>
+                            ) : (
+                              "复制路径"
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            className="settings-btn"
+                            onClick={handlePickWorkspace}
+                          >
+                            切换工作区
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="settings-item-card">
+                        <div className="settings-item-card__lead">
+                          <strong className="settings-item-card__name">暂未打开任何项目目录</strong>
+                          <span className="settings-item-card__desc">
+                            您可以打开本地已有的代码仓库，或使用快速开始创建临时工作空间。
+                          </span>
+                        </div>
+                        <div className="settings-item-card__action">
+                          <button
+                            type="button"
+                            className="settings-btn settings-btn--primary"
+                            onClick={handlePickWorkspace}
+                          >
+                            <FolderPlus size={14} style={{ marginRight: 4 }} />
+                            选择本地文件夹
+                          </button>
+                          <button
+                            type="button"
+                            className="settings-btn"
+                            onClick={handleQuickStartWorkspace}
+                          >
+                            <Play size={14} style={{ marginRight: 4 }} />
+                            快速开始
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 2. 智能体工程规则 (真实规则与契约展示) */}
+                  <div className="settings-card-group">
+                    <h4 className="settings-card-group__title">工程契约与安全规则</h4>
+                    <div className="settings-item-card">
+                      <div className="settings-item-card__lead">
+                        <strong className="settings-item-card__name">Agent 开发规范 (AGENTS.md)</strong>
+                        <span className="settings-item-card__desc">
+                          工作区内的工具执行严格遵循“先读后改”观察守卫、CAS 版本校验、移动端原生代码隔离以及破坏性操作事前审批。
+                        </span>
+                      </div>
+                      <div className="settings-item-card__action">
+                        <button
+                          type="button"
+                          className="settings-btn settings-btn--ghost"
+                          onClick={() => void handleCopyRuleContract()}
+                        >
+                          {copiedRule ? (
+                            <>
+                              <Check size={13} style={{ color: "#10b981", marginRight: 4 }} />
+                              已复制契约
+                            </>
+                          ) : (
+                            "复制契约"
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 3. 已加载技能清单 (真实动态渲染 SKILLS) */}
+                  <div className="settings-card-group">
+                    <h4 className="settings-card-group__title">
+                      已注册技能扩展 ({SKILLS.length})
+                    </h4>
+                    <div className="settings-skills-tag-grid">
+                      {SKILLS.map((skill) => {
+                        const isActive = shared.activeSkillIds.includes(skill.id);
+                        return (
+                          <button
+                            type="button"
+                            key={skill.id}
+                            className={`settings-skill-tag ${isActive ? "settings-skill-tag--active" : ""}`}
+                            title={skill.description}
+                            onClick={() => setActiveTab("custom")}
+                          >
+                            <span className={`settings-skill-tag__dot ${isActive ? "settings-skill-tag__dot--active" : ""}`} />
+                            <span className="settings-skill-tag__text">{skill.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 4. 危险区域 (仅当有活跃项目时展示真实分离操作) */}
+                  {activeProject ? (
+                    <div className="settings-card-group settings-card-group--danger-zone">
+                      <h4 className="settings-card-group__title settings-card-group__title--danger">
+                        危险区域
+                      </h4>
+                      <div className="settings-item-card settings-item-card--danger">
+                        <div className="settings-item-card__lead">
+                          <strong className="settings-item-card__name">从工作区脱离</strong>
+                          <span className="settings-item-card__desc">
+                            将当前客户端与工程目录 <strong>{getProjectDisplayName(activeProject)}</strong> 分离，切换回独立会话模式。您的本地磁盘文件不受任何影响。
+                          </span>
+                        </div>
+                        <div className="settings-item-card__action">
+                          {showDetachConfirm ? (
+                            <div className="settings-confirm-row">
+                              <button
+                                type="button"
+                                className="settings-btn settings-btn--danger"
+                                onClick={() => void handleDetachProject()}
+                              >
+                                确认脱离
+                              </button>
+                              <button
+                                type="button"
+                                className="settings-btn"
+                                onClick={() => setShowDetachConfirm(false)}
+                              >
+                                取消
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className="settings-btn settings-btn--danger"
+                              onClick={() => setShowDetachConfirm(true)}
+                            >
+                              脱离工作区
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              )}
             </div>
           ) : null}
 
-          {/* TAB 7: 存储与维护 (App & Maintenance) */}
+          {/* TAB: 存储与维护 (App) */}
           {activeTab === "app" ? (
             <div className="settings-panel-view">
               <div className="settings-panel-view__header">
@@ -982,7 +1066,7 @@ export function SettingsModal({
             </div>
           ) : null}
 
-          {/* TAB 8: 快捷键速查 (Shortcuts) */}
+          {/* TAB: 快捷键速查 (Shortcuts) */}
           {activeTab === "shortcuts" ? (
             <div className="settings-panel-view">
               <div className="settings-panel-view__header">
@@ -1035,8 +1119,206 @@ export function SettingsModal({
               </div>
             </div>
           ) : null}
+
+          {/* TAB: 用户设置 (User - 纯本地保存) */}
+          {activeTab === "user" ? (
+            <div className="settings-panel-view">
+              <div className="settings-panel-view__header">
+                <h3 className="settings-panel-view__title">用户设置</h3>
+                <p className="settings-panel-view__desc">
+                  管理您的本地个人资料、头像与用户名。本页所有数据仅安全保存在当前设备的本地存储中，绝不上传云端。
+                </p>
+              </div>
+
+              {/* 隐藏的本地头像文件选择器 */}
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/*"
+                aria-label="上传头像文件"
+                style={{ display: "none" }}
+                onChange={handleAvatarFileChange}
+              />
+
+              {/* 1. 个人资料卡片：头像与用户名 */}
+              <div className="settings-card-group">
+                <h4 className="settings-card-group__title">个人资料 (Profile)</h4>
+                <div className="settings-item-card settings-user-profile-card">
+                  <div className="settings-user-profile-layout">
+                    <div className="settings-user-profile-avatar-col">
+                      <div className="settings-user-avatar-wrapper">
+                        {userSettings.avatar ? (
+                          <img
+                            src={userSettings.avatar}
+                            alt={userSettings.username || "用户头像"}
+                            className="settings-user-avatar-preview"
+                          />
+                        ) : (
+                          <div className="settings-user-avatar-placeholder">
+                            <User size={36} />
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          className="settings-user-avatar-upload-overlay"
+                          onClick={() => avatarInputRef.current?.click()}
+                          title="点击更换头像"
+                          aria-label="更换头像"
+                        >
+                          <Camera size={16} />
+                        </button>
+                      </div>
+
+                      <div className="settings-user-avatar-actions">
+                        <button
+                          type="button"
+                          className="settings-btn settings-btn--ghost settings-btn--sm"
+                          onClick={() => avatarInputRef.current?.click()}
+                        >
+                          <Upload size={12} style={{ marginRight: 4 }} />
+                          更换头像
+                        </button>
+                        {userSettings.avatar ? (
+                          <button
+                            type="button"
+                            className="settings-btn settings-btn--ghost settings-btn--sm danger-action"
+                            onClick={handleRemoveAvatar}
+                          >
+                            移除头像
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="settings-user-profile-info-col">
+                      <div className="settings-item-card__lead">
+                        <strong className="settings-item-card__name">用户名称</strong>
+                        <span className="settings-item-card__desc">
+                          设置您的个人展示名称。留空保存时将自动恢复为默认角色名称“酒寄彩叶”。
+                        </span>
+                      </div>
+
+                      <div className="settings-user-input-row">
+                        <input
+                          type="text"
+                          aria-label="用户名"
+                          className="settings-user-input"
+                          placeholder="酒寄彩叶"
+                          value={usernameDraft}
+                          maxLength={20}
+                          onChange={(e) => setUsernameDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleSaveUsername();
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="settings-btn settings-btn--primary"
+                          onClick={handleSaveUsername}
+                        >
+                          {usernameSavedToast ? (
+                            <>
+                              <Check size={13} style={{ marginRight: 4 }} />
+                              已保存
+                            </>
+                          ) : (
+                            "保存名称"
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 身份称号与等级设置 */}
+                <div className="settings-item-card settings-user-badge-card" style={{ marginTop: 12 }}>
+                  <div className="settings-item-card__lead">
+                    <strong className="settings-item-card__name">身份称号 (Badge)</strong>
+                    <span className="settings-item-card__desc">
+                      设置侧边栏展示的个人称号。可快速选择标准预设（Lite、Plus、Pro、Go）或键入个性称号。
+                    </span>
+                  </div>
+                  <div className="settings-user-badge-settings-block">
+                    <div className="settings-user-badge-presets">
+                      {PRESET_USER_BADGES.map((badge) => {
+                        const isSelected =
+                          (userSettings.badge || "Lite").toLowerCase() === badge.toLowerCase();
+                        return (
+                          <button
+                            key={badge}
+                            type="button"
+                            className={`settings-user-badge-btn settings-user-badge-btn--${badge.toLowerCase()} ${
+                              isSelected ? "settings-user-badge-btn--active" : ""
+                            }`}
+                            onClick={() => handleSaveBadge(badge)}
+                          >
+                            {badge}
+                            {isSelected ? <Check size={12} style={{ marginLeft: 4 }} /> : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="settings-user-input-row" style={{ marginTop: 10 }}>
+                      <input
+                        type="text"
+                        aria-label="个性称号"
+                        className="settings-user-input"
+                        placeholder="输入自定义称号 (如 VIP, Go)"
+                        maxLength={10}
+                        value={badgeDraft}
+                        onChange={(e) => setBadgeDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleSaveBadge(badgeDraft);
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="settings-btn settings-btn--primary"
+                        onClick={() => handleSaveBadge(badgeDraft)}
+                      >
+                        保存称号
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. 本地隐私隔离保证 */}
+              <div className="settings-card-group">
+                <h4 className="settings-card-group__title">数据安全与本地存储</h4>
+                <div className="settings-item-card">
+                  <div className="settings-item-card__lead">
+                    <strong className="settings-item-card__name">纯本地隔离存储</strong>
+                    <span className="settings-item-card__desc">
+                      您的头像图片与用户名称仅保存在当前设备的 LocalStorage 中。任何云端服务、网络接口均不会收集或存储该配置。
+                    </span>
+                  </div>
+                  <div className="settings-item-card__action">
+                    <span className="settings-user-storage-badge">仅本地有效</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </main>
       </div>
+
+      {/* 圆形头像裁剪模态弹窗 */}
+      <AvatarCropModal
+        open={cropModalOpen}
+        imageSrc={rawAvatarSrc}
+        onClose={() => {
+          setCropModalOpen(false);
+          setRawAvatarSrc("");
+        }}
+        onConfirm={handleConfirmCropAvatar}
+      />
     </div>
   );
 }

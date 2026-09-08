@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { getDesktopWorkspaceRoot, pickDesktopFolder, setDesktopWorkspaceRoot } from "./desktop-bridge";
+import { useEffect, useSyncExternalStore } from "react";
+import { pickDesktopFolder, setDesktopWorkspaceRoot } from "./desktop-bridge";
 
 export const STORAGE_RECENT_PROJECTS = "yachiyo_recent_projects";
 export const STORAGE_ACTIVE_PROJECT = "yachiyo_active_project";
@@ -26,9 +26,11 @@ class ProjectManager {
   private recentProjects: string[] = [];
   private listeners = new Set<ProjectChangeListener>();
   private initialized = false;
+  private snapshot: ProjectState = { activeProject: null, recentProjects: [] };
 
   constructor() {
     this.loadFromStorage();
+    this.updateSnapshot(false);
   }
 
   private loadFromStorage(): void {
@@ -57,20 +59,32 @@ class ProjectManager {
       } else {
         window.localStorage.removeItem(STORAGE_ACTIVE_PROJECT);
       }
-      window.localStorage.setItem(STORAGE_RECENT_PROJECTS, JSON.stringify(this.recentProjects));
+      if (this.recentProjects.length > 0) {
+        window.localStorage.setItem(STORAGE_RECENT_PROJECTS, JSON.stringify(this.recentProjects));
+      } else {
+        window.localStorage.removeItem(STORAGE_RECENT_PROJECTS);
+      }
     } catch {
       // 容错
     }
   }
 
-  private notify(): void {
-    const state: ProjectState = {
+  private updateSnapshot(shouldNotify = true): void {
+    this.snapshot = {
       activeProject: this.activeProject,
       recentProjects: [...this.recentProjects],
     };
+    this.saveToStorage();
+    if (shouldNotify) {
+      this.notify();
+    }
+  }
+
+  private notify(): void {
+    const current = this.snapshot;
     this.listeners.forEach((listener) => {
       try {
-        listener(state);
+        listener(current);
       } catch {
         // 防止监听器抛错中断广播
       }
@@ -82,32 +96,51 @@ class ProjectManager {
     if (!this.initialized) {
       this.initialized = true;
       try {
-        const root = await getDesktopWorkspaceRoot();
-        if (root && root.trim().length > 0) {
-          this.activeProject = root;
-          this.addRecentProject(root);
-        } else if (this.activeProject) {
-          await setDesktopWorkspaceRoot(this.activeProject);
+        if (this.activeProject && this.activeProject.trim().length > 0) {
+          const success = await setDesktopWorkspaceRoot(this.activeProject);
+          if (!success) {
+            this.activeProject = null;
+            await setDesktopWorkspaceRoot("");
+          }
+        } else {
+          await setDesktopWorkspaceRoot("");
+          this.activeProject = null;
         }
       } catch {
         // 容错
       }
-      this.saveToStorage();
-      this.notify();
+      this.updateSnapshot();
     }
     return this.getState();
   }
 
+  /** 清除所有工作区状态（供重置数据/清空全部本地数据时调用） */
+  public async clear(): Promise<void> {
+    this.activeProject = null;
+    this.recentProjects = [];
+    if (typeof window !== "undefined" && window.localStorage) {
+      try {
+        window.localStorage.removeItem(STORAGE_ACTIVE_PROJECT);
+        window.localStorage.removeItem(STORAGE_RECENT_PROJECTS);
+      } catch {
+        // 容错
+      }
+    }
+    this.updateSnapshot();
+    try {
+      await setDesktopWorkspaceRoot("");
+    } catch {
+      // 容错
+    }
+  }
+
   public getState(): ProjectState {
-    return {
-      activeProject: this.activeProject,
-      recentProjects: [...this.recentProjects],
-    };
+    return this.snapshot;
   }
 
   public subscribe(listener: ProjectChangeListener): () => void {
     this.listeners.add(listener);
-    listener(this.getState());
+    listener(this.snapshot);
     return () => {
       this.listeners.delete(listener);
     };
@@ -125,9 +158,8 @@ class ProjectManager {
   public async switchProject(projectPath: string | null): Promise<boolean> {
     if (projectPath === null) {
       this.activeProject = null;
+      this.updateSnapshot();
       await setDesktopWorkspaceRoot("");
-      this.saveToStorage();
-      this.notify();
       return true;
     }
 
@@ -139,8 +171,7 @@ class ProjectManager {
     const success = await setDesktopWorkspaceRoot(clean);
     this.activeProject = clean;
     this.addRecentProject(clean);
-    this.saveToStorage();
-    this.notify();
+    this.updateSnapshot();
     return success;
   }
 
@@ -157,8 +188,7 @@ class ProjectManager {
   /** 移除最近项目历史 */
   public removeRecentProject(projectPath: string): void {
     this.recentProjects = this.recentProjects.filter((p) => p.toLowerCase() !== projectPath.toLowerCase());
-    this.saveToStorage();
-    this.notify();
+    this.updateSnapshot();
   }
 
   /** 快速开始 */
@@ -175,12 +205,13 @@ class ProjectManager {
 export const projectManager = new ProjectManager();
 
 export function useProjectState(): ProjectState {
-  const [state, setState] = useState<ProjectState>(() => projectManager.getState());
-
   useEffect(() => {
     void projectManager.init();
-    return projectManager.subscribe(setState);
   }, []);
 
-  return state;
+  return useSyncExternalStore(
+    (callback) => projectManager.subscribe(callback),
+    () => projectManager.getState(),
+    () => projectManager.getState(),
+  );
 }

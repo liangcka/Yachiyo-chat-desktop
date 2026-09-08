@@ -19,8 +19,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ContextMeter } from "../../components/ContextMeter";
 import { ConversationView } from "../../components/ConversationView";
 import { ModelSelect } from "../../components/desktop/ModelSelect";
+import { PlanStrip } from "../../components/desktop/PlanStrip";
 import { ProjectSelector } from "../../components/desktop/ProjectSelector";
 import { PermissionCard } from "../../components/tools/PermissionCard";
+import { extractLatestTodos } from "../../domain/chat";
 import { isRetryableChatErrorCode } from "../../services/chat-client";
 import { SKILLS } from "../../skills";
 
@@ -69,6 +71,12 @@ export function DesktopChatArea({
   const isCompressing = controller.phase === "compressing";
   const isOffline = !isOnline || controller.phase === "offline";
   const isBlank = controller.messages.length === 0 && !controller.activeConversation?.summary;
+
+  const latestTodos = useMemo(
+    () => extractLatestTodos(controller.messages),
+    [controller.messages],
+  );
+
 
   // 顶栏标题即地编辑状态
 
@@ -200,8 +208,33 @@ export function DesktopChatArea({
           onOpenSettings={() => onOpenSettings?.("project")}
           onNewChat={onNewChat}
         />
+        {controller.agentEnabled ? (
+          <button
+            type="button"
+            className="desktop-composer-agent-badge"
+            title="Agent 模式已开启：八千代可主动探查工程并执行任务（点击可切换）"
+            onClick={controller.toggleAgent}
+            aria-label="Agent 模式已开启"
+          >
+            <span className="desktop-composer-agent-badge__dot" />
+            Agent 模式
+          </button>
+        ) : null}
       </div>
 
+      {/* Agent 写类工具的授权卡片：从输入框上方平滑拉起的精致操作子容器 */}
+      {pendingPermission !== undefined ? (
+        <PermissionCard
+          argumentsJson={pendingPermission.argumentsJson}
+          toolName={pendingPermission.toolName}
+          onApprove={(sessionScope) => {
+            void controller.approvePermission(pendingPermission.requestId, true, sessionScope);
+          }}
+          onDeny={() => {
+            void controller.approvePermission(pendingPermission.requestId, false);
+          }}
+        />
+      ) : null}
 
       {isOffline ? <p className="status-banner">{copy.offline}</p> : null}
       {controller.phase === "error" &&
@@ -644,19 +677,11 @@ export function DesktopChatArea({
         )}
       </div>
 
-      {/* Agent 写类工具的授权卡片：消息流之后、输入区之前，等待用户批准/拒绝 */}
-      {pendingPermission !== undefined ? (
-        <PermissionCard
-          argumentsJson={pendingPermission.argumentsJson}
-          toolName={pendingPermission.toolName}
-          onApprove={(sessionScope) => {
-            void controller.approvePermission(pendingPermission.requestId, true, sessionScope);
-          }}
-          onDeny={() => {
-            void controller.approvePermission(pendingPermission.requestId, false);
-          }}
-        />
+      {/* Agent 任务待办清单 PlanStrip：对齐 DSH todo-write 任务呈现 */}
+      {latestTodos && latestTodos.length > 0 ? (
+        <PlanStrip todos={latestTodos} />
       ) : null}
+
 
       {/* 底部锚定输入交互区（仅在有消息时渲染） */}
       {!isBlank ? (

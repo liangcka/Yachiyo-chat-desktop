@@ -489,4 +489,27 @@ describe("agent 工具事件动作", () => {
     expect(failed.pendingPermission).toBeUndefined();
     expect(failed).toMatchObject({ phase: "error", errorCode: "PROVIDER_ERROR" });
   });
+
+  it("updates active conversation title on conversation-renamed and ignores mismatched ids", () => {
+    const loaded = chatReducer(initialChatState, {
+      type: "loaded",
+      conversation,
+      locale: "zh-CN",
+      messages: [],
+    });
+
+    const renamed = chatReducer(loaded, {
+      type: "conversation-renamed",
+      conversationId: conversation.id,
+      title: "这是什么这个项目",
+    });
+    expect(renamed.activeConversation?.title).toBe("这是什么这个项目");
+
+    const ignored = chatReducer(renamed, {
+      type: "conversation-renamed",
+      conversationId: "other-conv",
+      title: "无关标题",
+    });
+    expect(ignored.activeConversation?.title).toBe("这是什么这个项目");
+  });
 });

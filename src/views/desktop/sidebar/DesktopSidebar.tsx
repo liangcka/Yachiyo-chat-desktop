@@ -14,6 +14,7 @@ export function DesktopSidebar({
   activeRightTab,
   collapsed = false,
   conversations,
+  hideBrandHeader = false,
   copy,
   locale,
   onDeleteConversation,
@@ -23,10 +24,13 @@ export function DesktopSidebar({
   onRenameConversation,
   onSelectConversation,
   onSelectRightTab,
+  onSignOut,
+  onCloseApp,
   onToggleCollapse,
   onTogglePinConversation,
   onToggleTheme,
   resolvedTheme = "dark",
+  showToast,
 }: DesktopSidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -48,11 +52,16 @@ export function DesktopSidebar({
     return (
       <SidebarRail
         copy={copy}
+        locale={locale}
+        onCloseApp={onCloseApp}
+        onLocale={onLocale}
         onNewChat={onNewChat}
         onOpenSettings={onOpenSettings}
+        onSignOut={onSignOut}
         onToggleCollapse={onToggleCollapse}
         onToggleTheme={onToggleTheme}
         resolvedTheme={resolvedTheme}
+        showToast={showToast}
       />
     );
   }
@@ -69,8 +78,10 @@ export function DesktopSidebar({
       onPointerEnter={handlePointerEnter}
       onPointerLeave={handlePointerLeave}
     >
-      {/* 1. 顶部品牌与折叠按钮 */}
-      <SidebarBrandHeader onNewChat={onNewChat} onToggleCollapse={onToggleCollapse} />
+      {/* 1. 顶部品牌与折叠按钮（若全局顶栏接管则静默隐藏） */}
+      {!hideBrandHeader ? (
+        <SidebarBrandHeader onNewChat={onNewChat} onToggleCollapse={onToggleCollapse} />
+      ) : null}
 
       {/* 2. 新建对话与项目选择下拉菜单 */}
       <SidebarNewChat
@@ -99,14 +110,17 @@ export function DesktopSidebar({
         totalMatches={totalMatches}
       />
 
-      {/* 5. 底部快捷工具坞 (主题、语言、设置) */}
+      {/* 5. 底部用户个人卡片入口与设置菜单 */}
       <SidebarFooter
         locale={locale}
+        onCloseApp={onCloseApp}
         onLocale={onLocale}
         onOpenSettings={onOpenSettings}
+        onSignOut={onSignOut}
         onToggleTab={toggleTab}
         onToggleTheme={onToggleTheme}
         resolvedTheme={resolvedTheme}
+        showToast={showToast}
       />
     </aside>
   );

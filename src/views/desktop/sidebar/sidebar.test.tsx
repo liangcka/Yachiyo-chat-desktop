@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Conversation } from "../../../domain/chat";
@@ -214,11 +214,13 @@ describe("DesktopSidebar & Submodules", () => {
     expect(onTogglePin).toHaveBeenCalled();
   });
 
-  it("triggers theme and locale toggle from sidebar footer", async () => {
+  it("opens user popover from sidebar footer and triggers account, theme, locale, settings and signout", async () => {
     const user = userEvent.setup();
     const onToggleTheme = vi.fn();
     const onLocale = vi.fn();
     const onOpenSettings = vi.fn();
+    const onSignOut = vi.fn();
+    const showToast = vi.fn();
 
     render(
       <DesktopSidebar
@@ -233,24 +235,81 @@ describe("DesktopSidebar & Submodules", () => {
         onRenameConversation={vi.fn()}
         onSelectConversation={vi.fn()}
         onSelectRightTab={vi.fn()}
+        onSignOut={onSignOut}
         onToggleTheme={onToggleTheme}
         resolvedTheme="dark"
+        showToast={showToast}
       />,
     );
 
-    // 点击主题切换按钮
+    // 1. 默认状态下浮层未打开
+    expect(screen.queryByRole("dialog", { name: "用户账户与设置菜单" })).not.toBeInTheDocument();
+
+    // 2. 点击底部常驻用户条展开浮层
+    const userBar = screen.getByLabelText("用户资料与菜单");
+    await user.click(userBar);
+
+    const popover = screen.getByRole("dialog", { name: "用户账户与设置菜单" });
+    expect(popover).toBeInTheDocument();
+    expect(within(popover).getByText("Lite")).toBeInTheDocument();
+    // 确认已无积分元素
+    expect(screen.queryByTitle(/当前可用积分/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/每日签到/)).not.toBeInTheDocument();
+
+    // 3. 点击称号徽章展开称号选择器，并切换为 Pro 称号
+    const badgeBtn = screen.getByLabelText("切换称号，当前为 Lite");
+    await user.click(badgeBtn);
+    const proBtn = screen.getByRole("button", { name: "Pro" });
+    await user.click(proBtn);
+    expect(showToast).toHaveBeenCalledWith("已切换称号为「Pro」", "info");
+
+    // 5. 点击语言切换
+    const langBtn = screen.getByLabelText("选择语言");
+    await user.click(langBtn);
+    expect(onLocale).toHaveBeenCalledWith("ja-JP");
+
+    // 6. 点击主题切换
     const themeBtn = screen.getByLabelText("切换主题");
     await user.click(themeBtn);
     expect(onToggleTheme).toHaveBeenCalledTimes(1);
 
-    // 点击语言切换按钮
-    const langBtn = screen.getByLabelText("切换语言");
-    await user.click(langBtn);
-    expect(onLocale).toHaveBeenCalledWith("ja-JP");
+    // 7. 点击管理账户打开用户设置
+    const accountBtn = screen.getByLabelText("管理账户");
+    await user.click(accountBtn);
+    expect(onOpenSettings).toHaveBeenCalledWith("user");
+    // 点击后浮层自动关闭
+    expect(screen.queryByRole("dialog", { name: "用户账户与设置菜单" })).not.toBeInTheDocument();
 
-    // 点击设置按钮
+    // 8. 再次打开并点击偏好设置
+    await user.click(userBar);
     const settingsBtn = screen.getByLabelText("设置");
     await user.click(settingsBtn);
     expect(onOpenSettings).toHaveBeenCalledWith("general");
+    expect(screen.queryByRole("dialog", { name: "用户账户与设置菜单" })).not.toBeInTheDocument();
+
+    // 9. 再次打开并点击报告问题（直接跳到 GitHub 仓库主页）
+    await user.click(userBar);
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    const reportBtn = screen.getByLabelText("报告问题");
+    await user.click(reportBtn);
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://github.com/liangcka/Yachiyo-chat-desktop",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(screen.queryByRole("dialog", { name: "用户账户与设置菜单" })).not.toBeInTheDocument();
+    openSpy.mockRestore();
+
+    // 10. 再次打开并点击关闭应用（从原样板退出登录升级）
+    await user.click(userBar);
+    const closeAppBtn = screen.getByLabelText("关闭应用");
+    await user.click(closeAppBtn);
+    expect(onSignOut).toHaveBeenCalledTimes(1);
+
+    // 11. 再次打开并测试 Esc 关闭
+    await user.click(userBar);
+    expect(screen.getByRole("dialog", { name: "用户账户与设置菜单" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "用户账户与设置菜单" })).not.toBeInTheDocument();
   });
 });

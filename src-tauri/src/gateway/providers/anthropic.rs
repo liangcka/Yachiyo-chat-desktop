@@ -124,6 +124,8 @@ pub fn build_anthropic_body(
 
     let max_tokens = if let Some(crate::types::RequestMode::Summary) = request.mode {
         1024
+    } else if let Some(crate::types::RequestMode::Title) = request.mode {
+        128
     } else {
         2048
     };

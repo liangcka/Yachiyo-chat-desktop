@@ -388,4 +388,24 @@ describe("agent 事件解析", () => {
       ),
     ).rejects.toMatchObject({ code: "STREAM_ERROR" });
   });
+
+  it("支持在 agent 请求中携带 workspace 路径", async () => {
+    serverFetch.mockResolvedValue(sseResponse('event: done\ndata: {"truncated":false}\n\n'));
+
+    await streamChat(
+      {
+        locale: "zh-CN",
+        messages: [{ role: "user", text: "这是什么" }],
+        agent: { enabled: true, workspace: "D:\\test\\project" },
+      },
+      { fetcher: serverFetch, onDelta: () => undefined },
+    );
+
+    expect(serverFetch).toHaveBeenCalledWith(
+      "/api/chat",
+      expect.objectContaining({
+        body: expect.stringContaining('"workspace":"D:\\\\test\\\\project"'),
+      }),
+    );
+  });
 });

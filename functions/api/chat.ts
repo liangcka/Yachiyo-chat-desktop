@@ -148,22 +148,24 @@ export async function onRequestPost(context: ChatContext): Promise<Response> {
     return mockChatResponse(request.locale, request.mode, request.webSearch === true);
   }
 
-  const limit = dailyRequestLimit(context.env);
-  if (limit === null) {
-    return problemResponse("CONFIGURATION_ERROR", 503);
-  }
-
-  try {
-    const quota = await consumeDailyQuota(
-      context.env.RATE_LIMIT_KV,
-      session.deviceId ?? session.sid,
-      limit,
-    );
-    if (!quota.allowed) {
-      return problemResponse("DAILY_QUOTA_EXCEEDED", 429);
+  if (request.mode !== "title") {
+    const limit = dailyRequestLimit(context.env);
+    if (limit === null) {
+      return problemResponse("CONFIGURATION_ERROR", 503);
     }
-  } catch {
-    return problemResponse("QUOTA_UNAVAILABLE", 503);
+
+    try {
+      const quota = await consumeDailyQuota(
+        context.env.RATE_LIMIT_KV,
+        session.deviceId ?? session.sid,
+        limit,
+      );
+      if (!quota.allowed) {
+        return problemResponse("DAILY_QUOTA_EXCEEDED", 429);
+      }
+    } catch {
+      return problemResponse("QUOTA_UNAVAILABLE", 503);
+    }
   }
 
   return handleServerFallback(context, request);
@@ -195,7 +197,7 @@ async function handleUserKeyRequest(
     return problemResponse("INVALID_REQUEST", 400);
   }
   const searchResults =
-    provider.hasNativeWebSearch === true
+    request.mode === "title" || provider.hasNativeWebSearch === true
       ? undefined
       : await performWebSearchPipeline(request, {
           judge: (messages, signal) =>
@@ -242,7 +244,8 @@ async function handleUserKeyRequest(
     }
     return problemResponse("PROVIDER_ERROR", 502);
   }
-  const maxCharacters = request.mode === "summary" || request.webSearch === true ? 1000 : 200;
+  const maxCharacters =
+    request.mode === "title" ? 50 : request.mode === "summary" || request.webSearch === true ? 1000 : 200;
   return proxyProviderStream(
     upstream,
     {
@@ -265,18 +268,21 @@ async function handleServerFallback(
   if (providerConfiguration === null) {
     return problemResponse("CONFIGURATION_ERROR", 503);
   }
-  const searchResults = await performWebSearchPipeline(request, {
-    judge: (messages, signal) =>
-      judgeSearchNeed(
-        getProvider("stepfun"),
-        providerConfiguration.apiKey,
-        providerConfiguration.model,
-        messages,
-        signal,
-      ),
-    signal: context.request.signal,
-    env: context.env as unknown as Record<string, unknown>,
-  });
+  const searchResults =
+    request.mode === "title"
+      ? undefined
+      : await performWebSearchPipeline(request, {
+          judge: (messages, signal) =>
+            judgeSearchNeed(
+              getProvider("stepfun"),
+              providerConfiguration.apiKey,
+              providerConfiguration.model,
+              messages,
+              signal,
+            ),
+          signal: context.request.signal,
+          env: context.env as unknown as Record<string, unknown>,
+        });
   const handle = prepareUpstreamFetch(context);
   let upstream: Response;
   try {
@@ -292,7 +298,8 @@ async function handleServerFallback(
     await upstream.body?.cancel();
     return problemResponse("PROVIDER_ERROR", 502);
   }
-  const maxCharacters = request.mode === "summary" || request.webSearch === true ? 1000 : 200;
+  const maxCharacters =
+    request.mode === "title" ? 50 : request.mode === "summary" || request.webSearch === true ? 1000 : 200;
   return proxyStepFunStream(upstream, {
     abort: handle.abort,
     clientSignal: context.request.signal,

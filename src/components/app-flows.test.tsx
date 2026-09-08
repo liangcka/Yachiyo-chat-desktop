@@ -180,7 +180,8 @@ describe("App flows", () => {
 
     expect(await screen.findByPlaceholderText("什么都可以告诉我")).toBeVisible();
 
-    await user.click(screen.getByLabelText("切换语言"));
+    await user.click(screen.getByLabelText("用户资料与菜单"));
+    await user.click(screen.getByTitle("切换语言"));
     await waitFor(() => expect(screen.getByPlaceholderText("何でも話してね")).toBeInTheDocument());
     expect(services.repository.locale).toBe("ja-JP");
     expect(document.documentElement.lang).toBe("ja-JP");
@@ -247,6 +248,7 @@ describe("App flows", () => {
       expect(screen.queryByLabelText("参考来源")).not.toBeInTheDocument();
 
       // 设置 → 联网检索 → 开启联网搜索
+      await user.click(screen.getByLabelText("用户资料与菜单"));
       await user.click(screen.getByLabelText("设置"));
       await user.click(screen.getByRole("tab", { name: "联网检索" }));
       await user.click(screen.getByRole("button", { name: "切换技能启用状态: 联网搜索" }));
@@ -274,6 +276,7 @@ describe("App flows", () => {
       ).toEqual(sources);
 
       // 关闭"显示引用来源"后不再渲染来源列表
+      await user.click(screen.getByLabelText("用户资料与菜单"));
       await user.click(screen.getByLabelText("设置"));
       await user.click(screen.getByRole("tab", { name: "联网检索" }));
       await user.click(screen.getByRole("button", { name: "切换技能启用状态: 显示引用来源" }));
@@ -410,6 +413,7 @@ describe("App flows", () => {
     await user.click(screen.getByRole("button", { name: "发送" }));
     expect(await screen.findByText("还在慢慢写")).toBeVisible();
 
+    await user.click(screen.getByLabelText("用户资料与菜单"));
     await user.click(screen.getByLabelText("设置"));
     await user.click(screen.getByRole("tab", { name: "存储与维护" }));
     await user.click(screen.getByRole("button", { name: /清除凭据/i }));
@@ -485,7 +489,7 @@ describe("App flows", () => {
 
     await user.type(composer, "第一段有效内容");
     await user.click(screen.getByRole("button", { name: "发送" }));
-    await screen.findByText("第一段有效内容");
+    await screen.findAllByText("第一段有效内容");
 
     await user.click(screen.getByTitle("新建对话 (Ctrl+N)"));
     await waitFor(() => expect(services.repository.conversations).toHaveLength(2));
@@ -501,6 +505,7 @@ describe("App flows", () => {
     await user.click(deleteBtns[0]);
     await waitFor(() => expect(services.repository.conversations).toHaveLength(1));
 
+    await user.click(screen.getByLabelText("用户资料与菜单"));
     await user.click(screen.getByLabelText("设置"));
     await user.click(screen.getByRole("tab", { name: "存储与维护" }));
     await user.click(screen.getByRole("button", { name: "清空数据" }));
@@ -580,7 +585,7 @@ describe("App flows", () => {
 
     await user.type(composer, "现有对话内容");
     await user.click(screen.getByRole("button", { name: "发送" }));
-    await screen.findByText("现有对话内容");
+    await screen.findAllByText("现有对话内容");
 
     vi.spyOn(services.repository, "createConversation").mockRejectedValue(
       new Error("conversation limit reached"),
@@ -611,7 +616,7 @@ describe("App flows", () => {
     const composer = screen.getByPlaceholderText("什么都可以告诉我");
     await user.type(composer, "第一段有效对话");
     await user.click(screen.getByRole("button", { name: "发送" }));
-    await screen.findByText("第一段有效对话");
+    await screen.findAllByText("第一段有效对话");
 
     // 会话有消息后点击新建，成功创建第 2 个空白会话
     await user.click(newChatBtn);
@@ -664,7 +669,7 @@ describe("App flows", () => {
     await user.click(screen.getByRole("button", { name: "发送" }));
 
     await screen.findByText("AI的回复");
-    expect(screen.getByText("这是一条要撤回的消息")).toBeInTheDocument();
+    expect(screen.getAllByText("这是一条要撤回的消息")[0]).toBeInTheDocument();
 
     const userBubble = screen.getByRole("article", { name: "我的消息" });
     fireEvent.contextMenu(userBubble);

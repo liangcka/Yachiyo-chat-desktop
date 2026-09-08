@@ -170,6 +170,8 @@ pub fn handle_chat_stream(
             return;
         }
 
+        let is_title_mode = request.mode == Some(crate::types::RequestMode::Title);
+        let mut accumulated_chars: usize = 0;
         let mut byte_stream = upstream_res.bytes_stream();
         let mut buffer = String::new();
         let mut accumulated_usage: Option<TokenUsage> = None;
@@ -255,7 +257,15 @@ pub fn handle_chat_stream(
 
                     if let Some(content) = delta.content {
                         if !content.is_empty() {
+                            accumulated_chars += content.chars().count();
                             yield Ok(encode_client_event(&ClientStreamEvent::Delta { text: content }));
+                            if is_title_mode && accumulated_chars >= 50 {
+                                yield Ok(encode_client_event(&ClientStreamEvent::Done {
+                                    truncated: true,
+                                    usage: accumulated_usage,
+                                }));
+                                return;
+                            }
                         }
                     }
                 }

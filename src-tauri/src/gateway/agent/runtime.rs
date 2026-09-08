@@ -2,13 +2,19 @@ use crate::crypto::keys::KeyStore;
 use crate::gateway::agent::checkpoint::CheckpointStore;
 use crate::gateway::agent::messages::{history_to_agent_messages, AgentMessage};
 use crate::gateway::agent::permission::ApprovalRegistry;
+use crate::gateway::agent::pruner::{
+    prune_agent_messages, DEFAULT_PRUNE_HEAD_CHARS, DEFAULT_PRUNE_TAIL_CHARS,
+    DEFAULT_PRUNE_THRESHOLD_CHARS,
+};
 use crate::gateway::prompt::build_agent_system_prompt;
 use crate::gateway::providers::registry::get_provider_config;
 use crate::gateway::stream::{encode_client_event, encode_ping};
 use crate::tools::{
-    execute_tool, preview_tool_output, truncate_tool_output, WorkspaceManager, ToolRisk, tool_risk,
+    execute_tool_with_context, preview_tool_output, process_tool_output, tool_risk,
+    FsObservationTracker, ToolRisk, WorkspaceManager,
 };
 use crate::types::{ClientChatRequest, ClientStreamEvent, ProviderId, TokenUsage, ToolInvocation};
+
 use async_stream::stream;
 use futures::Stream;
 use futures_util::StreamExt;
@@ -87,6 +93,7 @@ pub async fn run_agent_loop(
 ) -> Result<LoopOutcome, String> {
     let mut usage = TokenUsage::default();
     let mut session_allowed: HashSet<String> = HashSet::new();
+    let fs_tracker = FsObservationTracker::new();
     let run_id = checkpoint.run_id().to_string();
 
     for turn in 1..=config.max_turns {
@@ -95,7 +102,13 @@ pub async fn run_agent_loop(
         }
         sink(LoopEmit::Event(ClientStreamEvent::Turn { index: turn, usage: None }));
 
-        let outcome = executor.execute(&messages, sink).await?;
+        let pruned_messages = prune_agent_messages(
+            &messages,
+            DEFAULT_PRUNE_THRESHOLD_CHARS,
+            DEFAULT_PRUNE_HEAD_CHARS,
+            DEFAULT_PRUNE_TAIL_CHARS,
+        );
+        let outcome = executor.execute(&pruned_messages, sink).await?;
         accumulate_usage(&mut usage, &outcome.usage);
 
         if outcome.tool_calls.is_empty() {
@@ -173,7 +186,7 @@ pub async fn run_agent_loop(
                         checkpoint.backup_before_write(path)?;
                     }
                 }
-                match execute_tool(&call.name, &call.arguments, workspace_root, http_client).await {
+                match execute_tool_with_context(&call.name, &call.arguments, workspace_root, http_client, Some(&fs_tracker)).await {
                     Ok(out) => (out, false),
                     Err(err) => (err, true),
                 }
@@ -182,7 +195,11 @@ pub async fn run_agent_loop(
             };
             let duration_ms = started.elapsed().as_millis() as u64;
 
-            let model_output = if is_error { output.clone() } else { truncate_tool_output(&call.name, &output) };
+            let model_output = if is_error {
+                output.clone()
+            } else {
+                process_tool_output(&call.name, &output, workspace_root)
+            };
             sink(LoopEmit::Event(ClientStreamEvent::ToolResult {
                 id: call.id.clone(),
                 name: call.name.clone(),
@@ -380,7 +397,24 @@ pub fn run_agent_chat_stream(
         let cancelled = Arc::new(AtomicBool::new(false));
         let _guard = CancelOnDrop(Arc::clone(&cancelled));
 
-        let system_prompt = build_agent_system_prompt(request.locale, request.current_time.as_deref());
+        // 若客户端显式传递了当前活跃工作区路径，强行对齐 workspace_manager
+        if let Some(ws) = request.agent.as_ref().and_then(|a| a.workspace.as_deref()) {
+            let ws_path = std::path::Path::new(ws);
+            if ws_path.exists() && ws_path.is_dir() {
+                let _ = workspace_manager.set_workspace_root(ws_path.to_path_buf());
+            }
+        }
+        let root = match workspace_manager.get_workspace_root() {
+            Some(r) => r,
+            None => {
+                yield Ok(encode_client_event(&ClientStreamEvent::Error {
+                    code: "WORKSPACE_REQUIRED".to_string(),
+                }));
+                return;
+            }
+        };
+
+        let system_prompt = build_agent_system_prompt(request.locale, request.current_time.as_deref(), Some(&root));
         let executor = HttpTurnExecutor {
             client: client.clone(),
             provider_id,
@@ -393,8 +427,6 @@ pub fn run_agent_chat_stream(
         let agent_config = request.agent.as_ref()
             .map(|a| AgentLoopConfig { max_turns: a.max_turns.unwrap_or(12), permission_timeout_secs: 300 })
             .unwrap_or_default();
-
-        let root = workspace_manager.get_workspace_root();
         let run_id = format!(
             "{}-{}",
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(),

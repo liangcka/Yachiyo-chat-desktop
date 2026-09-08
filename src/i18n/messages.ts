@@ -28,6 +28,7 @@ export interface UiCopy {
   readonly delete: string;
   readonly deleteConfirm: string;
   readonly signOut: string;
+  readonly closeApp: string;
   readonly clearData: string;
   readonly clearDataConfirm: string;
   readonly cancel: string;
@@ -93,6 +94,10 @@ export interface UiCopy {
   readonly copyText: string;
   readonly copied: string;
   readonly regenerate: string;
+  readonly thinking: string;
+  readonly deepThinking: string;
+  readonly thoughtProcess: string;
+  readonly thoughtCompleted: string;
   readonly skillsEntry: string;
   readonly skillsTitle: string;
   readonly skillsDescription: string;
@@ -178,6 +183,7 @@ const chinese = Object.freeze({
   delete: "删除",
   deleteConfirm: "确定删除这段对话吗？",
   signOut: "退出访问",
+  closeApp: "关闭应用",
   clearData: "清除本地数据",
   clearDataConfirm: "这会删除当前设备上的全部聊天记录，确定继续吗？",
   cancel: "取消",
@@ -244,6 +250,10 @@ const chinese = Object.freeze({
   copyText: "复制",
   copied: "已复制",
   regenerate: "重新生成",
+  thinking: "思考中…",
+  deepThinking: "深度思考中…",
+  thoughtProcess: "思考过程",
+  thoughtCompleted: "已深度思考",
   skillsEntry: "技能",
   skillsTitle: "技能",
   skillsDescription: "供对话调用的文本处理技能，启用后自动生效",
@@ -328,6 +338,7 @@ const japanese = Object.freeze({
   delete: "削除",
   deleteConfirm: "この会話を削除しますか？",
   signOut: "アクセスを終了",
+  closeApp: "アプリを終了",
   clearData: "端末データを消去",
   clearDataConfirm: "この端末の会話履歴をすべて削除します。続けますか？",
   cancel: "キャンセル",
@@ -395,6 +406,10 @@ const japanese = Object.freeze({
   copyText: "コピー",
   copied: "コピーしました",
   regenerate: "再生成",
+  thinking: "考え中…",
+  deepThinking: "深く思考中…",
+  thoughtProcess: "思考プロセス",
+  thoughtCompleted: "思考完了",
   skillsEntry: "スキル",
   skillsTitle: "スキル",
   skillsDescription: "会話で使用するテキスト処理スキル。有効にすると自動的に適用されます",

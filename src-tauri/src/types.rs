@@ -43,6 +43,8 @@ pub struct AgentRequestConfig {
     pub enabled: bool,
     #[serde(rename = "maxTurns", skip_serializing_if = "Option::is_none")]
     pub max_turns: Option<u32>,
+    #[serde(rename = "workspace", skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,6 +63,7 @@ pub enum ProviderId {
 pub enum RequestMode {
     Chat,
     Summary,
+    Title,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

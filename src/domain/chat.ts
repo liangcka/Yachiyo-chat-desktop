@@ -41,6 +41,38 @@ export interface ToolStep {
   };
 }
 
+export type TodoStatus = "pending" | "in_progress" | "completed";
+
+export interface TodoItem {
+  readonly content: string;
+  readonly status: TodoStatus;
+}
+
+/** 从会话历史消息中投影提取最新的待办任务清单（对齐 DSH Last-write-wins 投影状态机） */
+export function extractLatestTodos(
+  messages: ReadonlyArray<ChatMessage>,
+): ReadonlyArray<TodoItem> | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role === "assistant" && msg.toolSteps && msg.toolSteps.length > 0) {
+      for (let j = msg.toolSteps.length - 1; j >= 0; j--) {
+        const step = msg.toolSteps[j];
+        if (step.name === "todo_write") {
+          try {
+            const parsed = JSON.parse(step.argumentsJson) as { todos?: unknown };
+            if (Array.isArray(parsed?.todos)) {
+              return parsed.todos as TodoItem[];
+            }
+          } catch {
+            // 解析失败忽略
+          }
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
 export interface ChatMessage {
   id: string;
   conversationId: string;

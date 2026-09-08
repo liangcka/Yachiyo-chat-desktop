@@ -1,15 +1,20 @@
-# Yachiyo Chat
+# Yachiyo Chat Desktop
 
-[![CI](https://github.com/liangcka/yachiyo-chat/actions/workflows/ci.yml/badge.svg)](https://github.com/liangcka/yachiyo-chat/actions/workflows/ci.yml)
+[![CI](https://github.com/liangcka/Yachiyo-chat-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/liangcka/Yachiyo-chat-desktop/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-Yachiyo Chat 是一个手机优先的 AI 角色扮演聊天应用，以 Cloudflare Pages PWA 形式交付：以深蓝星空和磨砂玻璃 UI 提供月见八千代角色聊天，支持六家 LLM 厂商自由切换、拍照识图、多 Provider 级联联网搜索、可组合技能系统、用户记忆、中日双语界面、本地历史、停止生成与离线只读。浏览器只访问同源 `/api/*`；服务端备用凭据只存在于 Pages Functions，用户在 LLM 设置中填写的 Key 只保存在当前浏览器并随同源聊天请求临时转发。
+Yachiyo Chat Desktop 是面向动画电影《超时空辉夜姬》（超かぐや姫！ / Chou Kaguya-hime!）女主角「月见八千代（八七）」的高拟真 AI 角色伴侣与现代化桌面工作区系统。
 
-> **English Overview**: Yachiyo Chat is a mobile-first Progressive Web App (PWA) for roleplay chat with Tsukimi Yachiyo, featuring a starfield frosted glass UI, multi-provider LLM settings (StepFun / DeepSeek / GLM / OpenAI / Claude / Gemini), a composable skill system, user memory, cascading web search, image capture & vision, bilingual support (zh-CN / ja-JP), local IndexedDB conversation storage, and offline capabilities. Powered by React 19, TypeScript, and Cloudflare Pages Functions.
+项目采用双轨架构交付：以 Tauri v2 与 Rust 为核心构建原生桌面端体验，同时保留 Cloudflare Pages Functions 与 PWA 架构。系统融合了深海星空磨砂玻璃 UI、六大主流 LLM 厂商统一适配、DeepSeek Harness (DSH) 工业级智能体工作流（工具修剪、文件系统观察守卫、任务进度清单与主动项目探索）、深度思考链折叠展示、双阶智能会话命名、多 Provider 级联联网搜索、可组合技能系统以及纯本地隐私隔离存储。
+
+> [!NOTE]
+> **English Overview**: Yachiyo Chat Desktop is a dual-track AI companion and developer workspace dedicated to Tsukimi Yachiyo from "Chou Kaguya-hime!". Powered by Tauri v2 (Rust) for desktop and React 19 + TypeScript + Cloudflare Pages Functions for Web/PWA. Features include an immersive frameless starfield UI, DSH-aligned agent loop (tool pruning, FS observation guard, task tracking, proactive workspace exploration), deep thinking visualization, two-tier conversation titling, multi-provider LLM routing (StepFun / DeepSeek / GLM / OpenAI / Claude / Gemini), cascading web search, local avatar cropping, and offline storage via IndexedDB.
+
+---
 
 ## 灵感来源与项目概念
 
-本项目高度还原了动画电影《**超时空辉夜姬**》（《超かぐや姫！》/ *Chou Kaguya-hime!*）官方 **ray MV 0分52秒** 中出现的经典彩页场景——**拿出手机打开聊天软件，与月见八千代（八七）进行跨越次元的日常 LINE 聊天陪伴**。
+本项目高度还原了动画电影《**超时空辉夜姬**》（《超かぐや姫！》/ *Chou Kaguya-hime!*）官方 **ray MV 0分52秒** 中出现的经典彩页场景——**拿出手机与桌面端设备，与月见八千代进行跨越次元的日常聊天陪伴与协作**。
 
 <div align="center">
   <table>
@@ -26,274 +31,188 @@ Yachiyo Chat 是一个手机优先的 AI 角色扮演聊天应用，以 Cloudfla
   </table>
 </div>
 
-> [!WARNING]
-> **当前项目缺陷 / 待改进项**：目前项目的主要缺陷是没有官方授权或制作的 **Live2D 动态形象**（当前主要采用星空磨砂玻璃、头像与动作气泡交互），期待后续社区创作者或官方 Live2D 模型的接入与支持！
+> [!NOTE]
+> **关于动态形象支持**：目前项目交互主要采用星空磨砂玻璃、头像与动作气泡交互，已包含 Live2D 扩展插槽与编剧室架构，期待后续社区创作者或官方 Live2D 模型的接入与支持。
 
-## 核心特性
+---
 
-- **角色聊天**：月见八千代人设，流式输出，回复带括号动作描写，可随时停止生成并保留已生成内容。
-- **多厂商 LLM**：六家厂商按国内/国际分组切换，个人 API Key 仅保存在本地浏览器。
-- **拍照识图**：相机/相册图片经压缩后发送，由所选厂商的视觉模型回答。
-- **联网搜索**：多 Provider 级联容灾路由，参考来源随消息本地保存。
-- **技能系统**：五项可组合技能，启用后注入对话指令。
-- **用户记忆**：可维护的长期记忆面板，让角色更了解你。
-- **中日双语**：界面与交互支持 zh-CN / ja-JP。
-- **本地历史**：聊天记录仅存于浏览器 IndexedDB，跨会话保留。
-- **离线只读**：断网可阅读历史，发送与拍摄禁用，恢复网络自动复原。
-- **PWA**：可安装，更新只在用户确认后刷新。
+## 核心功能与架构特性
 
-## 功能特性
+### 1. 沉浸式一体化桌面端 (Tauri v2 + Rust)
 
-### 多厂商 LLM 设置
+- **无边框沉浸顶栏 (Frameless Title Bar)**：移除操作系统默认原生标题栏，采用高度 38px 的一体化现代顶栏，集成品牌徽标、工作区视图切换胶囊（对话与编剧室）、原生窗口控制组（最小化、最大化/还原、关闭）及自定义拖拽区域。
+- **本地 Rust 网关 (Axum Gateway)**：桌面端内置高性能 Rust 本地服务，提供统一流式代理与客户端事件广播，支持离线或本地直连各大厂商 API。
+- **项目工作区管理**：原生支持选择本地工程目录，双端状态强一致同步。
 
-在 LLM 设置面板中激活个人 API Key 后，聊天请求将直接调用所选厂商并产生对应用量；未激活时走服务端备用凭据（仅限受邀访问场景）。
+### 2. 桌面端 IDE Agent 模式 (对齐 DSH 工业级规范)
 
-| 分组 | 厂商 | 视觉模型 |
-| ---- | ---- | -------- |
-| 国内 | 阶跃星辰 StepFun（Step Plan） | 支持（step-3.7-flash） |
-| 国内 | DeepSeek | 支持（vision 实验模型） |
-| 国内 | 智谱 GLM | 支持（多款 flash 视觉模型） |
-| 国际 | OpenAI (GPT) | 支持 |
-| 国际 | Anthropic (Claude) | 支持 |
-| 国际 | Google (Gemini) | 支持 |
+针对长会话、复杂重构与代码审查场景，系统实现了完整的智能体工具循环，并严格对齐 DeepSeek Harness (DSH) 工业级工程规范：
 
-StepFun 选项使用 Step Plan 专用 API，请填写 Step Plan Key；其余厂商请在对应控制台获取 API Key。
+- **无模型工具结果智能修剪 (Tool Result Pruner)**：
+  对齐 DSH `compaction-tool-result-pruner` 规范。当单项工具调用输出（如读取大型文件或命令日志）超过 8192 字符预算时，自动保留头部与尾部关键信息并以无模型方式折叠中间冗余，有效防止上下文与 Token 膨胀，保护上游 LLM 的 KV-Cache 命中率。同时保持前端与持久化存储中的原始完整数据，做到审查零失真。
+- **文件系统观察守卫 (FS Observation Policy)**：
+  对齐 DSH `fs-observation-policy` 规范。会话级追踪文件读取状态与修改时间戳（mtime）。在写入文件前强制要求先读后写，杜绝未读盲写破坏代码；并在写入时进行 CAS 版本校验，若文件在读取后被外部进程修改则自动拦截并提示重读，避免冲突覆盖。
+- **任务进度清单与 Plan Strip (Tool Todo)**：
+  对齐 DSH `tool-todo` 规范。提供 `todo_write` 工具，支持模型自主将复杂多步任务拆解为清单；前端在输入框上方提供具备呼吸灯高亮、展开/折叠与完成度统计的星空玻璃任务进度条（Plan Strip）。
+- **超大工具输出落地与引导 (Spill Policy)**：
+  对齐 DSH `spill-policy` 规范。当命令输出超过阈值时，自动将完整日志写入本地 `.yachiyo/spill/` 目录，并向模型返回双向检索指引。
+- **工作区深度感知与主动探索准则 (Action-first)**：
+  系统动态扫描工作区顶层文件与工程结构注入上下文；当用户提出「这是什么」、「分析项目」等疑问时，模型遵循主动探索准则，优先自主调用工具查阅实际代码与说明文档，杜绝凭空捏造事实。
 
-### 技能系统
+### 3. 月见八千代 角色交互与情感陪伴
 
-技能面板中的技能可单独开关，启用后对应指令会注入当前对话：
+- **人设还原与流式交互**：八千代拥有贯通岁月长河的记忆人设，回复带括号动作心理描写，支持随时中断生成并保留已生成内容。
+- **深度思考可视化 (ThinkingBlock)**：全面支持 DeepSeek R1、Claude、Gemini 等模型的推理思维链（`reasoning_content` / thinking），提供折叠展示、思考耗时统计与平滑流式展开。
+- **两阶平滑智能会话命名**：
+  首轮对话完成后立即采用启发式零延迟命名更新界面；随后在后台异步调度大模型进行主题提炼，概括讨论核心并过滤客套前缀，实现平滑升级与历史孤儿会话全链路自愈。
+- **本地个性化资料与圆形头像裁剪**：
+  完全保存在本地的个性化配置（用户名与头像）。集成大视口、无黑边全覆盖算法的圆形头像裁剪器，支持缩放、拖拽与顺时针旋转，并将用户名自然注入对话前置元数据。
+- **长期记忆与可组合技能**：
+  内置记忆管理面板；提供深度思维、情感洞察、精准事实、知识条理与 Humanizer（真人文风去 AI 味）五项可组合技能。
 
-| 技能 | 说明 |
-| ---- | ---- |
-| 深度思维 | 多步拆解与逻辑推理，输出深层见解 |
-| 情感洞察 | 敏锐捕捉情绪与潜台词，提供高情商温暖共鸣 |
-| 精准事实 | 严谨事实核对与抗幻觉，时序逻辑自洽 |
-| 知识条理 | 结构化梳理复杂概念，清晰层次分明 |
-| Humanizer | 去除文本中的 AI 味，让输出更像真人写作 |
+### 4. 多厂商 LLM 路由矩阵
 
-技能面板中的"联网搜索"开关默认关闭；开启后普通消息会先经服务端搜索再交给当前厂商回答（Mock 模式且未激活 Key 时返回固定示例来源，不实际访问外网）。
+支持国内与国际六大厂商自由切换，个人 API Key 仅保存在本地客户端，双端无缝支持流式回复与视觉识图（Vision）：
 
-### 联网搜索（DSH Harness WebRuntime）
+| 分组 | 厂商 | 模型支持 | 视觉模型 |
+| ---- | ---- | -------- | -------- |
+| 国内 | 阶跃星辰 StepFun | step-3.7-flash, step-plan 等 | 支持 |
+| 国内 | DeepSeek | deepseek-chat, deepseek-reasoner | 支持（实验性） |
+| 国内 | 智谱 GLM | glm-4-plus, glm-4v-flash 等 | 支持 |
+| 国际 | OpenAI | gpt-4o, gpt-4o-mini 等 | 支持 |
+| 国际 | Anthropic | claude-3-7-sonnet, claude-3-5-sonnet 等 | 支持 |
+| 国际 | Google Gemini | gemini-2.5-pro, gemini-2.5-flash 等 | 支持 |
 
-网络搜索架构基于 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 的 `packages/web/` 模块规范设计，具备多 Provider 可插拔能力、智能级联容灾路由与 `SearchSieve` 证据清洗机制：
+### 5. DSH 联网搜索管道 (WebRuntime Router)
 
-- **智能意图门控与多词提取**：服务端先由模型（或规则兜底）判断是否需要联网，并提取精准搜索关键词（去除语气/疑问/时间填充词，追问或纠错时自动结合上下文关联）。
-- **统一级联容灾路由（`SearchOrchestrator` / WebRuntime Router）**：
+基于 DeepSeek Harness 的 `packages/web/` 模块规范设计：
 
-| Provider | 激活条件 | 特点 |
-| -------- | -------- | ---- |
-| DeepSeek 搜索 | 配置 `DEEPSEEK_API_KEY` | 高精准搜索与结构化证据提取 |
-| Exa 神经搜索 | 配置 `EXA_API_KEY` | 专为 LLM 设计的神经语义检索 |
-| Tavily 事实搜索 | 配置 `TAVILY_API_KEY` | 针对实时研究与时效事实优化 |
-| Perplexity 搜索 | 配置 `PERPLEXITY_API_KEY` | 基于 Sonar 模型与精准引用 |
-| Brave 搜索 | 配置 `BRAVE_API_KEY` | 隐私优先的全球独立网络索引 |
-| 博查 AI 搜索 | 配置 `BOCHA_API_KEY` | 专为中文大模型优化 |
-| SearXNG 元搜索 | 配置 `SEARXNG_BASE_URL` | 自建或公共开源元搜索引擎 |
-| Google 自定义搜索 | 配置 `GOOGLE_SEARCH_API_KEY` 与 `GOOGLE_SEARCH_CX` | Google 索引 |
-| Jina AI 语义搜索 | 配置 `JINA_API_KEY` 或开启 `ENABLE_JINA` | 直接返回纯净 Markdown 证据 |
-| 免 Key 聚合兜底 | 无需配置 | Bing Multi-Route + DuckDuckGo，Round-Robin 多路检索（支持智能双市场并行：本地市场 + en-US 近 30 天权威信息） |
+- **智能意图门控与多词提取**：自动判断是否需要联网，并提取去除停用词的精炼关键词。
+- **统一级联容灾路由**：
+  支持 DeepSeek 搜索、Exa 神经搜索、Tavily 事实搜索、Perplexity、Brave、博查、SearXNG、Google 自定义搜索、Jina AI 语义搜索，以及基于 Bing / DuckDuckGo 的免 Key 多路轮询兜底。
+- **SearchSieve 证据清洗与正文抓取**：自动过滤黑名单与低质站点；对 Top 3 结果并行抓取正文段落注入系统上下文，参考来源随消息持久化保存。
 
-  可通过环境变量 `DSH_WEB_SEARCH_PROVIDER`（如 `deepseek` / `exa` / `tavily` / `perplexity` / `brave` / `bocha` / `searxng` / `google` / `jina` / `duckduckgo` / `bing`）指定首选 Provider。
-- **SearchSieve 证据筛子**：自动过滤黑名单域名、低质黄页、广告跳转、登录页及语种不匹配噪音；智能双市场模式下放行权威国际来源。
-- **页面正文并行抓取**：对命中 Top 3 结果并行抓取正文段落（超时静默降级为摘要），格式化注入系统提示词后由当前聊天模型回答。
-- **展示与保存**：搜索失败或纯图片消息静默降级为普通对话；搜索命中时输出上限放宽至 1000 字符，并在回复下方流式展示参考来源（随 IndexedDB 历史持久化存储）。
+---
 
 ## 技术栈
 
-| 层 | 技术 |
-| -- | ---- |
-| 前端 | React 19、TypeScript、Vite、TanStack Virtual（消息列表虚拟化） |
-| 本地存储 | Dexie（IndexedDB） |
-| PWA | Workbox（vite-plugin-pwa）、离线只读缓存 |
-| 服务端 | Cloudflare Pages Functions（TypeScript）、Workers KV（限流与配额） |
-| 移动端（实验性） | Capacitor 8（Android） |
-| 测试 | Vitest、Testing Library、Playwright（E2E + 性能） |
+| 层次 | 技术选型 | 说明 |
+| ---- | -------- | ---- |
+| 桌面端核心 | Tauri v2、Rust、Axum、Tokio | 无边框窗口、原生网关、本地工具集 |
+| 前端框架 | React 19、TypeScript、Vite | 现代化响应式界面、严格类型 |
+| 渲染与列表 | TanStack Virtual | 长消息列表高性能虚拟化滚动 |
+| 本地存储 | Dexie.js (IndexedDB)、localStorage | 聊天历史、长期记忆、本地用户设置 |
+| PWA / 离线 | Workbox (vite-plugin-pwa) | 离线只读缓存、应用级安装 |
+| 云端边缘 | Cloudflare Pages Functions、Workers KV | 边缘 API 中间件、会话鉴权、速率控制 |
+| 移动端外壳 | Capacitor 8 (Android) | 实验性移动端封装 |
+| 自动化测试 | Vitest、Testing Library、Playwright | 单元测试、云函数测试、桌面端集成测试 |
 
-## 本地运行
+---
 
-要求 Node.js 22.12 或更高版本及 npm。
+## 快速开始
 
-```powershell
+### 环境准备
+
+- Node.js 22.12 或更高版本
+- Rust 稳定版编译器与 Cargo（仅桌面端开发需要）
+- npm 包管理器
+
+### 安装依赖
+
+```bash
+git clone https://github.com/liangcka/Yachiyo-chat-desktop.git
+cd Yachiyo-chat-desktop
 npm install
+```
+
+### 运行方式
+
+#### 1. 桌面端开发 (推荐)
+
+启动基于 Tauri v2 的原生桌面开发环境：
+
+```bash
+npm run desktop:dev
+```
+
+#### 2. 本地 Mock 联调 (前端 + 本地 Pages Functions)
+
+启动内置 Cloudflare Pages Functions 与本地 KV 模拟的环境，支持免配置完整体验：
+
+```bash
 npm run dev:mock
 ```
 
-打开 Wrangler 输出的本地地址，使用仅限 mock 模式的访问码：`yachiyo-local-access`。未在 LLM 设置中激活个人 Key 时，Mock 模式只返回固定示例且不会调用模型；激活个人 Key 后会调用所选厂商并产生对应用量。
+访问控制台输出的本地 URL，使用默认开发访问码：`yachiyo-local-access`。
 
-### 常用脚本
+#### 3. 生产完整联调
 
-| 命令 | 说明 |
-| ---- | ---- |
-| `npm run dev` | Vite 纯前端开发模式 |
-| `npm run dev:pages` | 构建后以 wrangler pages dev 运行（live 模式） |
-| `npm run dev:mock` | 构建后以 wrangler pages dev 运行（mock 模式） |
-| `npm run build` | 类型检查 + 生产构建 |
-| `npm run typecheck` | 三份 tsconfig 全量类型检查 |
-| `npm run lint` | ESLint 检查 |
-| `npm run test` | 单元测试 + 云函数测试 |
-| `npm run test:unit` | 前端单元测试 |
-| `npm run test:functions` | Pages Functions 测试 |
-| `npm run test:e2e` | Playwright 端到端测试 |
-| `npm run test:perf` | 构建 + Playwright 性能测试 |
-| `npm run mob:sync` | 构建 + Capacitor Android 同步（实验性） |
-| `npm run mob:build` | Android Release 构建（实验性） |
-
-## 实验性：Android 原生应用
-
-项目通过 Capacitor 8 提供 Android 原生壳（`android/` 目录），当前定位为**实验性功能**，构建与签名流程可能随版本调整：
-
-```powershell
-npm run mob:sync    # 构建前端并同步到 Android 工程
-npm run mob:build   # 同步后执行 gradlew assembleRelease
+```bash
+npm run dev:pages
 ```
 
-签名配置参考 `android/keystore.properties.example`。日常使用建议以 Web PWA 为准。
+---
 
-## 测试与验证
+## 常用脚本命令
 
-```powershell
-npm run test:unit
-npm run test:functions
+| 命令 | 用途说明 |
+| ---- | -------- |
+| `npm run desktop:dev` | 启动桌面端 Tauri 开发窗口 |
+| `npm run desktop:build` | 编译生成桌面端 Release 可执行程序 |
+| `npm run dev:mock` | 本地 Mock 联调（内置 Pages Functions 与 KV 模拟） |
+| `npm run dev:pages` | 本地完整 Pages 联调（需配置相关环境变量） |
+| `npm run build` | 生产构建（自动执行提示词同步与严格类型检查） |
+| `npm run sync:prompt` | 同步角色提示词至云函数自动生成代码 |
+| `npm run typecheck` | 对 app、node 与 functions 执行三份 tsconfig 全量类型检查 |
+| `npm run lint` | ESLint 静态代码风格与规范检查 |
+| `npm run test:unit` | 前端组件与业务逻辑单元测试 |
+| `npm run test:functions` | Cloudflare Pages Functions 云函数测试 |
+| `npm run test:desktop` | 桌面端 Rust 单元与集成测试 |
+| `npm test` | 串行运行单元测试、云函数测试与桌面端测试 |
+
+---
+
+## 质量门禁与工程规范
+
+项目遵循严格的工程行为准则（Think Before Coding, Simplicity First, Surgical Changes, Goal-Driven Execution）。
+
+在提交代码前，请执行基线质量门禁：
+
+```bash
 npm run typecheck
 npm run lint
-npm run build
-npx playwright install chromium
-npm run test:e2e
-```
-
-首次运行端到端测试前需要安装 Playwright 的 Chromium；Linux CI 使用 `npx playwright install --with-deps chromium`。后续无需重复安装，除非 Playwright 提示浏览器版本已更新。
-
-仅当 Windows 仓库的物理路径含中文、且 `npm run test:functions` 出现 Cloudflare Workers 测试池的文件 URL 路径错误时，才需要使用纯 ASCII 路径规避。请从同一个 Git 远端做一次物理克隆并重新安装依赖，不要使用 `subst` 盘符映射：
-
-```powershell
-$remote = git remote get-url origin
-git clone $remote C:\src\yachiyo-chat
-Set-Location C:\src\yachiyo-chat
-npm ci
+npm run test:unit
 npm run test:functions
+cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-该规避只针对本机 `@cloudflare/vitest-pool-workers` 的非 ASCII 文件 URL 兼容问题；Cloudflare 远程 Git 构建不会使用本机路径。
+### 移动端隔离规则
 
-## Cloudflare Pages 部署
+除明确指令要求修改移动端外，严禁修改 `android/` 目录下的任何原生代码、清单、Gradle 脚本以及顶层 `capacitor.config.ts`。所有日常功能演进均以 PC 桌面端（Tauri）与 Web PWA 为准。
 
-### 构建配置
+---
 
-- 构建命令：`npm run build`
-- 输出目录：`dist`
-- 根目录：仓库根目录
-- Node.js：22.12 或更新版本
+## 隐私与安全边界
 
-项目不生成顶层 `404.html`；Cloudflare Pages 会按其默认 SPA 规则把未命中的导航请求交给根页面。由于项目包含 Pages Functions，不使用 `_redirects` rewrite 覆盖该行为。
+1. **本地数据绝对优先**：
+   所有的聊天记录、长期记忆、图片、自定义用户名与个人头像均严格保存在当前设备的 IndexedDB 与 localStorage 中。服务端不持久化任何聊天正文或用户图片。
+2. **凭据安全隔离**：
+   用户在客户端填写的个人 API Key 仅保存在本地设备，调用请求直连厂商（桌面端）或随同源请求临时转发（Web 端），不存储于云端数据库。
+3. **边缘防护与配额**：
+   云函数接口具备 Cloudflare Workers KV 频控限制；桌面端执行系统命令具备安全白名单校验与危险指令拦截（如危险系统级删除指令）。
 
-仓库中的 `wrangler.jsonc` 只提供本地 `wrangler pages dev` 使用的非敏感默认变量；`npm run dev:mock` 还会通过命令行加入本地 KV 绑定和 `APP_MODE=mock`。它不会代替 Cloudflare Pages 项目的云端环境配置。
+---
 
-### 环境绑定
+## 参与贡献
 
-在 Pages 项目的设置中，分别为 **Production** 和 **Preview** 环境创建以下绑定；不要只配置其中一个环境：
+欢迎提交 Issue 与 Pull Request 协助改进项目。
 
-- KV namespace binding：`RATE_LIMIT_KV`
-- 普通变量：
+- 代码规范与决策记录请参考 `.agents/notes/` 目录；
+- 安全漏洞反馈请参阅 [SECURITY.md](SECURITY.md)；
+- 贡献流程与代码提交守则请参考 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-```text
-STEPFUN_BASE_URL=https://api.stepfun.com/step_plan/v1
-STEPFUN_MODEL=step-3.7-flash
-DAILY_REQUEST_LIMIT=100
-AUTH_ATTEMPT_LIMIT=10
-```
-
-- Secrets：
-  - `STEPFUN_API_KEY`
-  - `ACCESS_CODE_SHA256`
-  - `SESSION_SIGNING_SECRET`
-
-Production 和 Preview 都不要设置 `APP_MODE=mock`；应省略 `APP_MODE` 或设为 `live`。如 Preview 需要隔离配额或 StepFun 凭据，应为它绑定独立的 KV namespace 和 Secrets。
-
-### 配额与边缘防护
-
-KV 额度是面向小范围受邀用户的尽力限制，不是严格计费边界；上线时还应在 Cloudflare 为 `/api/session` 与 `/api/chat` 配置边缘速率规则，并在 StepFun 控制台设置预算告警。绑定自定义域名后，可在确认所有子域都使用 HTTPS 的前提下启用 Cloudflare HSTS。
-
-不要把任何真实值写入 `.dev.vars.example`、Git、前端变量或 Cloudflare 普通变量。
-
-`public/_headers` 只作用于 Pages 提供的静态资源，不会修改 Pages Functions 返回的 `/api/*` 响应；API 的 `Cache-Control: no-store` 由 Functions 自身设置，因此 `_headers` 中不配置无效的 `/api/*` 段。
-
-## 安全与密钥管理
-
-### 生成访问码摘要与签名密钥
-
-在本机 PowerShell 中生成随机访问码并计算 SHA-256。命令只在当前会话变量中保存原文；把显示的访问码通过安全渠道交给受邀用户：
-
-```powershell
-$accessBytes = New-Object byte[] 32
-$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
-try {
-  $rng.GetBytes($accessBytes)
-} finally {
-  $rng.Dispose()
-}
-$accessCode = [Convert]::ToBase64String($accessBytes)
-$sha256 = [Security.Cryptography.SHA256]::Create()
-try {
-  $hashBytes = $sha256.ComputeHash([Text.Encoding]::UTF8.GetBytes($accessCode))
-} finally {
-  $sha256.Dispose()
-}
-$digest = -join ($hashBytes | ForEach-Object { $_.ToString("x2") })
-$accessCode
-$digest
-```
-
-生成独立的会话签名密钥：
-
-```powershell
-$secretBytes = New-Object byte[] 48
-$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
-try {
-  $rng.GetBytes($secretBytes)
-} finally {
-  $rng.Dispose()
-}
-[Convert]::ToBase64String($secretBytes)
-```
-
-分别把摘要和签名密钥写入 `ACCESS_CODE_SHA256`、`SESSION_SIGNING_SECRET` Secret。访问码至少应包含 16 个随机字符，签名密钥不得与访问码或 StepFun Key 复用。
-
-### 部署后检查
-
-1. 新设备无法跳过访问码门禁，错误码不会泄露内部信息。
-2. 中文和日文文字请求均能流式返回，角色为月见八千代且带括号动作。
-3. 相机/相册图片可预览、移除并获得基于图片的回答。
-4. 停止按钮保留已生成内容；刷新后历史仍在当前设备。
-5. 每日额度耗尽时显示本地化提示且不继续调用 StepFun。
-6. 离线时可以打开和阅读历史，但发送与拍摄均禁用；恢复网络后自动恢复。
-7. PWA 可以安装，更新只在用户确认后刷新。
-8. 浏览器控制台无异常，390×844 与桌面居中布局正常。
-
-### 泄漏扫描
-
-最后执行泄漏扫描。交互式输入旧 Key 的短前缀，不要把完整旧 Key 写入命令、文件或日志：
-
-```powershell
-$oldKeyPrefix = Read-Host "旧 Key 的短前缀"
-rg -n "$oldKeyPrefix|Authorization: Bearer [A-Za-z0-9]" . -g "!node_modules" -g "!dist" -g "!.git"
-```
-
-预期无匹配。静态 `dist/` 中也不应出现 `角色提示词.txt` 内容、访问码或任何 Key。
-
-## 隐私边界
-
-聊天记录、语言和压缩后的图片仅保存在当前浏览器 IndexedDB。服务端不保存聊天内容或图片；KV 只保存访问失败计数和按会话/日期的请求额度。退出访问不会删除本地历史，清除本地数据需要单独确认。
-
-开启"联网搜索"时，最后一条用户消息文本会由 Pages Functions 转发至当前命中的搜索服务商（按级联路由可能为 DeepSeek、Exa、Tavily、Perplexity、Brave、博查、SearXNG、Google、Jina、Bing/Microsoft 或 DuckDuckGo）完成搜索；搜索返回的标题与链接仅用于本次回答与本地展示，参考来源随消息一起保存在当前浏览器。
-
-## 参与贡献与反馈
-
-欢迎提交 Issue 与 Pull Request！详情请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
-如发现问题或有改进建议，也可通过邮件联系：<xingyucka@qq.com>。
-
-如发现安全漏洞，请阅读 [SECURITY.md](SECURITY.md) 了解反馈流程，不要在公开 Issue 中提交漏洞细节。
+---
 
 ## 许可证
 
-本项目采用 [Apache License 2.0](LICENSE) 许可证。
+本项目采用 [Apache License 2.0](LICENSE) 许可证分发与使用。

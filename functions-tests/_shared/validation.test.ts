@@ -231,4 +231,19 @@ describe("validateChatRequest", () => {
       validateChatRequest({ ...(validRequest() as object), currentTime: "a".repeat(101) }),
     ).toThrow(ChatValidationError);
   });
+
+  it("accepts valid request mode values and rejects unknown modes", () => {
+    expect(validateChatRequest({ ...(validRequest() as object), mode: "chat" })).toMatchObject({
+      mode: "chat",
+    });
+    expect(
+      validateChatRequest({ ...(validRequest() as object), mode: "summary" }),
+    ).toMatchObject({ mode: "summary" });
+    expect(validateChatRequest({ ...(validRequest() as object), mode: "title" })).toMatchObject({
+      mode: "title",
+    });
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), mode: "invalid-mode" }),
+    ).toThrow(ChatValidationError);
+  });
 });

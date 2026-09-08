@@ -17,7 +17,7 @@ export interface StreamChatMessage {
 export interface StreamChatRequest {
   locale: Locale;
   messages: StreamChatMessage[];
-  mode?: "chat" | "summary";
+  mode?: "chat" | "summary" | "title";
   /** 发送消息时的客户端本地格式化时间戳 */
   currentTime?: string;
   /** 用户自带 Key 路径：三者必须同时存在，否则走服务端 fallback */
@@ -31,7 +31,7 @@ export interface StreamChatRequest {
   /** 智能搜索：联网搜索开启时启用双市场并行检索（结果更多、带发布日期） */
   smartSearch?: boolean;
   /** Agent 模式：开启后服务端启用多轮工具调用循环 */
-  agent?: { enabled: true; maxTurns?: number };
+  agent?: { enabled: true; maxTurns?: number; workspace?: string };
 }
 
 export interface StreamChatResult {

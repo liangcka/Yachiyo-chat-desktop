@@ -9,6 +9,10 @@ import {
   type StreamChatResult,
 } from "../services/chat-client";
 import {
+  resetLocalUserSettings,
+  saveLocalUserSettings,
+} from "../services/user-settings";
+import {
   formatClientTimestamp,
   useChatController,
   type ChatRepository,
@@ -56,6 +60,7 @@ function repositoryWith(
     setLocale: vi.fn(async () => undefined),
     replaceMessages: vi.fn(async () => undefined),
     deleteMessagesFrom: vi.fn(async () => undefined),
+    renameConversation: vi.fn(async () => undefined),
     ...overrides,
   };
 }
@@ -274,6 +279,43 @@ describe("useChatController", () => {
       role: "user",
       text: "八千代？",
     });
+  });
+
+  it("preserves agent toolSteps and partial text as history when retrying or continuing after failure", async () => {
+    const repository = repositoryWith();
+    const stream = vi
+      .fn<StreamChatFunction>()
+      .mockImplementationOnce(async (_request, options) => {
+        options.onToolCall?.({ id: "call-1", name: "list_directory", arguments: { path: "." } });
+        options.onToolResult?.({ id: "call-1", name: "list_directory", output: "README.md\nrun.ps1", isError: false, durationMs: 10 });
+        options.onDelta("已帮您查看目录");
+        throw new ChatClientError("PROVIDER_ERROR");
+      })
+      .mockImplementationOnce(async (request, options) => {
+        // 关键断言：第二次请求必须包含前一次执行过的工具步骤和结果
+        const roles = request.messages.map((m) => m.role);
+        expect(roles).toContain("tool");
+        expect(request.messages.some((m) => m.role === "tool" && m.text.includes("run.ps1"))).toBe(true);
+        options.onDelta("接续完成！");
+        return { truncated: false };
+      });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("user-1", "assistant-1", "assistant-2"),
+        repository,
+        streamChat: stream,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => result.current.send("启动项目"));
+    expect(result.current.phase).toBe("error");
+
+    // 点击重试，断言工具调用记录与上下文完整继承
+    await act(async () => result.current.retry());
+    expect(result.current.phase).toBe("idle");
+    expect(result.current.messages.at(-1)?.text).toBe("接续完成！");
   });
 
   it("aborts the active request on unmount", async () => {
@@ -572,6 +614,33 @@ describe("useChatController", () => {
       role: "assistant",
       text: "（关于彩叶的事情，我一直都记得哦~）",
     });
+  });
+
+  it("keeps username local only and does not override nickname in chat request", async () => {
+    saveLocalUserSettings({ username: "小彩叶" });
+    try {
+      const repository = repositoryWith({
+        listConversations: vi.fn(async () => []),
+        listMessages: vi.fn(async () => []),
+      });
+      const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+        options.onDelta("了解啦~");
+        return { truncated: false };
+      });
+
+      const { result } = renderHook(() =>
+        useChatController({ id: ids("user-1", "assistant-1"), repository, streamChat: stream }),
+      );
+      await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+      await act(async () => result.current.send("出击！"));
+
+      const chatRequest = stream.mock.calls[0]?.[0];
+      const identityUserMsg = chatRequest?.messages.find((m) => m.text.includes("【用户的名字】"));
+      expect(identityUserMsg).toBeUndefined();
+    } finally {
+      resetLocalUserSettings();
+    }
   });
 
   it("updates user memory through the controller and reflects the change", async () => {
@@ -901,6 +970,7 @@ describe("useChatController", () => {
     });
     const { result } = renderHook(() =>
       useChatController({
+        autoAiTitle: false,
         id: ids("user-1", "assistant-1", "assistant-2"),
         repository,
         streamChat: stream,
@@ -941,6 +1011,7 @@ describe("useChatController", () => {
     });
     const { result } = renderHook(() =>
       useChatController({
+        autoAiTitle: false,
         id: ids("user-1", "assistant-1", "assistant-2"),
         repository,
         streamChat: stream,
@@ -971,6 +1042,7 @@ describe("useChatController", () => {
     });
     const { result } = renderHook(() =>
       useChatController({
+        autoAiTitle: false,
         id: ids("user-1", "assistant-1", "user-2", "assistant-2", "assistant-3"),
         repository,
         streamChat: stream,
@@ -1391,5 +1463,195 @@ describe("useChatController", () => {
 
     expect(repository.createConversation).not.toHaveBeenCalled();
     expect(result.current.activeConversation?.id).toBe("blank-conv");
+  });
+
+  it("automatically renames conversation when completing the first turn if title is default", async () => {
+    const repository = repositoryWith({
+      listMessages: vi.fn(async () => []),
+    });
+    const onConversationUpdated = vi.fn();
+    const streamChat = vi.fn(async (_req, opts) => {
+      opts.onDelta?.("这是《Alice in Cradle》的社区专用启动器");
+      return { model: "test-model", provider: "stepfun", truncated: false };
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("user-msg-1", "asst-msg-1"),
+        now: () => 100,
+        autoAiTitle: false,
+        onConversationUpdated,
+        repository,
+        streamChat,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    expect(result.current.activeConversation?.title).toBe("新的对话");
+
+    await act(async () => {
+      await result.current.send("这是什么这个项目");
+    });
+
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    expect(repository.renameConversation).toHaveBeenCalledWith(conversation.id, "这是什么这个项目");
+    expect(result.current.activeConversation?.title).toBe("这是什么这个项目");
+    expect(onConversationUpdated).toHaveBeenCalled();
+  });
+
+  it("does not overwrite a custom conversation title upon completing a turn", async () => {
+    const customConv: Conversation = {
+      ...conversation,
+      title: "我的专属探索",
+    };
+    const repository = repositoryWith({
+      getConversation: vi.fn(async () => customConv),
+      listConversations: vi.fn(async () => [customConv]),
+      listMessages: vi.fn(async () => []),
+    });
+    const streamChat = vi.fn(async (_req, opts) => {
+      opts.onDelta?.("收到！");
+      return { model: "test-model", provider: "stepfun", truncated: false };
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("user-msg-1", "asst-msg-1"),
+        now: () => 100,
+        repository,
+        streamChat,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    expect(result.current.activeConversation?.title).toBe("我的专属探索");
+
+    await act(async () => {
+      await result.current.send("继续研究这个功能");
+    });
+
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    expect(repository.renameConversation).not.toHaveBeenCalled();
+    expect(result.current.activeConversation?.title).toBe("我的专属探索");
+  });
+
+  it("supports manual renameConversation and notifies onConversationUpdated", async () => {
+    const repository = repositoryWith();
+    const onConversationUpdated = vi.fn();
+    const { result } = renderHook(() =>
+      useChatController({
+        id: () => "msg-1",
+        onConversationUpdated,
+        repository,
+        streamChat: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => {
+      await result.current.renameConversation(conversation.id, "重命名的标题");
+    });
+
+    expect(repository.renameConversation).toHaveBeenCalledWith(conversation.id, "重命名的标题");
+    expect(result.current.activeConversation?.title).toBe("重命名的标题");
+    expect(onConversationUpdated).toHaveBeenCalled();
+  });
+
+  it("self-heals conversation title on startup if conversation already has messages and default title", async () => {
+    const existingMessage: ChatMessage = {
+      conversationId: conversation.id,
+      createdAt: 12,
+      id: "user-1",
+      role: "user",
+      status: "complete",
+      text: "这是什么这个项目",
+    };
+    const repository = repositoryWith({
+      listMessages: vi.fn(async () => [existingMessage]),
+    });
+    const { result } = renderHook(() =>
+      useChatController({
+        id: () => "msg-1",
+        repository,
+        streamChat: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    expect(result.current.activeConversation?.title).toBe("这是什么这个项目");
+    expect(repository.renameConversation).toHaveBeenCalledWith(conversation.id, "这是什么这个项目");
+  });
+
+  it("automatically generates AI title after first turn and upgrades conversation title", async () => {
+    const repository = repositoryWith();
+    let titleStreamCalled = false;
+    const streamChat = vi.fn(async (request, options) => {
+      if (request.mode === "title") {
+        titleStreamCalled = true;
+        await new Promise((r) => setTimeout(r, 20));
+        options.onDelta("《项目核心定位》");
+        return { truncated: false };
+      }
+      options.onDelta("这是 Alice in Cradle 启动器。");
+      return { truncated: false };
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        autoAiTitle: true,
+        id: ids("user-1", "asst-1"),
+        now: () => 100,
+        repository,
+        streamChat,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => {
+      await result.current.send("这是什么这个项目？");
+    });
+
+    // 第一阶段：立刻变为启发式标题
+    await waitFor(() => expect(result.current.activeConversation?.title).toBe("这是什么这个项目"));
+
+    // 第二阶段：AI 标题异步返回并清洗后无缝升级
+    await waitFor(() => expect(result.current.activeConversation?.title).toBe("项目核心定位"));
+    expect(titleStreamCalled).toBe(true);
+    expect(repository.renameConversation).toHaveBeenCalledWith(conversation.id, "项目核心定位");
+  });
+
+  it("supports manual generateAiTitle to fetch and clean title", async () => {
+    const existingMessage: ChatMessage = {
+      conversationId: conversation.id,
+      createdAt: 10,
+      id: "user-1",
+      role: "user",
+      status: "complete",
+      text: "帮我用 React 编写一个星空画布组件",
+    };
+    const repository = repositoryWith({
+      listMessages: vi.fn(async () => [existingMessage]),
+    });
+    const streamChat = vi.fn(async (request, options) => {
+      if (request.mode === "title") {
+        options.onDelta("标题：React 星空画布实现。");
+        return { truncated: false };
+      }
+      return { truncated: false };
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        id: () => "msg-1",
+        repository,
+        streamChat,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    let generated: string | undefined;
+    await act(async () => {
+      generated = await result.current.generateAiTitle(conversation.id);
+    });
+
+    expect(generated).toBe("React 星空画布实现");
   });
 });

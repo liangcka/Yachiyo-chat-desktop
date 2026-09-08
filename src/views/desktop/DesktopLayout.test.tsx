@@ -125,14 +125,16 @@ describe("DesktopLayout", () => {
 
     expect(screen.queryByRole("dialog", { name: "设置中心" })).not.toBeInTheDocument();
 
-    // 点击侧边栏底部的设置入口
+    // 点击侧边栏底部的用户资料展开浮层，再点击设置
+    const userBar = screen.getByLabelText("用户资料与菜单");
+    await user.click(userBar);
     const settingsBtn = screen.getByTitle("系统设置与偏好");
     await user.click(settingsBtn);
 
     expect(screen.getByRole("dialog", { name: "设置中心" })).toBeInTheDocument();
-    expect(screen.getByText(/配置智能体执行、排队消息发送以及权限/i)).toBeInTheDocument();
-    expect(screen.getByText("当前活跃大模型")).toBeInTheDocument();
-    expect(screen.getByText("本地持久化存储")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "常规" })).toBeInTheDocument();
+    expect(screen.getByText("本地隐私保护模式")).toBeInTheDocument();
+    expect(screen.getByText("大语言模型服务 (LLM)")).toBeInTheDocument();
 
     // 切换到模型配置标签
     const modelsTabBtn = screen.getByRole("tab", { name: /模型配置/i });

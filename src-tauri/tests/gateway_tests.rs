@@ -17,6 +17,12 @@ fn test_build_system_prompt() {
 
     let summary_prompt = build_system_prompt(ChatLocale::ZhCn, Some(RequestMode::Summary), false, None);
     assert!(summary_prompt.contains("记忆整理"));
+
+    let title_zh = build_system_prompt(ChatLocale::ZhCn, Some(RequestMode::Title), false, None);
+    assert!(title_zh.contains("标题生成"));
+
+    let title_ja = build_system_prompt(ChatLocale::JaJp, Some(RequestMode::Title), false, None);
+    assert!(title_ja.contains("会話タイトル"));
 }
 
 #[test]
@@ -180,16 +186,32 @@ fn test_plain_request_still_parses_without_agent_fields() {
 fn test_agent_system_prompt() {
     use yachiyo_desktop_lib::gateway::prompt::build_agent_system_prompt;
 
-    let zh = build_agent_system_prompt(ChatLocale::ZhCn, Some("2026-09-02"));
+    let zh = build_agent_system_prompt(ChatLocale::ZhCn, Some("2026-09-02"), None);
     assert!(zh.contains("月见八千代"));
     assert!(zh.contains("工具"));
     assert!(zh.contains("彩叶"));
     assert!(!zh.contains("```tool_call"));
     assert!(!zh.contains("输出最多200个Unicode字符"));
 
-    let ja = build_agent_system_prompt(ChatLocale::JaJp, None);
+    let ja = build_agent_system_prompt(ChatLocale::JaJp, None, None);
     assert!(ja.contains("八千代"));
     assert!(!ja.contains("```tool_call"));
+}
+
+#[test]
+fn test_agent_system_prompt_with_workspace() {
+    use std::path::Path;
+    use yachiyo_desktop_lib::gateway::prompt::build_agent_system_prompt;
+
+    let ws = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let zh = build_agent_system_prompt(ChatLocale::ZhCn, Some("2026-09-02"), Some(ws));
+    assert!(zh.contains("当前项目工作区"));
+    assert!(zh.contains("项目感知与主动探索准则"));
+    assert!(zh.contains("亲自探查先行"));
+    assert!(zh.contains("list_directory"));
+    assert!(zh.contains("read_file"));
+    assert!(zh.contains("src/"));
+    assert!(zh.contains("Cargo.toml"));
 }
 
 #[test]

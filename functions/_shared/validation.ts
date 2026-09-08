@@ -21,7 +21,7 @@ export function isProviderId(value: unknown): value is ProviderId {
   return typeof value === "string" && (PROVIDER_IDS as readonly string[]).includes(value);
 }
 
-export type RequestMode = "chat" | "summary";
+export type RequestMode = "chat" | "summary" | "title";
 
 export interface ClientChatRequest {
   locale: ChatLocale;
@@ -205,7 +205,7 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
     return invalid();
   }
 
-  if (value.mode !== undefined && value.mode !== "chat" && value.mode !== "summary") {
+  if (value.mode !== undefined && value.mode !== "chat" && value.mode !== "summary" && value.mode !== "title") {
     return invalid();
   }
 

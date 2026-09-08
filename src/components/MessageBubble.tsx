@@ -3,6 +3,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import type { ChatMessage, Locale } from "../domain/chat";
 import { copyFor } from "../i18n/messages";
 import { MarkdownContent } from "./chat/MarkdownContent";
+import { ThinkingBlock } from "./chat/ThinkingBlock";
 import { ToolCard } from "./tools/ToolCard";
 
 export interface MessageBubbleProps {
@@ -66,7 +67,31 @@ export const MessageBubble = memo(function MessageBubble({
   const openMenu = () => {
     if (bubbleRef.current) {
       const rect = bubbleRef.current.getBoundingClientRect();
-      setPlacement(rect.top < 110 ? "bottom" : "top");
+      const scrollContainer = bubbleRef.current.closest(".conversation-view");
+      const containerRect = scrollContainer?.getBoundingClientRect();
+
+      // 菜单高度约 40px，加上外边距与浮动安全间隙共约 52px
+      const REQUIRED_VERTICAL_SPACE = 52;
+      // 避开视口顶部的 Header / Titlebar（桌面端 76px 以上，移动端含安全区与控制条约 80~100px）与内边距
+      const VIEWPORT_HEADER_OFFSET = 135;
+
+      const topSpaceInContainer = containerRect ? rect.top - containerRect.top : rect.top;
+      const hasTopSpace = topSpaceInContainer >= REQUIRED_VERTICAL_SPACE && rect.top >= VIEWPORT_HEADER_OFFSET;
+
+      const bottomSpaceInContainer = containerRect
+        ? containerRect.bottom - rect.bottom
+        : window.innerHeight - rect.bottom;
+      const hasBottomSpace = bottomSpaceInContainer >= REQUIRED_VERTICAL_SPACE;
+
+      if (!hasTopSpace && hasBottomSpace) {
+        setPlacement("bottom");
+      } else if (!hasBottomSpace && hasTopSpace) {
+        setPlacement("top");
+      } else if (!hasTopSpace && !hasBottomSpace) {
+        setPlacement(topSpaceInContainer >= bottomSpaceInContainer ? "top" : "bottom");
+      } else {
+        setPlacement("top");
+      }
     }
     setMenuOpen(true);
   };
@@ -207,10 +232,10 @@ export const MessageBubble = memo(function MessageBubble({
                 <span>{message.skills.join(" · ")}</span>
               </span>
             ) : null}
-            {message.status === "streaming" ? (
+            {message.status === "streaming" && hasText ? (
               <span className="assistant-identity-header__status assistant-identity-header__status--streaming">
                 <span className="assistant-identity-header__pulse" />
-                思考中...
+                {copyFor(locale).thinking}
               </span>
             ) : null}
           </div>
@@ -261,20 +286,22 @@ export const MessageBubble = memo(function MessageBubble({
           ))}
         </div>
       ) : null}
-      {message.text.length === 0 && message.status === "streaming" && !hasImage ? (
-        <span aria-hidden="true" className="message-bubble__typing">
-          <i />
-          <i />
-          <i />
-        </span>
-      ) : hasText ? (
+      {message.role === "assistant" ? (
+        <ThinkingBlock
+          hasText={hasText}
+          isStreaming={message.status === "streaming"}
+          locale={locale}
+          thought={message.thought}
+        />
+      ) : null}
+      {hasText ? (
         <>
           <MarkdownContent text={displayText} isAssistant={message.role === "assistant"} />
           {message.truncated === true ? (
             <span className="message-bubble__truncated">{copyFor(locale).truncated}</span>
           ) : null}
         </>
-      ) : message.status === "streaming" ? (
+      ) : message.role !== "assistant" && message.status === "streaming" ? (
         <span aria-hidden="true" className="message-bubble__typing">
           <i />
           <i />
@@ -309,7 +336,7 @@ export const MessageBubble = memo(function MessageBubble({
               role="menuitem"
               type="button"
             >
-              <RotateCw aria-hidden="true" size={14} strokeWidth={2.2} />
+              <RotateCw aria-hidden="true" size={13} strokeWidth={2.2} />
               <span>{copyFor(locale).regenerate}</span>
             </button>
           ) : null}
@@ -321,9 +348,12 @@ export const MessageBubble = memo(function MessageBubble({
               role="menuitem"
               type="button"
             >
-              <RotateCcw aria-hidden="true" size={14} strokeWidth={2.2} />
+              <RotateCcw aria-hidden="true" size={13} strokeWidth={2.2} />
               <span>{copyFor(locale).recall}</span>
             </button>
+          ) : null}
+          {(onRegenerate !== undefined || onRecall !== undefined) && hasText ? (
+            <span aria-hidden="true" className="message-bubble__context-divider" />
           ) : null}
           {hasText ? (
             <button
@@ -333,7 +363,7 @@ export const MessageBubble = memo(function MessageBubble({
               role="menuitem"
               type="button"
             >
-              <Copy aria-hidden="true" size={14} strokeWidth={2.2} />
+              <Copy aria-hidden="true" size={13} strokeWidth={2.2} />
               <span>{copyFor(locale).copyText}</span>
             </button>
           ) : null}

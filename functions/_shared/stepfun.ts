@@ -83,7 +83,7 @@ export function buildStepFunBody(
     stream_options: { include_usage: true },
     reasoning_effort: containsImage ? "medium" : "low",
     // 推理模型的思考 token 计入 max_tokens 预算，2048 会被偶发冲高的思考耗尽导致正文为空
-    max_tokens: request.mode === "summary" ? 4096 : 8192,
+    max_tokens: request.mode === "title" ? 512 : request.mode === "summary" ? 4096 : 8192,
   };
 }
 

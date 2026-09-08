@@ -19,6 +19,7 @@ import { clearWebCaches } from "./services/api-origins";
 import { isDesktopApp, isNativeApp } from "./services/app-platform";
 import { streamChat } from "./services/chat-client";
 import { LlmSettingsService } from "./services/llm-settings";
+import { projectManager } from "./services/project-manager";
 import { SessionClient } from "./services/session-client";
 import { SkillSettingsService } from "./services/skill-settings";
 import {
@@ -54,6 +55,7 @@ export interface AppServices {
 
 export interface AppProps {
   services?: AppServices;
+  autoAiTitle?: boolean;
 }
 
 const productionDatabase = new YachiyoDatabase();
@@ -95,7 +97,7 @@ function controllerErrorMessage(code: string, copy: UiCopy): string {
   return copy.genericFailure;
 }
 
-export function App({ services }: AppProps) {
+export function App({ services, autoAiTitle }: AppProps) {
   const activeServices = services ?? productionServices;
   const llmService = activeServices.llmSettings ?? productionLlmService;
   const skillService = activeServices.skillSettings ?? productionSkillService;
@@ -133,6 +135,8 @@ export function App({ services }: AppProps) {
     [activeSkillIds],
   );
 
+  const refreshHistoryRef = useRef<() => Promise<void>>(() => Promise.resolve());
+
   const controller = useChatController({
     repository: activeServices.repository,
     streamChat: activeServices.streamChat,
@@ -140,6 +144,10 @@ export function App({ services }: AppProps) {
     activeSkills,
     webSearchEnabled: webSearchSettings.enabled,
     webSearchSmart: webSearchSettings.smart,
+    autoAiTitle: autoAiTitle ?? (services === undefined),
+    onConversationUpdated: () => {
+      void refreshHistoryRef.current();
+    },
   });
   const setControllerOnline = controller.setOnline;
   const copy = copyFor(controller.locale);
@@ -244,6 +252,10 @@ export function App({ services }: AppProps) {
       showToast(copy.storageFull, "error");
     }
   }, [activeServices, copy.storageFull, showToast]);
+
+  useEffect(() => {
+    refreshHistoryRef.current = refreshHistory;
+  }, [refreshHistory]);
 
   const refreshLlm = useCallback(async () => {
     try {
@@ -474,7 +486,7 @@ export function App({ services }: AppProps) {
   };
 
   const handleRename = async (id: string, title: string) => {
-    await activeServices.repository.renameConversation(id, title);
+    await controller.renameConversation(id, title);
     await refreshHistory();
   };
 
@@ -504,6 +516,7 @@ export function App({ services }: AppProps) {
     await webSearchService.clear().catch(() => undefined);
     setLlmEntries([]);
     setLlmActiveProvider(undefined);
+    await projectManager.clear().catch(() => undefined);
     await controller.newConversation();
     setComposerValue("");
     setPendingImageDataUrl(undefined);

@@ -448,13 +448,17 @@ export function mockChatResponse(
   webSearch?: boolean,
 ): Response {
   const text =
-    mode === "summary"
+    mode === "title"
       ? locale === "ja-JP"
-        ? "これまでの会話：ユーザーと八千代の交流。重要な話題と約束が共有されています。"
-        : "前情摘要：用户与八千代进行了日常交流，确认了相互的约定与近期话题。"
-      : locale === "ja-JP"
-        ? "彩葉〜今日もお疲れさま！（笑顔で温かいパンケーキを差し出す）"
-        : "彩叶~今天也辛苦啦！（笑着递上热乎乎的松饼）";
+        ? "日常の会話と挨拶"
+        : "日常闲聊与问候"
+      : mode === "summary"
+        ? locale === "ja-JP"
+          ? "これまでの会話：ユーザーと八千代の交流。重要な話題と約束が共有されています。"
+          : "前情摘要：用户与八千代进行了日常交流，确认了相互的约定与近期话题。"
+        : locale === "ja-JP"
+          ? "彩葉〜今日もお疲れさま！（笑顔で温かいパンケーキを差し出す）"
+          : "彩叶~今天也辛苦啦！（笑着递上热乎乎的松饼）";
   const characters = [...text];
   const midpoint = Math.ceil(characters.length / 2);
   return responseFromEvents([

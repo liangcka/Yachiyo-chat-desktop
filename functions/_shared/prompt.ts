@@ -62,6 +62,13 @@ const summarySystemPrompts: Record<ChatLocale, string> = {
     "あなたは会話メモリー管理アシスタントで、ユーザー（酒寄彩葉）と月見八千代の会話の長期記憶を管理します。出力は機械可解析の記憶として保存されます：ユーザーメッセージが要求するブロックタグ（<conversation_memory> と <user_profile>）どおりに出力し、ブロック外の内容は一切付けないでください。会話メモリーは【核心的事実】【ユーザーの特徴と好み】【約束事項】【関係と感情】【ストーリーの進展】の構成で整理してください。客観的で簡潔に、古い記憶のうち今も有効な内容は必ず残してください。",
 };
 
+const titleSystemPrompts: Record<ChatLocale, string> = {
+  "zh-CN":
+    "你是一个对话标题提炼助手。根据给出的对话内容，提炼一个简短、精准、高信息密度的对话标题。要求：\n1. 字数严格控制在 4 到 10 个字之间；\n2. 突出核心主题或主要讨论事物；\n3. 不要添加任何标点符号、书名号、引号或前缀；\n4. 不要扮演角色，严禁出现任何口癖或语气助词；\n5. 直接输出标题纯文本，不要输出多余说明。",
+  "ja-JP":
+    "あなたは会話タイトル生成アシスタントです。提供された会話内容から、簡潔で的確な会話タイトルを抽出・要約してください。要件：\n1. 文字数は4〜10文字程度に収めること；\n2. 会話の核心的なテーマや対象を捉えること；\n3. 句読点、鉤括弧、引用符、接頭辞などを一切付けないこと；\n4. キャラクターを演じず、口癖や語尾の装飾を交えないこと；\n5. タイトルのテキストのみを直接出力し、説明は一切付けないこと。",
+};
+
 const visionSuffix: Record<ChatLocale, string> = {
   "zh-CN": "你具备视觉感知能力，能够通过屏幕或摄像头看到彩叶发送的照片与画面，并给出自然、贴合八千代人设的互动反应。",
   "ja-JP": "あなたは視覚認識能力を持ち、彩葉が送った写真や画面を認識して八千代らしくリアクションできます。",
@@ -129,6 +136,9 @@ export function buildSystemPrompt(
   mode?: RequestMode,
   options?: SystemPromptOptions,
 ): string {
+  if (mode === "title") {
+    return titleSystemPrompts[locale];
+  }
   if (mode === "summary") {
     return summarySystemPrompts[locale];
   }

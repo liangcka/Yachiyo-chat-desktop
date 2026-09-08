@@ -180,3 +180,142 @@ async fn test_read_head_file_lifecycle() {
 
     fs::remove_dir_all(&temp_dir).ok();
 }
+
+#[test]
+fn test_fs_observation_policy() {
+    use yachiyo_desktop_lib::tools::fs::{read_file_guarded, write_file_guarded, FsObservationTracker};
+
+    let temp_dir = std::env::temp_dir().join("yachiyo_obs_test");
+    fs::remove_dir_all(&temp_dir).ok();
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let tracker = FsObservationTracker::new();
+
+    // 1. 新建文件（不存在）：允许直接写入 (createIfAbsent)
+    let res = write_file_guarded("new_file.txt", "initial content", &temp_dir, Some(&tracker));
+    assert!(res.is_ok(), "Writing new file should succeed");
+
+    // 2. 已有文件、且在会话中没有 read 过：必须被拦截并报 FS_NOT_OBSERVED
+    let unobserved_tracker = FsObservationTracker::new();
+    let res_blocked = write_file_guarded("new_file.txt", "blind rewrite", &temp_dir, Some(&unobserved_tracker));
+    assert!(res_blocked.is_err());
+    let err_msg = res_blocked.unwrap_err();
+    assert!(err_msg.contains("FS_NOT_OBSERVED"), "Expected FS_NOT_OBSERVED, got: {}", err_msg);
+
+    // 3. 先 read 文件：记录版本
+    let read_res = read_file_guarded("new_file.txt", &temp_dir, Some(&unobserved_tracker));
+    assert!(read_res.is_ok());
+
+    // 4. read 之后正常 write：应该放行
+    let res_allowed = write_file_guarded("new_file.txt", "valid edit", &temp_dir, Some(&unobserved_tracker));
+    assert!(res_allowed.is_ok(), "Observed write should succeed");
+
+    // 5. 外部修改文件使 mtime 推进：再次写应报 FS_STALE_VERSION
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    fs::write(temp_dir.join("new_file.txt"), "external modify").unwrap();
+    let res_stale = write_file_guarded("new_file.txt", "stale edit", &temp_dir, Some(&unobserved_tracker));
+    assert!(res_stale.is_err());
+    let stale_msg = res_stale.unwrap_err();
+    assert!(stale_msg.contains("FS_STALE_VERSION"), "Expected FS_STALE_VERSION, got: {}", stale_msg);
+
+    fs::remove_dir_all(&temp_dir).ok();
+}
+
+#[tokio::test]
+async fn test_todo_write_execution() {
+    use yachiyo_desktop_lib::tools::execute_tool;
+
+    let temp_dir = std::env::temp_dir();
+    let http = reqwest::Client::new();
+
+    let args = serde_json::json!({
+        "todos": [
+            { "content": "Step 1: Check code", "status": "completed" },
+            { "content": "Step 2: Refactor loop", "status": "in_progress" },
+            { "content": "Step 3: Add tests", "status": "pending" }
+        ]
+    });
+
+    let res = execute_tool("todo_write", &args, &temp_dir, &http).await.expect("todo_write should succeed");
+    assert_eq!(res, "Updated todo list: 1 pending, 1 in progress, 1 completed.");
+
+    // 状态非法时报错
+    let bad_status_args = serde_json::json!({
+        "todos": [
+            { "content": "Bad task", "status": "unknown_status" }
+        ]
+    });
+    let err = execute_tool("todo_write", &bad_status_args, &temp_dir, &http).await.unwrap_err();
+    assert!(err.contains("invalid status"));
+
+    // 内容为空时报错
+    let empty_content_args = serde_json::json!({
+        "todos": [
+            { "content": "   ", "status": "pending" }
+        ]
+    });
+    let err_empty = execute_tool("todo_write", &empty_content_args, &temp_dir, &http).await.unwrap_err();
+    assert!(err_empty.contains("cannot be empty"));
+}
+
+#[test]
+fn test_process_tool_output_spill() {
+    use yachiyo_desktop_lib::tools::process_tool_output;
+
+    let temp_dir = std::env::temp_dir().join("yachiyo_spill_test");
+    fs::remove_dir_all(&temp_dir).ok();
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    // 1. 小于 limit: 原样返回
+    let small = "small output";
+    assert_eq!(process_tool_output("run_command", small, &temp_dir), "small output");
+
+    // 2. 超过 limit (>16KB): 自动落盘到 .yachiyo/spill/ 并返回预览与引导
+    let big = "LINE OF OUTPUT\n".repeat(2000); // ~30KB
+    let processed = process_tool_output("run_command", &big, &temp_dir);
+
+    assert!(processed.contains("[... 工具输出过长，已省略中间"));
+    assert!(processed.contains(".yachiyo/spill/"));
+    assert!(processed.contains("若需查阅中间内容，请使用 read_file 查看该文件"));
+
+    // 检查落盘文件确实存在且内容完整
+    let spill_dir = temp_dir.join(".yachiyo").join("spill");
+    assert!(spill_dir.exists());
+    let mut files = fs::read_dir(&spill_dir).unwrap();
+    let entry = files.next().expect("Spill file should exist").unwrap();
+    let saved_content = fs::read_to_string(entry.path()).unwrap();
+    assert_eq!(saved_content.len(), big.len());
+
+    fs::remove_dir_all(&temp_dir).ok();
+}
+
+#[test]
+fn test_read_file_encodings_utf16_gbk_bom() {
+    let temp_dir = std::env::temp_dir().join("yachiyo_test_encodings");
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    // 1. UTF-8 with BOM
+    let mut utf8_bom = vec![0xEF, 0xBB, 0xBF];
+    utf8_bom.extend_from_slice("Write-Host 'Hello UTF8 BOM'".as_bytes());
+    fs::write(temp_dir.join("utf8_bom.ps1"), &utf8_bom).unwrap();
+    let read_utf8 = read_file("utf8_bom.ps1", &temp_dir).expect("Should decode UTF-8 BOM");
+    assert_eq!(read_utf8, "Write-Host 'Hello UTF8 BOM'");
+
+    // 2. UTF-16 LE with BOM (典型 Windows PowerShell 默认编码)
+    let mut utf16_le = vec![0xFF, 0xFE];
+    for ch in "Get-Content run.ps1".encode_utf16() {
+        utf16_le.extend_from_slice(&ch.to_le_bytes());
+    }
+    fs::write(temp_dir.join("run.ps1"), &utf16_le).unwrap();
+    let read_utf16 = read_file("run.ps1", &temp_dir).expect("Should decode UTF-16 LE BOM");
+    assert_eq!(read_utf16, "Get-Content run.ps1");
+
+    // 3. GBK / GB18030 中文脚本
+    let (gbk_bytes, _, _) = encoding_rs::GB18030.encode("echo '你好世界'");
+    fs::write(temp_dir.join("gbk_script.bat"), &gbk_bytes).unwrap();
+    let read_gbk = read_file("gbk_script.bat", &temp_dir).expect("Should decode GBK");
+    assert_eq!(read_gbk, "echo '你好世界'");
+
+    fs::remove_dir_all(&temp_dir).ok();
+}
+

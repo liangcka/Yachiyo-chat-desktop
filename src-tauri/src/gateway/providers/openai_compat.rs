@@ -64,6 +64,8 @@ pub fn build_openai_compat_body(
 
     if let Some(crate::types::RequestMode::Summary) = request.mode {
         body["max_tokens"] = json!(1024);
+    } else if let Some(crate::types::RequestMode::Title) = request.mode {
+        body["max_tokens"] = json!(512);
     }
 
     body
@@ -120,6 +122,14 @@ pub fn build_openai_agent_body(
             }
         }
     }
+
+    // 防御性契约：OpenAI 兼容接口要求请求体最后一条不能是 assistant 角色，避免上游 400 拒绝
+    if let Some(last) = out.last() {
+        if last.get("role").and_then(|r| r.as_str()) == Some("assistant") {
+            out.push(json!({ "role": "user", "content": "请接续上文继续完成任务。" }));
+        }
+    }
+
     json!({
         "model": model,
         "messages": out,

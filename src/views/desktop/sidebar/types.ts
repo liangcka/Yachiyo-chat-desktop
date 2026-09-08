@@ -16,6 +16,7 @@ export interface DesktopSidebarProps {
   activeConversationId?: string;
   activeRightTab?: DesktopRightTab;
   collapsed?: boolean;
+  hideBrandHeader?: boolean;
   conversations: Conversation[];
   copy: UiCopy;
   locale: Locale;
@@ -29,8 +30,10 @@ export interface DesktopSidebarProps {
   onSelectConversation: (id: string) => Promise<void>;
   onSelectRightTab?: (tab: DesktopRightTab) => void;
   onSignOut?: () => Promise<void>;
+  onCloseApp?: () => Promise<void> | void;
   onToggleCollapse?: () => void;
   onTogglePinConversation?: (id: string) => void;
   onToggleTheme?: () => void;
   resolvedTheme?: "light" | "dark";
+  showToast?: (message: string, tone?: "info" | "error") => void;
 }

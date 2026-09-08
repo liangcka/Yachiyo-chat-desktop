@@ -43,13 +43,21 @@ fn delete_api_key(state: State<DesktopState>, provider: String) -> Result<(), St
 }
 
 #[tauri::command]
-fn get_workspace_root(state: State<DesktopState>) -> String {
-    state.workspace_manager.get_workspace_root().to_string_lossy().to_string()
+fn get_workspace_root(state: State<DesktopState>) -> Option<String> {
+    state
+        .workspace_manager
+        .get_workspace_root()
+        .map(|p| p.to_string_lossy().to_string())
 }
 
 #[tauri::command]
 fn set_workspace_root(state: State<DesktopState>, path: String) -> Result<(), String> {
-    state.workspace_manager.set_workspace_root(PathBuf::from(path))
+    if path.trim().is_empty() {
+        state.workspace_manager.clear_workspace_root();
+        Ok(())
+    } else {
+        state.workspace_manager.set_workspace_root(PathBuf::from(path))
+    }
 }
 
 #[tauri::command]
@@ -58,7 +66,10 @@ async fn execute_agent_tool(
     name: String,
     arguments: serde_json::Value,
 ) -> Result<String, String> {
-    let root = state.workspace_manager.get_workspace_root();
+    let root = state
+        .workspace_manager
+        .get_workspace_root()
+        .ok_or_else(|| "当前未绑定工作区，无法执行工作区相关操作。请先选择或打开一个项目。".to_string())?;
     tools::execute_tool(&name, &arguments, &root, &state.http_client).await
 }
 
@@ -68,7 +79,9 @@ fn list_workspace_entries(
     state: State<DesktopState>,
     path: Option<String>,
 ) -> Result<Vec<tools::fs::WorkspaceEntry>, String> {
-    let root = state.workspace_manager.get_workspace_root();
+    let Some(root) = state.workspace_manager.get_workspace_root() else {
+        return Ok(Vec::new());
+    };
     tools::fs::list_workspace_entries(path.as_deref().unwrap_or("."), &root)
 }
 
@@ -78,7 +91,12 @@ async fn read_head_file(
     state: State<'_, DesktopState>,
     path: String,
 ) -> Result<tools::git::HeadFile, String> {
-    let root = state.workspace_manager.get_workspace_root();
+    let Some(root) = state.workspace_manager.get_workspace_root() else {
+        return Ok(tools::git::HeadFile {
+            present: false,
+            content: String::new(),
+        });
+    };
     tools::git::read_head_file(&path, &root).await
 }
 
@@ -91,6 +109,76 @@ async fn pick_folder(title: Option<String>) -> Result<Option<String>, String> {
     }
     let res = dialog.pick_folder().await;
     Ok(res.map(|h| h.path().to_string_lossy().to_string()))
+}
+
+/// 退出并完全关闭桌面端应用（销毁窗口并终止后台进程）
+#[tauri::command]
+fn exit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+/// 最小化当前窗口
+#[tauri::command]
+fn minimize_window(window: tauri::Window) -> Result<(), String> {
+    window.minimize().map_err(|e| e.to_string())
+}
+
+/// 切换窗口最大化 / 还原状态
+#[tauri::command]
+fn toggle_maximize_window(window: tauri::Window) -> Result<(), String> {
+    let is_max = window.is_maximized().map_err(|e| e.to_string())?;
+    if is_max {
+        window.unmaximize().map_err(|e| e.to_string())
+    } else {
+        window.maximize().map_err(|e| e.to_string())
+    }
+}
+
+/// 查询当前窗口是否处于最大化状态
+#[tauri::command]
+fn is_window_maximized(window: tauri::Window) -> Result<bool, String> {
+    window.is_maximized().map_err(|e| e.to_string())
+}
+
+/// 在系统默认外部独立浏览器中打开指定链接（避免在 IDE 内置视图或应用内打开）
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let parsed = url::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err("Only http and https schemes are permitted".into());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("cmd")
+            .raw_arg(format!("/c start \"\" \"{}\"", url))
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| format!("Failed to open system browser: {e}"))?;
+        Ok(())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("Failed to open system browser: {e}"))?;
+        Ok(())
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("Failed to open system browser: {e}"))?;
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        Err("Unsupported operating system".into())
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -177,11 +265,6 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -195,6 +278,11 @@ pub fn run() {
             list_workspace_entries,
             read_head_file,
             pick_folder,
+            exit_app,
+            open_external_url,
+            minimize_window,
+            toggle_maximize_window,
+            is_window_maximized,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

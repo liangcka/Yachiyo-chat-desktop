@@ -21,7 +21,8 @@ export async function getDesktopWorkspaceRoot(): Promise<string | undefined> {
   if (!isDesktopApp()) return undefined;
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<string>("get_workspace_root");
+    const root = await invoke<string | null>("get_workspace_root");
+    return root && root.trim().length > 0 ? root : undefined;
   } catch {
     return undefined;
   }
@@ -87,3 +88,120 @@ export async function pickDesktopFolder(title = "Open workspace"): Promise<strin
     return undefined;
   }
 }
+
+/** 安全退出并关闭桌面应用（在桌面端终止进程与窗口，在浏览器端优雅降级） */
+export async function exitDesktopApp(): Promise<boolean> {
+  if (isDesktopApp()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("exit_app");
+      return true;
+    } catch {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        await getCurrentWindow().close();
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+
+  // Web 浏览器环境降级尝试
+  if (typeof window !== "undefined") {
+    try {
+      window.close();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/** 在系统默认外部独立浏览器中打开链接（避免在 IDE 内置视图或应用内打开） */
+export async function openExternalUrl(url: string): Promise<boolean> {
+  if (isDesktopApp()) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("open_external_url", { url });
+      return true;
+    } catch {
+      /* 静默降级至普通新窗口打开 */
+    }
+  }
+
+  if (typeof window !== "undefined") {
+    try {
+      const win = window.open(url, "_blank", "noopener,noreferrer");
+      return win !== null;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/** 最小化桌面窗口 */
+export async function minimizeDesktopWindow(): Promise<boolean> {
+  if (isDesktopApp()) {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().minimize();
+      return true;
+    } catch {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("minimize_window");
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+  return false;
+}
+
+/** 切换桌面窗口最大化 / 还原 */
+export async function toggleMaximizeDesktopWindow(): Promise<boolean> {
+  if (isDesktopApp()) {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().toggleMaximize();
+      return true;
+    } catch {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("toggle_maximize_window");
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+  return false;
+}
+
+/** 查询桌面窗口是否处于最大化状态 */
+export async function isDesktopWindowMaximized(): Promise<boolean> {
+  if (isDesktopApp()) {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      return await getCurrentWindow().isMaximized();
+    } catch {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        return await invoke<boolean>("is_window_maximized");
+      } catch {
+        return false;
+      }
+    }
+  }
+  return false;
+}
+
+/** 关闭桌面窗口 */
+export async function closeDesktopWindow(): Promise<boolean> {
+  return exitDesktopApp();
+}
+

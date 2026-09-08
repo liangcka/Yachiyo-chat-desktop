@@ -1,7 +1,10 @@
-import { FolderCode, Moon, PanelLeftOpen, Plus, Settings, Sun } from "lucide-react";
-import type { ReactNode } from "react";
+import { FolderCode, PanelLeftOpen, Plus, User } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import type { UiCopy } from "../../../i18n/messages";
 import type { SettingsTabKey } from "../../../components/settings/SettingsModal";
+import type { Locale } from "../../../domain/chat";
+import { useLocalUserSettings } from "../../../services/user-settings";
+import { SidebarUserPopover } from "./SidebarUserPopover";
 
 interface RailButtonProps {
   active?: boolean;
@@ -37,24 +40,35 @@ function RailButton({
 
 interface SidebarRailProps {
   copy: UiCopy;
+  locale?: Locale;
+  onCloseApp?: () => Promise<void> | void;
+  onLocale?: (locale: Locale) => Promise<void>;
   onNewChat: () => Promise<void>;
   onOpenSettings?: (tab?: SettingsTabKey) => void;
+  onSignOut?: () => Promise<void>;
   onToggleCollapse?: () => void;
   onToggleTheme?: () => void;
   resolvedTheme?: "light" | "dark";
+  showToast?: (message: string, tone?: "info" | "error") => void;
 }
 
 export function SidebarRail({
   copy,
+  locale = "zh-CN",
+  onCloseApp,
+  onLocale,
   onNewChat,
   onOpenSettings,
+  onSignOut,
   onToggleCollapse,
   onToggleTheme,
   resolvedTheme = "dark",
+  showToast,
 }: SidebarRailProps) {
-  const handleOpenGeneralSettings = () => {
-    onOpenSettings?.("general");
-  };
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [userSettings] = useLocalUserSettings();
+
+  const username = userSettings.username || "酒寄彩叶";
 
   return (
     <aside className="desktop-sidebar desktop-sidebar--rail" aria-label="紧凑导航栏">
@@ -87,20 +101,45 @@ export function SidebarRail({
         />
       </div>
 
-      {/* 底部：主题切换与设置 */}
+      {/* 底部：用户个人头像与向上弹出的菜单 */}
       <div className="desktop-sidebar__rail-bottom">
-        {onToggleTheme ? (
-          <RailButton
-            icon={resolvedTheme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
-            label={resolvedTheme === "dark" ? "浅色主题" : "深色主题"}
-            onClick={onToggleTheme}
-          />
-        ) : null}
-        <RailButton
-          icon={<Settings size={17} />}
-          label="设置"
-          onClick={handleOpenGeneralSettings}
+        <SidebarUserPopover
+          isOpen={popoverOpen}
+          locale={locale}
+          onClose={() => setPopoverOpen(false)}
+          onCloseApp={onCloseApp}
+          onLocale={onLocale}
+          onOpenSettings={onOpenSettings}
+          onSignOut={onSignOut}
+          onToggleTheme={onToggleTheme}
+          resolvedTheme={resolvedTheme}
+          showToast={showToast}
+          userSettings={userSettings}
         />
+
+        <button
+          type="button"
+          className={`desktop-sidebar__rail-avatar-btn ${
+            popoverOpen ? "desktop-sidebar__rail-avatar-btn--active" : ""
+          }`}
+          onClick={() => setPopoverOpen((prev) => !prev)}
+          title={`当前用户：${username} [${userSettings.badge || "Lite"}]（点击展开菜单）`}
+          aria-label="用户账户与设置"
+          aria-haspopup="dialog"
+          aria-expanded={popoverOpen}
+        >
+          {userSettings.avatar ? (
+            <img src={userSettings.avatar} alt={username} className="desktop-sidebar__rail-avatar-img" />
+          ) : (
+            <div className="desktop-sidebar__rail-avatar-placeholder">
+              <User size={16} />
+            </div>
+          )}
+          <span
+            className={`desktop-sidebar__rail-avatar-dot desktop-sidebar__rail-avatar-dot--${(userSettings.badge || "Lite").toLowerCase()}`}
+            title={`${userSettings.badge || "Lite"} 会员`}
+          />
+        </button>
       </div>
     </aside>
   );

@@ -231,6 +231,31 @@ describe("POST /api/chat", () => {
     expect(providerFetch).not.toHaveBeenCalled();
   });
 
+  it("exempts title mode from consuming daily quota", async () => {
+    const deviceId = "device-quota-exemption";
+    const date = new Date().toISOString().slice(0, 10);
+    await env.RATE_LIMIT_KV.put(`quota:${date}:${deviceId}`, env.DAILY_REQUEST_LIMIT);
+
+    providerFetch.mockImplementationOnce(async () => {
+      return new Response(providerSse("量子力学探索"), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const response = await invoke(
+      await chatRequest(
+        { locale: "zh-CN", messages: [{ role: "user", text: "生成标题" }], mode: "title" },
+        "quota-session",
+        env,
+        deviceId,
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(providerFetch).toHaveBeenCalled();
+  });
+
   it("uses the same localized SSE contract in explicit mock mode", async () => {
     const mockEnv: Env = { ...env, APP_MODE: "mock" };
     const response = await invoke(
@@ -253,6 +278,22 @@ describe("POST /api/chat", () => {
       usage: { promptTokens: 35, completionTokens: 28, totalTokens: 63 },
     });
     expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  it("outputs localized title in mock mode when mode is title", async () => {
+    const mockEnv: Env = { ...env, APP_MODE: "mock" };
+    const response = await invoke(
+      await chatRequest(
+        { locale: "zh-CN", messages: [{ role: "user", text: "生成标题" }], mode: "title" },
+        "mock-session",
+        mockEnv,
+      ),
+      mockEnv,
+    );
+    const events = await collectClientEvents(response.body!);
+    expect(response.status).toBe(200);
+    const deltas = events.filter((event) => event.type === "delta").map((e) => (e as { text: string }).text).join("");
+    expect(deltas).toBe("日常闲聊与问候");
   });
 
   it("uses an explicit Step Plan key instead of the canned mock response", async () => {

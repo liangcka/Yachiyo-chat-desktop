@@ -51,6 +51,19 @@ describe("buildSystemPrompt", () => {
     expect(jaPrompt).toContain("核心的事実");
   });
 
+  it("builds dedicated title extraction prompt in title mode", () => {
+    const zhPrompt = buildSystemPrompt("zh-CN", "title");
+    expect(zhPrompt).toContain("对话标题提炼助手");
+    expect(zhPrompt).toContain("4 到 10 个字");
+    expect(zhPrompt).toContain("不要添加任何标点符号");
+    expect(zhPrompt).toContain("不要扮演角色");
+
+    const jaPrompt = buildSystemPrompt("ja-JP", "title");
+    expect(jaPrompt).toContain("会話タイトル生成アシスタント");
+    expect(jaPrompt).toContain("4〜10文字程度");
+    expect(jaPrompt).toContain("キャラクターを演じず");
+  });
+
   it("relaxes the runtime output cap to 1000 characters when web search is on", () => {
     for (const locale of ["zh-CN", "ja-JP"] as const) {
       const prompt = buildSystemPrompt(locale, "chat", { webSearch: true });

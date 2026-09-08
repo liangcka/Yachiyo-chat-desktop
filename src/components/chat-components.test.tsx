@@ -709,5 +709,50 @@ describe("reference chat components", () => {
     expect(onImageDisabled).toHaveBeenCalledOnce();
     expect(process).not.toHaveBeenCalled();
   });
+
+  it("renders refined thinking indicator during streaming wait period", () => {
+    const message = makeAssistantMessage({
+      status: "streaming",
+      text: "",
+    });
+
+    const { rerender } = render(<MessageBubble locale="zh-CN" message={message} />);
+    expect(document.querySelector(".thinking-indicator")).not.toBeNull();
+    expect(screen.getByText("思考中…")).toBeInTheDocument();
+
+    rerender(<MessageBubble locale="ja-JP" message={message} />);
+    expect(screen.getByText("考え中…")).toBeInTheDocument();
+  });
+
+  it("renders deep thinking block and supports expanding/collapsing thought process", () => {
+    const message = makeAssistantMessage({
+      status: "streaming",
+      text: "",
+      thought: "先分析用户的问题，再构思回答...",
+    });
+
+    const { rerender } = render(<MessageBubble locale="zh-CN" message={message} />);
+    // 流式思考无正文时默认展开
+    expect(screen.getByText("深度思考中…")).toBeInTheDocument();
+    expect(screen.getByText("先分析用户的问题，再构思回答...")).toBeInTheDocument();
+
+    // 点击折叠按钮可收起
+    fireEvent.click(screen.getByRole("button", { name: /深度思考中/ }));
+    expect(screen.queryByText("先分析用户的问题，再构思回答...")).toBeNull();
+
+    // 正文到达且完成思考
+    rerender(
+      <MessageBubble
+        locale="zh-CN"
+        message={{
+          ...message,
+          status: "complete",
+          text: "你好呀！",
+        }}
+      />,
+    );
+    expect(screen.getByText("已深度思考")).toBeInTheDocument();
+    expect(screen.getByText("你好呀！")).toBeInTheDocument();
+  });
 });
 

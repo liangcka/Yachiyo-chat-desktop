@@ -3,6 +3,8 @@ pub mod git;
 pub mod shell;
 pub mod web;
 
+pub use fs::FsObservationTracker;
+
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
@@ -16,7 +18,9 @@ pub enum ToolRisk {
 
 pub fn tool_risk(name: &str) -> Option<ToolRisk> {
     match name {
-        "read_file" | "list_directory" | "git_status" | "git_diff" | "web_fetch" => Some(ToolRisk::Read),
+        "read_file" | "list_directory" | "git_status" | "git_diff" | "web_fetch" | "todo_write" => {
+            Some(ToolRisk::Read)
+        }
         "write_file" | "run_command" => Some(ToolRisk::Write),
         _ => None,
     }
@@ -57,6 +61,54 @@ pub fn truncate_tool_output(name: &str, output: &str) -> String {
     )
 }
 
+/// 对齐 DSH spill-policy：
+/// 当工具输出超出上限时，将完整内容落盘至 .yachiyo/spill/ 目录，
+/// 返回 head/tail 预览并附带落地文件路径与检索引导，避免上下文撑爆同时保留完整信息。
+pub fn process_tool_output(name: &str, output: &str, workspace_root: &Path) -> String {
+    let limit = tool_output_limit(name);
+    if output.len() <= limit {
+        return output.to_string();
+    }
+
+    let spill_dir = workspace_root.join(".yachiyo").join("spill");
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let filename = format!("spill-{}-{}.txt", timestamp, name);
+    let spill_path = spill_dir.join(&filename);
+
+    let written = std::fs::create_dir_all(&spill_dir)
+        .and_then(|_| std::fs::write(&spill_path, output));
+
+    if written.is_ok() {
+        const HEAD_LIMIT: usize = 2 * 1024;
+        const TAIL_LIMIT: usize = 1024;
+        let head_cut = floor_char_boundary(output, HEAD_LIMIT);
+        let tail_start = if output.len() > TAIL_LIMIT {
+            let mut start = output.len() - TAIL_LIMIT;
+            while start < output.len() && !output.is_char_boundary(start) {
+                start += 1;
+            }
+            start
+        } else {
+            output.len()
+        };
+
+        let head = &output[..head_cut];
+        let tail = &output[tail_start..];
+        let omitted = output.len().saturating_sub(head_cut + (output.len() - tail_start));
+
+        format!(
+            "{}\n\n[... 工具输出过长，已省略中间 {} 字节 ...]\n\n{}\n\n[提示：原始完整输出共 {} 字节，已保存至工作区: .yachiyo/spill/{}。若需查阅中间内容，请使用 read_file 查看该文件，或使用 run_command 针对该文件执行 grep。]",
+            head, omitted, tail, output.len(), filename
+        )
+    } else {
+        truncate_tool_output(name, output)
+    }
+}
+
+
 /// 下发给前端 ToolCard 的 2KB 预览
 pub fn preview_tool_output(output: &str) -> String {
     const PREVIEW_LIMIT: usize = 2 * 1024;
@@ -84,20 +136,24 @@ pub struct ToolResult {
 
 #[derive(Debug)]
 pub struct WorkspaceManager {
-    root_path: RwLock<PathBuf>,
+    root_path: RwLock<Option<PathBuf>>,
 }
 
 impl WorkspaceManager {
     pub fn new(initial_path: Option<PathBuf>) -> Self {
-        let root = initial_path.unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        let root = initial_path.and_then(|p| {
+            if p.exists() && p.is_dir() {
+                p.canonicalize().ok()
+            } else {
+                None
+            }
         });
         Self {
             root_path: RwLock::new(root),
         }
     }
 
-    pub fn get_workspace_root(&self) -> PathBuf {
+    pub fn get_workspace_root(&self) -> Option<PathBuf> {
         self.root_path.read().unwrap().clone()
     }
 
@@ -106,8 +162,12 @@ impl WorkspaceManager {
             return Err("Workspace path does not exist or is not a directory".to_string());
         }
         let canonical = path.canonicalize().map_err(|e| e.to_string())?;
-        *self.root_path.write().unwrap() = canonical;
+        *self.root_path.write().unwrap() = Some(canonical);
         Ok(())
+    }
+
+    pub fn clear_workspace_root(&self) {
+        *self.root_path.write().unwrap() = None;
     }
 }
 
@@ -117,7 +177,7 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
             "type": "function",
             "function": {
                 "name": "read_file",
-                "description": "Read content of a file within the workspace boundary",
+                "description": "Read content of a file within the workspace boundary. 读取工作区中的文件内容。在了解项目概况（如读取 README.md、package.json、Cargo.toml、配置文件）、查看源代码或分析代码逻辑时使用。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -131,7 +191,7 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
             "type": "function",
             "function": {
                 "name": "write_file",
-                "description": "Write or overwrite content of a file within the workspace boundary",
+                "description": "Write or overwrite content of a file within the workspace boundary (requires user approval). 写入或覆盖工作区中的文件内容（需彩叶批准）。创建新文件或修改现有代码时使用。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -146,7 +206,7 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
             "type": "function",
             "function": {
                 "name": "list_directory",
-                "description": "List files and subdirectories within a workspace directory",
+                "description": "List files and subdirectories within a workspace directory. 列出工作区目录中的文件与子目录。查看项目结构、探索工作区文件布局、寻找特定文件或初次感知项目时使用。path 为空或 '.' 表示工作区根目录。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -159,7 +219,7 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
             "type": "function",
             "function": {
                 "name": "run_command",
-                "description": "Execute a terminal shell command (PowerShell / CMD) in the workspace directory",
+                "description": "Execute a terminal shell command (PowerShell / CMD) in the workspace directory (requires user approval). 在工作区根目录下执行终端命令（需彩叶批准）。运行构建、测试、包安装或执行检查时使用。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -174,7 +234,7 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
             "type": "function",
             "function": {
                 "name": "git_status",
-                "description": "Get git status of the current workspace repository",
+                "description": "Get git status of the current workspace repository. 获取当前工作区 Git 仓库的状态（已修改、未暂存、未跟踪文件等）。",
                 "parameters": { "type": "object", "properties": {} }
             }
         }),
@@ -182,7 +242,7 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
             "type": "function",
             "function": {
                 "name": "git_diff",
-                "description": "Get uncommitted git diff of the workspace",
+                "description": "Get uncommitted git diff of the workspace. 获取工作区未提交的代码差异。",
                 "parameters": { "type": "object", "properties": {} }
             }
         }),
@@ -190,7 +250,7 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
             "type": "function",
             "function": {
                 "name": "web_fetch",
-                "description": "Fetch content from a web URL",
+                "description": "Fetch content from a web URL. 抓取网络链接内容。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -200,24 +260,54 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
                 }
             }
         }),
+        serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "todo_write",
+                "description": "Update the agent's task checklist for this session. Pass the ENTIRE updated list every time (replace wholesale).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "todos": {
+                            "type": "array",
+                            "description": "The complete current list of tasks",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "content": { "type": "string", "description": "Description of the task step" },
+                                    "status": {
+                                        "type": "string",
+                                        "enum": ["pending", "in_progress", "completed"],
+                                        "description": "Task status: pending, in_progress, or completed"
+                                    }
+                                },
+                                "required": ["content", "status"]
+                            }
+                        }
+                    },
+                    "required": ["todos"]
+                }
+            }
+        }),
     ]
 }
 
-pub async fn execute_tool(
+pub async fn execute_tool_with_context(
     name: &str,
     args: &serde_json::Value,
     workspace_root: &Path,
     http_client: &reqwest::Client,
+    fs_tracker: Option<&FsObservationTracker>,
 ) -> Result<String, String> {
     match name {
         "read_file" => {
             let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path' argument")?;
-            fs::read_file(path, workspace_root)
+            fs::read_file_guarded(path, workspace_root, fs_tracker)
         }
         "write_file" => {
             let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path' argument")?;
             let content = args.get("content").and_then(|v| v.as_str()).ok_or("Missing 'content' argument")?;
-            fs::write_file(path, content, workspace_root)
+            fs::write_file_guarded(path, content, workspace_root, fs_tracker)
         }
         "list_directory" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
@@ -239,6 +329,53 @@ pub async fn execute_tool(
             let url = args.get("url").and_then(|v| v.as_str()).ok_or("Missing 'url' argument")?;
             web::web_fetch(url, http_client).await
         }
+        "todo_write" => {
+            let todos = args
+                .get("todos")
+                .and_then(|v| v.as_array())
+                .ok_or("Missing or invalid 'todos' argument (must be an array)")?;
+            let mut pending = 0;
+            let mut in_progress = 0;
+            let mut completed = 0;
+            for (idx, item) in todos.iter().enumerate() {
+                let content = item
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| format!("Item #{}: missing 'content'", idx))?;
+                if content.trim().is_empty() {
+                    return Err(format!("Item #{}: 'content' cannot be empty", idx));
+                }
+                let status = item
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| format!("Item #{}: missing 'status'", idx))?;
+                match status {
+                    "pending" => pending += 1,
+                    "in_progress" => in_progress += 1,
+                    "completed" => completed += 1,
+                    unknown => {
+                        return Err(format!(
+                            "Item #{}: invalid status '{}', must be pending, in_progress, or completed",
+                            idx, unknown
+                        ))
+                    }
+                }
+            }
+            Ok(format!(
+                "Updated todo list: {} pending, {} in progress, {} completed.",
+                pending, in_progress, completed
+            ))
+        }
         unknown => Err(format!("Unknown tool: '{}'", unknown)),
     }
 }
+
+pub async fn execute_tool(
+    name: &str,
+    args: &serde_json::Value,
+    workspace_root: &Path,
+    http_client: &reqwest::Client,
+) -> Result<String, String> {
+    execute_tool_with_context(name, args, workspace_root, http_client, None).await
+}
+

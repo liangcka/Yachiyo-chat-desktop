@@ -91,7 +91,9 @@ pub fn build_gemini_contents(
 pub fn build_gemini_body(
     request: &ClientChatRequest,
 ) -> serde_json::Value {
-    let use_google_search = request.web_search.unwrap_or(false) && request.mode != Some(crate::types::RequestMode::Summary);
+    let use_google_search = request.web_search.unwrap_or(false)
+        && request.mode != Some(crate::types::RequestMode::Summary)
+        && request.mode != Some(crate::types::RequestMode::Title);
     let system_prompt = build_system_prompt(
         request.locale,
         request.mode,
@@ -101,6 +103,8 @@ pub fn build_gemini_body(
 
     let max_output_tokens = if let Some(crate::types::RequestMode::Summary) = request.mode {
         4096
+    } else if let Some(crate::types::RequestMode::Title) = request.mode {
+        512
     } else {
         8192
     };

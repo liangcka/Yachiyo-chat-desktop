@@ -7,6 +7,7 @@ import { Live2DWaifu } from "../../components/desktop/Live2DWaifu";
 import type { SharedViewProps } from "../layout-types";
 import { DesktopChatArea } from "./DesktopChatArea";
 import { DesktopSidebar } from "./sidebar";
+import { DesktopTopBar } from "./DesktopTopBar";
 import { SettingsModal, type SettingsTabKey } from "../../components/settings/SettingsModal";
 
 /* ── 列宽约束与持久化 Key ─────────────────────────────── */
@@ -214,73 +215,63 @@ export function DesktopLayout(props: SharedViewProps) {
   const gridColumns = `${effectiveSidebarWidth}px minmax(0, 1fr)`;
 
   return (
-    <div
-      ref={layoutRef}
-      className="desktop-shell"
-      style={{ gridTemplateColumns: gridColumns }}
-      {...(sidebarCollapsed ? { "data-sidebar-collapsed": "" } : {})}
-      {...(dragging ? { "data-dragging": "" } : {})}
-    >
-      {/* 左列：导航与历史侧栏，列容器同时充当右缘分隔条的定位基准 */}
-      <div className="desktop-shell__sidebar">
-        <DesktopSidebar
-          activeConversationId={props.controller.activeConversation?.id}
-          collapsed={sidebarCollapsed}
-          conversations={props.conversations}
-          copy={props.copy}
-          locale={props.controller.locale}
-          onClearData={props.onClearData}
-          onCompress={handleCompress}
-          onDeleteConversation={props.onDelete}
-          onLocale={props.onLocale}
-          onNewChat={props.onNewChat}
-          onOpenSettings={handleOpenSettings}
-          onRenameConversation={props.onRename}
-          onSelectConversation={props.controller.selectConversation}
-          onSignOut={props.onSignOut}
-          onToggleCollapse={() => setUserSidebarCollapsed((current) => !current)}
-          onToggleTheme={handleToggleTheme}
-          resolvedTheme={resolved}
-        />
-        {/* 侧栏右缘分隔条（折叠态禁用拖拽） */}
-        <DragHandle
-          disabled={sidebarCollapsed}
-          onDrag={handleSidebarDrag}
-          onDragEnd={handleSidebarDragEnd}
-          onDragStart={handleDragStart}
-          position="left"
-        />
-      </div>
+    <div className="desktop-shell-root">
+      {/* 统一沉浸式桌面顶栏：融合窗口控制、应用品牌与视图控制器 */}
+      <DesktopTopBar
+        activeView={centerView}
+        copy={props.copy}
+        onNewChat={props.onNewChat}
+        onSwitchView={switchCenterView}
+        onToggleSidebar={() => setUserSidebarCollapsed((current) => !current)}
+        sidebarCollapsed={sidebarCollapsed}
+      />
 
-      {/* 中列：视图切换条 + 对话/编辑器双视图 */}
-      <div className="desktop-shell__center" data-center-view={centerView}>
-        <div className="center-view-switcher" role="tablist" aria-label="中栏视图切换">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={centerView === "chat"}
-            className={`center-view-switcher__btn ${centerView === "chat" ? "center-view-switcher__btn--active" : ""}`}
-            onClick={() => switchCenterView("chat")}
-          >
-            {props.copy.editorViewTab}
-            <kbd>Ctrl+1</kbd>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={centerView === "editor"}
-            className={`center-view-switcher__btn ${centerView === "editor" ? "center-view-switcher__btn--active" : ""}`}
-            onClick={() => switchCenterView("editor")}
-          >
-            {props.copy.editorTab}
-            <kbd>Ctrl+2</kbd>
-          </button>
+      <div
+        ref={layoutRef}
+        className="desktop-shell"
+        style={{ gridTemplateColumns: gridColumns }}
+        {...(sidebarCollapsed ? { "data-sidebar-collapsed": "" } : {})}
+        {...(dragging ? { "data-dragging": "" } : {})}
+      >
+        {/* 左列：导航与历史侧栏，列容器同时充当右缘分隔条的定位基准 */}
+        <div className="desktop-shell__sidebar">
+          <DesktopSidebar
+            activeConversationId={props.controller.activeConversation?.id}
+            collapsed={sidebarCollapsed}
+            hideBrandHeader={true}
+            conversations={props.conversations}
+            copy={props.copy}
+            locale={props.controller.locale}
+            onClearData={props.onClearData}
+            onCompress={handleCompress}
+            onDeleteConversation={props.onDelete}
+            onLocale={props.onLocale}
+            onNewChat={props.onNewChat}
+            onOpenSettings={handleOpenSettings}
+            onRenameConversation={props.onRename}
+            onSelectConversation={props.controller.selectConversation}
+            onSignOut={props.onSignOut}
+            onToggleCollapse={() => setUserSidebarCollapsed((current) => !current)}
+            onToggleTheme={handleToggleTheme}
+            resolvedTheme={resolved}
+            showToast={props.showToast}
+          />
+          {/* 侧栏右缘分隔条（折叠态禁用拖拽） */}
+          <DragHandle
+            disabled={sidebarCollapsed}
+            onDrag={handleSidebarDrag}
+            onDragEnd={handleSidebarDragEnd}
+            onDragStart={handleDragStart}
+            position="left"
+          />
         </div>
 
-        <div className="desktop-shell__chat">
-          <DesktopChatArea
-            {...props}
-            onOpenSettings={handleOpenSettings}
+        {/* 中列：对话/编辑器双视图 */}
+        <div className="desktop-shell__center" data-center-view={centerView}>
+          <div className="desktop-shell__chat">
+            <DesktopChatArea
+              {...props}
+              onOpenSettings={handleOpenSettings}
             onRenameConversation={props.onRename}
             onToggleSidebar={() => setUserSidebarCollapsed((current) => !current)}
             resolvedTheme={resolved}
@@ -317,5 +308,6 @@ export function DesktopLayout(props: SharedViewProps) {
       {/* Live2D 看板娘：视口右下角悬浮挂件（自建 #waifu DOM，经 CSS 层叠覆盖置于 IDE 内容之上） */}
       <Live2DWaifu />
     </div>
+  </div>
   );
 }
