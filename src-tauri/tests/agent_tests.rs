@@ -389,7 +389,7 @@ async fn test_loop_plain_text_completion() {
     }]);
     let (sink, events) = collector();
     let gate = ApprovalRegistry::new();
-    let mut checkpoint = CheckpointStore::new(dir.path(), "run-1");
+    let mut checkpoint = Some(CheckpointStore::new(dir.path(), "run-1"));
     let cancelled = AtomicBool::new(false);
     let http = reqwest::Client::new();
 
@@ -402,7 +402,7 @@ async fn test_loop_plain_text_completion() {
         &mut checkpoint,
         &cancelled,
         &sink,
-        dir.path(),
+        Some(dir.path()),
         &http,
     )
     .await
@@ -423,7 +423,7 @@ async fn test_loop_multi_turn_chain() {
     ]);
     let (sink, events) = collector();
     let gate = ApprovalRegistry::new();
-    let mut checkpoint = CheckpointStore::new(dir.path(), "run-2");
+    let mut checkpoint = Some(CheckpointStore::new(dir.path(), "run-2"));
     let cancelled = AtomicBool::new(false);
     let http = reqwest::Client::new();
 
@@ -436,7 +436,7 @@ async fn test_loop_multi_turn_chain() {
         &mut checkpoint,
         &cancelled,
         &sink,
-        dir.path(),
+        Some(dir.path()),
         &http,
     )
     .await
@@ -468,7 +468,7 @@ async fn test_loop_write_permission_denied() {
     ]);
     let (sink, events) = collector();
     let gate = Arc::new(ApprovalRegistry::new());
-    let mut checkpoint = CheckpointStore::new(dir.path(), "run-3");
+    let mut checkpoint = Some(CheckpointStore::new(dir.path(), "run-3"));
     let cancelled = AtomicBool::new(false);
     let http = reqwest::Client::new();
 
@@ -487,7 +487,7 @@ async fn test_loop_write_permission_denied() {
         &mut checkpoint,
         &cancelled,
         &sink,
-        dir.path(),
+        Some(dir.path()),
         &http,
     )
     .await
@@ -520,7 +520,7 @@ async fn test_loop_session_scope_skips_second_prompt() {
     ]);
     let (sink, events) = collector();
     let gate = Arc::new(ApprovalRegistry::new());
-    let mut checkpoint = CheckpointStore::new(dir.path(), "run-4");
+    let mut checkpoint = Some(CheckpointStore::new(dir.path(), "run-4"));
     let cancelled = AtomicBool::new(false);
     let http = reqwest::Client::new();
 
@@ -542,7 +542,7 @@ async fn test_loop_session_scope_skips_second_prompt() {
         &mut checkpoint,
         &cancelled,
         &sink,
-        dir.path(),
+        Some(dir.path()),
         &http,
     )
     .await
@@ -577,7 +577,7 @@ async fn test_loop_permission_timeout_treated_as_denied() {
     ]);
     let (sink, events) = collector();
     let gate = ApprovalRegistry::new();
-    let mut checkpoint = CheckpointStore::new(dir.path(), "run-5");
+    let mut checkpoint = Some(CheckpointStore::new(dir.path(), "run-5"));
     let cancelled = AtomicBool::new(false);
     let http = reqwest::Client::new();
 
@@ -590,7 +590,7 @@ async fn test_loop_permission_timeout_treated_as_denied() {
         &mut checkpoint,
         &cancelled,
         &sink,
-        dir.path(),
+        Some(dir.path()),
         &http,
     )
     .await
@@ -607,7 +607,7 @@ async fn test_loop_cancel_between_turns() {
     let executor = ScriptedExecutor::new(vec![read_call("c1", ".")]);
     let (sink, _events) = collector();
     let gate = ApprovalRegistry::new();
-    let mut checkpoint = CheckpointStore::new(dir.path(), "run-6");
+    let mut checkpoint = Some(CheckpointStore::new(dir.path(), "run-6"));
     let cancelled = AtomicBool::new(true);
     let http = reqwest::Client::new();
 
@@ -620,7 +620,7 @@ async fn test_loop_cancel_between_turns() {
         &mut checkpoint,
         &cancelled,
         &sink,
-        dir.path(),
+        Some(dir.path()),
         &http,
     )
     .await
@@ -642,7 +642,7 @@ async fn test_loop_usage_accumulates() {
     }]);
     let (sink, _events) = collector();
     let gate = ApprovalRegistry::new();
-    let mut checkpoint = CheckpointStore::new(dir.path(), "run-7");
+    let mut checkpoint = Some(CheckpointStore::new(dir.path(), "run-7"));
     let cancelled = AtomicBool::new(false);
     let http = reqwest::Client::new();
 
@@ -655,7 +655,7 @@ async fn test_loop_usage_accumulates() {
         &mut checkpoint,
         &cancelled,
         &sink,
-        dir.path(),
+        Some(dir.path()),
         &http,
     )
     .await
@@ -665,3 +665,147 @@ async fn test_loop_usage_accumulates() {
         _ => panic!("expected Completed"),
     }
 }
+
+#[tokio::test]
+async fn test_loop_without_workspace_plain_completion() {
+    // 无工作区时（无项目），模型直接输出文本回答（如“你能长任务运行吗”），Agent 模式应平滑完成
+    let executor = ScriptedExecutor::new(vec![TurnOutcome {
+        text: "我当然可以帮你执行长任务啦～".to_string(),
+        tool_calls: vec![],
+        usage: Some(TokenUsage {
+            prompt_tokens: Some(20),
+            completion_tokens: Some(15),
+            total_tokens: Some(35),
+        }),
+    }]);
+    let (sink, events) = collector();
+    let gate = ApprovalRegistry::new();
+    let mut checkpoint = None;
+    let cancelled = AtomicBool::new(false);
+    let http = reqwest::Client::new();
+
+    let outcome = run_agent_loop(
+        vec![AgentMessage::User { text: "你能长任务运行吗".to_string(), image_data_url: None }],
+        get_agent_tools_schema(),
+        AgentLoopConfig::default(),
+        &executor,
+        &gate,
+        &mut checkpoint,
+        &cancelled,
+        &sink,
+        None,
+        &http,
+    )
+    .await
+    .unwrap();
+
+    assert!(matches!(outcome, LoopOutcome::Completed { .. }));
+    let evs = events.lock().unwrap();
+    assert!(evs.iter().any(|ev| matches!(ev, ClientStreamEvent::Turn { index: 1, .. })));
+    assert!(evs.iter().all(|ev| !matches!(ev, ClientStreamEvent::ToolCall { .. })));
+}
+
+#[tokio::test]
+async fn test_loop_without_workspace_tool_interception() {
+    // 无工作区时，若模型尝试调用 read_file，工具应返回安全错误提示，而不是导致系统崩溃
+    let executor = ScriptedExecutor::new(vec![
+        read_call("call-no-ws", "package.json"),
+        TurnOutcome {
+            text: "彩叶，请先在上方打开工作区文件夹哦～".to_string(),
+            tool_calls: vec![],
+            usage: None,
+        },
+    ]);
+    let (sink, events) = collector();
+    let gate = ApprovalRegistry::new();
+    let mut checkpoint = None;
+    let cancelled = AtomicBool::new(false);
+    let http = reqwest::Client::new();
+
+    let outcome = run_agent_loop(
+        vec![AgentMessage::User { text: "读 package.json".to_string(), image_data_url: None }],
+        get_agent_tools_schema(),
+        AgentLoopConfig::default(),
+        &executor,
+        &gate,
+        &mut checkpoint,
+        &cancelled,
+        &sink,
+        None,
+        &http,
+    )
+    .await
+    .unwrap();
+
+    assert!(matches!(outcome, LoopOutcome::Completed { .. }));
+    let evs = events.lock().unwrap();
+    let has_tool_err = evs.iter().any(|ev| match ev {
+        ClientStreamEvent::ToolResult { is_error, output, .. } => {
+            *is_error && output.contains("当前未打开项目工作区")
+        }
+        _ => false,
+    });
+    assert!(has_tool_err, "无工作区时调用文件工具应安全返回未打开项目提示");
+}
+
+#[tokio::test]
+async fn test_loop_without_workspace_run_command_allowed() {
+    let executor = ScriptedExecutor::new(vec![
+        TurnOutcome {
+            text: "我来查看系统状态～".to_string(),
+            tool_calls: vec![ToolInvocation {
+                id: "cmd1".to_string(),
+                name: "run_command".to_string(),
+                arguments: serde_json::json!({ "command": "echo 'system check ok'" }),
+            }],
+            usage: None,
+        },
+        TurnOutcome {
+            text: "系统检查完成啦！".to_string(),
+            tool_calls: vec![],
+            usage: None,
+        },
+    ]);
+    let (sink, events) = collector();
+    let gate = Arc::new(ApprovalRegistry::new());
+    let mut checkpoint = None;
+    let cancelled = AtomicBool::new(false);
+    let http = reqwest::Client::new();
+
+    let gate_ref = Arc::clone(&gate);
+    let approver = tokio::spawn(async move {
+        for _ in 0..10 {
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+            if gate_ref.resolve("no-workspace-cmd1", ApprovalDecision { approved: true, session_scope: false }) {
+                break;
+            }
+        }
+    });
+
+    let outcome = run_agent_loop(
+        vec![AgentMessage::User { text: "帮我看看系统".to_string(), image_data_url: None }],
+        get_agent_tools_schema(),
+        AgentLoopConfig::default(),
+        &executor,
+        &gate,
+        &mut checkpoint,
+        &cancelled,
+        &sink,
+        None,
+        &http,
+    )
+    .await
+    .unwrap();
+    approver.abort();
+
+    assert!(matches!(outcome, LoopOutcome::Completed { .. }));
+    let evs = events.lock().unwrap();
+    let has_tool_success = evs.iter().any(|ev| match ev {
+        ClientStreamEvent::ToolResult { is_error, output, .. } => {
+            !*is_error && output.contains("system check ok")
+        }
+        _ => false,
+    });
+    assert!(has_tool_success, "无工作区时运行终端命令应成功执行并返回输出");
+}
+

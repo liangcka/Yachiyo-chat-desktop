@@ -31,7 +31,7 @@ export interface StreamChatRequest {
   /** 智能搜索：联网搜索开启时启用双市场并行检索（结果更多、带发布日期） */
   smartSearch?: boolean;
   /** Agent 模式：开启后服务端启用多轮工具调用循环 */
-  agent?: { enabled: true; maxTurns?: number; workspace?: string };
+  agent?: { enabled: true; auto?: boolean; maxTurns?: number; workspace?: string };
 }
 
 export interface StreamChatResult {
@@ -43,6 +43,7 @@ export type ChatClientErrorCode =
   | "SESSION_REQUIRED"
   | "DAILY_QUOTA_EXCEEDED"
   | "INVALID_REQUEST"
+  | "WORKSPACE_REQUIRED"
   | "PROVIDER_ERROR"
   | "SERVICE_UNAVAILABLE"
   | "NETWORK_ERROR"
@@ -78,6 +79,7 @@ export function isRetryableChatErrorCode(code: string | undefined): boolean {
 
 /** 流内 error 事件的 code → 客户端错误码；未知码一律视为上游故障，原始值进 detail */
 function streamErrorEvent(code: string, detail?: string): ChatClientError {
+  if (code === "WORKSPACE_REQUIRED") return new ChatClientError("WORKSPACE_REQUIRED", undefined, detail);
   if (code === "PROVIDER_STREAM_ERROR") return new ChatClientError("PROVIDER_ERROR", undefined, detail);
   return new ChatClientError("PROVIDER_ERROR", undefined, `${code}${detail === undefined ? "" : ` ${detail}`}`);
 }

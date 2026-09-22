@@ -64,11 +64,15 @@ pub fn truncate_tool_output(name: &str, output: &str) -> String {
 /// 对齐 DSH spill-policy：
 /// 当工具输出超出上限时，将完整内容落盘至 .yachiyo/spill/ 目录，
 /// 返回 head/tail 预览并附带落地文件路径与检索引导，避免上下文撑爆同时保留完整信息。
-pub fn process_tool_output(name: &str, output: &str, workspace_root: &Path) -> String {
+pub fn process_tool_output(name: &str, output: &str, workspace_root: Option<&Path>) -> String {
     let limit = tool_output_limit(name);
     if output.len() <= limit {
         return output.to_string();
     }
+
+    let Some(workspace_root) = workspace_root else {
+        return truncate_tool_output(name, output);
+    };
 
     let spill_dir = workspace_root.join(".yachiyo").join("spill");
     let timestamp = std::time::SystemTime::now()
@@ -171,6 +175,28 @@ impl WorkspaceManager {
     }
 }
 
+pub fn get_fallback_cwd() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            let p = PathBuf::from(profile);
+            if p.exists() && p.is_dir() {
+                return p;
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            let p = PathBuf::from(home);
+            if p.exists() && p.is_dir() {
+                return p;
+            }
+        }
+    }
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
 pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
     vec![
         serde_json::json!({
@@ -219,7 +245,7 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
             "type": "function",
             "function": {
                 "name": "run_command",
-                "description": "Execute a terminal shell command (PowerShell / CMD) in the workspace directory (requires user approval). 在工作区根目录下执行终端命令（需彩叶批准）。运行构建、测试、包安装或执行检查时使用。",
+                "description": "Execute a terminal shell command (PowerShell on Windows, sh on Unix) (requires user approval). 在终端执行命令（需彩叶批准）。用于运行构建、测试、包安装、系统环境检测、磁盘查询（如通过 PowerShell 获取盘符与文件信息）或执行诊断脚本。若未打开特定工作区，将在默认用户环境中执行。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -295,35 +321,48 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
 pub async fn execute_tool_with_context(
     name: &str,
     args: &serde_json::Value,
-    workspace_root: &Path,
+    workspace_root: Option<&Path>,
     http_client: &reqwest::Client,
     fs_tracker: Option<&FsObservationTracker>,
 ) -> Result<String, String> {
     match name {
         "read_file" => {
+            let root = workspace_root.ok_or("当前未打开项目工作区，无法读取文件。若彩叶需要查看本地代码，请提醒彩叶在界面上方选择或打开工作区文件夹。")?;
             let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path' argument")?;
-            fs::read_file_guarded(path, workspace_root, fs_tracker)
+            fs::read_file_guarded(path, root, fs_tracker)
         }
         "write_file" => {
+            let root = workspace_root.ok_or("当前未打开项目工作区，无法写入文件。若彩叶需要修改或创建代码，请提醒彩叶在界面上方选择或打开工作区文件夹。")?;
             let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path' argument")?;
             let content = args.get("content").and_then(|v| v.as_str()).ok_or("Missing 'content' argument")?;
-            fs::write_file_guarded(path, content, workspace_root, fs_tracker)
+            fs::write_file_guarded(path, content, root, fs_tracker)
         }
         "list_directory" => {
+            let root = workspace_root.ok_or("当前未打开项目工作区，无法查看工程目录结构。若彩叶需要探索项目代码，请提醒彩叶在界面上方选择或打开工作区文件夹。")?;
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-            let entries = fs::list_directory(path, workspace_root)?;
+            let entries = fs::list_directory(path, root)?;
             serde_json::to_string_pretty(&entries).map_err(|e| e.to_string())
         }
         "run_command" => {
             let command = args.get("command").and_then(|v| v.as_str()).ok_or("Missing 'command' argument")?;
             let timeout_secs = args.get("timeout_secs").and_then(|v| v.as_u64());
-            shell::run_command(command, workspace_root, timeout_secs).await
+            let fallback_buf;
+            let root = match workspace_root {
+                Some(ws) => ws,
+                None => {
+                    fallback_buf = get_fallback_cwd();
+                    &fallback_buf
+                }
+            };
+            shell::run_command(command, root, timeout_secs).await
         }
         "git_status" => {
-            git::git_status(workspace_root).await
+            let root = workspace_root.ok_or("当前未打开项目工作区，无法获取 Git 状态。若彩叶需要查看仓库差异，请提醒彩叶在界面上方选择或打开工作区文件夹。")?;
+            git::git_status(root).await
         }
         "git_diff" => {
-            git::git_diff(workspace_root).await
+            let root = workspace_root.ok_or("当前未打开项目工作区，无法获取 Git diff。若彩叶需要查看未提交修改，请提醒彩叶在界面上方选择或打开工作区文件夹。")?;
+            git::git_diff(root).await
         }
         "web_fetch" => {
             let url = args.get("url").and_then(|v| v.as_str()).ok_or("Missing 'url' argument")?;
@@ -376,6 +415,6 @@ pub async fn execute_tool(
     workspace_root: &Path,
     http_client: &reqwest::Client,
 ) -> Result<String, String> {
-    execute_tool_with_context(name, args, workspace_root, http_client, None).await
+    execute_tool_with_context(name, args, Some(workspace_root), http_client, None).await
 }
 

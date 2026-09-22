@@ -1,5 +1,7 @@
 use std::fs;
-use yachiyo_desktop_lib::tools::fs::{is_path_inside_workspace, list_directory, read_file, write_file};
+use yachiyo_desktop_lib::tools::fs::{
+    is_path_inside_workspace, list_directory, read_file, search_workspace_files, write_file,
+};
 use yachiyo_desktop_lib::tools::shell::{is_dangerous_command, run_command};
 
 #[test]
@@ -56,6 +58,20 @@ async fn test_safe_command_execution() {
         .await
         .expect("Echo command should succeed");
     assert!(result.contains("Yachiyo Agent"));
+}
+
+#[tokio::test]
+async fn test_run_command_fallback_cwd_without_workspace() {
+    use yachiyo_desktop_lib::tools::execute_tool_with_context;
+
+    let http = reqwest::Client::new();
+    let args = serde_json::json!({
+        "command": "echo 'fallback_cwd_success'"
+    });
+    let result = execute_tool_with_context("run_command", &args, None, &http, None)
+        .await
+        .expect("Command should succeed without workspace via fallback cwd");
+    assert!(result.contains("fallback_cwd_success"));
 }
 
 use yachiyo_desktop_lib::tools::{preview_tool_output, tool_risk, truncate_tool_output, ToolRisk};
@@ -268,15 +284,19 @@ fn test_process_tool_output_spill() {
 
     // 1. 小于 limit: 原样返回
     let small = "small output";
-    assert_eq!(process_tool_output("run_command", small, &temp_dir), "small output");
+    assert_eq!(process_tool_output("run_command", small, Some(&temp_dir)), "small output");
 
     // 2. 超过 limit (>16KB): 自动落盘到 .yachiyo/spill/ 并返回预览与引导
     let big = "LINE OF OUTPUT\n".repeat(2000); // ~30KB
-    let processed = process_tool_output("run_command", &big, &temp_dir);
+    let processed = process_tool_output("run_command", &big, Some(&temp_dir));
 
     assert!(processed.contains("[... 工具输出过长，已省略中间"));
     assert!(processed.contains(".yachiyo/spill/"));
     assert!(processed.contains("若需查阅中间内容，请使用 read_file 查看该文件"));
+
+    // 3. 无工作区时：安全降级为内存截断，不 panic 也不落盘
+    let processed_no_ws = process_tool_output("run_command", &big, None);
+    assert!(processed_no_ws.contains("[输出已截断"));
 
     // 检查落盘文件确实存在且内容完整
     let spill_dir = temp_dir.join(".yachiyo").join("spill");
@@ -318,4 +338,40 @@ fn test_read_file_encodings_utf16_gbk_bom() {
 
     fs::remove_dir_all(&temp_dir).ok();
 }
+
+#[test]
+fn test_search_workspace_files_fuzzy() {
+    let temp_dir = std::env::temp_dir().join("yachiyo_search_test_ws");
+    fs::create_dir_all(temp_dir.join("src/components/editor")).unwrap();
+    fs::create_dir_all(temp_dir.join("node_modules/fake_pkg")).unwrap();
+    fs::create_dir_all(temp_dir.join(".git/objects")).unwrap();
+
+    fs::write(temp_dir.join("src/components/editor/EditorView.tsx"), "").unwrap();
+    fs::write(temp_dir.join("src/App.tsx"), "").unwrap();
+    fs::write(temp_dir.join("README.md"), "").unwrap();
+    fs::write(temp_dir.join("node_modules/fake_pkg/index.js"), "").unwrap();
+    fs::write(temp_dir.join(".git/objects/dummy"), "").unwrap();
+
+    // 1. 搜索 "editor" 应命中 EditorView.tsx，不命中 node_modules
+    let res = search_workspace_files(Some("editor"), Some(10), &temp_dir)
+        .expect("Should search successfully");
+    assert_eq!(res.len(), 1);
+    assert_eq!(res[0], "src/components/editor/EditorView.tsx");
+
+    // 2. 搜索为空应列出常规文件并过滤黑名单目录
+    let all = search_workspace_files(None, Some(10), &temp_dir)
+        .expect("Should list files");
+    assert!(all.contains(&"src/App.tsx".to_string()));
+    assert!(all.contains(&"README.md".to_string()));
+    assert!(!all.iter().any(|p| p.contains("node_modules")));
+    assert!(!all.iter().any(|p| p.contains(".git")));
+
+    // 3. 子序列匹配，例如 "app" 匹配 "src/App.tsx"
+    let app_match = search_workspace_files(Some("app"), Some(10), &temp_dir)
+        .expect("Should match app");
+    assert!(app_match.contains(&"src/App.tsx".to_string()));
+
+    fs::remove_dir_all(&temp_dir).ok();
+}
+
 

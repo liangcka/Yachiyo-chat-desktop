@@ -45,6 +45,8 @@ pub struct AgentRequestConfig {
     pub max_turns: Option<u32>,
     #[serde(rename = "workspace", skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
+    #[serde(rename = "auto", skip_serializing_if = "Option::is_none")]
+    pub auto: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -66,11 +66,8 @@ async fn execute_agent_tool(
     name: String,
     arguments: serde_json::Value,
 ) -> Result<String, String> {
-    let root = state
-        .workspace_manager
-        .get_workspace_root()
-        .ok_or_else(|| "当前未绑定工作区，无法执行工作区相关操作。请先选择或打开一个项目。".to_string())?;
-    tools::execute_tool(&name, &arguments, &root, &state.http_client).await
+    let root = state.workspace_manager.get_workspace_root();
+    tools::execute_tool_with_context(&name, &arguments, root.as_deref(), &state.http_client, None).await
 }
 
 /// UI 文件树懒加载：结构化目录条目（仅前端调用，不进 agent 工具 schema）
@@ -84,6 +81,20 @@ fn list_workspace_entries(
     };
     tools::fs::list_workspace_entries(path.as_deref().unwrap_or("."), &root)
 }
+
+/// 快速模糊检索工作区文件（用于 @ 引用智能补全浮层）
+#[tauri::command]
+fn search_workspace_files(
+    state: State<DesktopState>,
+    query: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<String>, String> {
+    let Some(root) = state.workspace_manager.get_workspace_root() else {
+        return Ok(Vec::new());
+    };
+    tools::fs::search_workspace_files(query.as_deref(), limit, &root)
+}
+
 
 /// diff 审阅基线：读取文件在 HEAD 的内容
 #[tauri::command]
@@ -283,6 +294,7 @@ pub fn run() {
             minimize_window,
             toggle_maximize_window,
             is_window_maximized,
+            search_workspace_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

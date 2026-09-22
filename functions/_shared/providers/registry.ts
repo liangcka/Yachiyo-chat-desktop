@@ -56,7 +56,15 @@ const openaiCompatProviders = {
   stepfun: {
     endpoint: "https://api.stepfun.com/step_plan/v1/chat/completions",
     defaultModel: "step-3.7-flash",
-    allowedModels: ["step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"],
+    allowedModels: [
+      "step-3.7-flash",
+      "step-3.5-flash",
+      "step-3.5-flash-2603",
+      "step-2-16k",
+      "step-1-8k",
+      "step-1v-8k",
+      "step-plan",
+    ],
     supportsImage: true,
     imageModels: ["step-3.7-flash"],
     reasoningEffort: true,

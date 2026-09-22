@@ -66,6 +66,21 @@ export async function listWorkspaceEntries(path: string): Promise<WorkspaceEntry
   }
 }
 
+/** 快速检索工作区文件（用于 @ 引用文件模糊搜索浮层） */
+export async function searchWorkspaceFiles(
+  query?: string,
+  limit?: number,
+): Promise<string[] | undefined> {
+  if (!isDesktopApp()) return undefined;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return await invoke<string[]>("search_workspace_files", { query, limit });
+  } catch {
+    return undefined;
+  }
+}
+
+
 /** 读取文件在 git HEAD 的基线内容（diff 审阅 original 侧） */
 export async function readHeadFile(path: string): Promise<HeadFile | undefined> {
   if (!isDesktopApp()) return undefined;

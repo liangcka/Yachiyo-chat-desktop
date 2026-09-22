@@ -1,14 +1,53 @@
-import { useEffect, useRef, useState } from "react";
-import { FileCode, GitCompareArrows, Save, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Code2,
+  FileCode,
+  Folder,
+  FolderPlus,
+  GitCompareArrows,
+  PanelLeft,
+  PanelLeftClose,
+  RefreshCw,
+  Save,
+  X,
+} from "lucide-react";
 import type { EditorWorkspaceController } from "../../app/use-editor-workspace";
 import type { UiCopy } from "../../i18n/messages";
 import { DiffReviewPanel } from "./DiffReviewPanel";
 import { languageForPath } from "./editor-language";
 import { editorThemeFor, loadMonaco } from "./monaco-loader";
+import { FileTree } from "../desktop/FileTree";
+import { getDesktopWorkspaceRoot } from "../../services/desktop-bridge";
+import { projectManager } from "../../services/project-manager";
 
 type CodeEditor = import("monaco-editor").editor.IStandaloneCodeEditor;
 type TextModel = import("monaco-editor").editor.ITextModel;
 type MonacoNamespace = typeof import("monaco-editor");
+
+const STORAGE_EDITOR_SIDEBAR_COLLAPSED = "yachiyo-editor-sidebar-collapsed";
+
+function readStoredSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_EDITOR_SIDEBAR_COLLAPSED) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function writeStoredSidebarCollapsed(collapsed: boolean): void {
+  try {
+    localStorage.setItem(STORAGE_EDITOR_SIDEBAR_COLLAPSED, String(collapsed));
+  } catch {
+    /* 隐私模式静默降级 */
+  }
+}
+
+function getWorkspaceName(root: string): string {
+  if (!root) return "工作区";
+  const normalized = root.replace(/\\/g, "/").replace(/\/+$/, "");
+  const lastSlash = normalized.lastIndexOf("/");
+  return lastSlash >= 0 ? normalized.slice(lastSlash + 1) : normalized;
+}
 
 export interface EditorViewProps {
   workspace: EditorWorkspaceController;
@@ -55,6 +94,33 @@ export function EditorView({
   const [ready, setReady] = useState(false);
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
 
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readStoredSidebarCollapsed);
+  const [workspaceRoot, setWorkspaceRoot] = useState<string>("");
+  const [treeRefreshKey, setTreeRefreshKey] = useState(0);
+
+  const toggleSidebar = useCallback((collapsed: boolean) => {
+    setSidebarCollapsed(collapsed);
+    writeStoredSidebarCollapsed(collapsed);
+  }, []);
+
+  const refreshTree = useCallback(() => {
+    setTreeRefreshKey((k) => k + 1);
+  }, []);
+
+  useEffect(() => {
+    void getDesktopWorkspaceRoot().then((root) => {
+      if (root) setWorkspaceRoot(root);
+    });
+  }, [treeRefreshKey]);
+
+  const handlePickFolder = useCallback(async () => {
+    const picked = await projectManager.pickAndOpenProject("Open workspace");
+    if (picked) {
+      setWorkspaceRoot(picked);
+      refreshTree();
+    }
+  }, [refreshTree]);
+
   /* ── editor 实例生命周期：懒加载 Monaco、Ctrl+S、光标追踪 ── */
   useEffect(() => {
     let disposed = false;
@@ -86,10 +152,12 @@ export function EditorView({
       });
     });
 
+    const models = modelsRef.current;
+
     return () => {
       disposed = true;
-      for (const model of modelsRef.current.values()) model.dispose();
-      modelsRef.current.clear();
+      for (const model of models.values()) model.dispose();
+      models.clear();
       editorRef.current?.dispose();
       editorRef.current = null;
     };
@@ -143,95 +211,187 @@ export function EditorView({
 
   return (
     <section className={`editor-view ${hidden ? "editor-view--hidden" : ""}`} aria-label="代码编辑器">
-      <div className="editor-view__tabs" role="tablist">
-        {workspace.tabs.map((tab) => {
-          const dirty = tab.content !== tab.savedContent;
-          return (
+      <div className="editor-view__container">
+        {/* 左侧轻量工作区文件树侧栏 */}
+        {!sidebarCollapsed ? (
+          <aside className="editor-view__sidebar" aria-label="工作区文件浏览">
+            <div className="editor-sidebar__header">
+              <div className="editor-sidebar__title" title={workspaceRoot || "工作区"}>
+                <Folder size={14} className="editor-sidebar__folder-icon" />
+                <span className="editor-sidebar__name">{getWorkspaceName(workspaceRoot)}</span>
+              </div>
+              <div className="editor-sidebar__actions">
+                <button
+                  type="button"
+                  className="editor-sidebar__btn"
+                  onClick={refreshTree}
+                  title={copy?.refreshFileTree ?? "刷新文件树"}
+                >
+                  <RefreshCw size={13} />
+                </button>
+                <button
+                  type="button"
+                  className="editor-sidebar__btn"
+                  onClick={() => void handlePickFolder()}
+                  title="打开工作区文件夹"
+                >
+                  <FolderPlus size={13} />
+                </button>
+                <button
+                  type="button"
+                  className="editor-sidebar__btn"
+                  onClick={() => toggleSidebar(true)}
+                  title="折叠文件树侧栏"
+                >
+                  <PanelLeftClose size={13} />
+                </button>
+              </div>
+            </div>
+            <div className="editor-sidebar__tree">
+              <FileTree
+                key={treeRefreshKey}
+                copy={copy}
+                activePath={workspace.activePath}
+                onOpenFile={(path) => {
+                  void workspace.openFile(path);
+                  onReviewActiveChange?.(false);
+                }}
+              />
+            </div>
+          </aside>
+        ) : null}
+
+        {/* 右侧主编辑区 */}
+        <div className="editor-view__main">
+          <div className="editor-view__tabs" role="tablist">
+            {sidebarCollapsed ? (
+              <button
+                type="button"
+                className="editor-tab editor-tab--sidebar-toggle"
+                onClick={() => toggleSidebar(false)}
+                title="展开工作区文件树"
+                aria-label="展开工作区文件树"
+              >
+                <PanelLeft size={13} />
+              </button>
+            ) : null}
+
+            {workspace.tabs.map((tab) => {
+              const dirty = tab.content !== tab.savedContent;
+              return (
+                <button
+                  key={tab.path}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab.path === workspace.activePath}
+                  className={`editor-tab ${tab.path === workspace.activePath && !reviewActive ? "editor-tab--active" : ""}`}
+                  onClick={() => {
+                    workspace.setActive(tab.path);
+                    onReviewActiveChange?.(false);
+                  }}
+                  title={tab.path}
+                >
+                  {dirty ? <span className="editor-tab__dirty-dot" aria-label={copy?.editorModified ?? "未保存"} /> : null}
+                  <FileCode size={13} className="editor-tab__icon" />
+                  <span className="editor-tab__name">{baseName(tab.path)}</span>
+                  <span
+                    className="editor-tab__close"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={copy?.editorCloseTab ?? "关闭标签页"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      workspace.closeTab(tab.path);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        workspace.closeTab(tab.path);
+                      }
+                    }}
+                  >
+                    <X size={11} />
+                  </span>
+                </button>
+              );
+            })}
+
             <button
-              key={tab.path}
               type="button"
               role="tab"
-              aria-selected={tab.path === workspace.activePath}
-              className={`editor-tab ${tab.path === workspace.activePath && !reviewActive ? "editor-tab--active" : ""}`}
-              onClick={() => {
-                workspace.setActive(tab.path);
-                onReviewActiveChange?.(false);
-              }}
-              title={tab.path}
+              aria-selected={reviewActive}
+              className={`editor-tab editor-tab--review ${reviewActive ? "editor-tab--active" : ""}`}
+              onClick={() => onReviewActiveChange?.(!reviewActive)}
             >
-              {dirty ? <span className="editor-tab__dirty-dot" aria-label={copy?.editorModified ?? "未保存"} /> : null}
-              <FileCode size={13} className="editor-tab__icon" />
-              <span className="editor-tab__name">{baseName(tab.path)}</span>
-              <span
-                className="editor-tab__close"
-                role="button"
-                tabIndex={0}
-                aria-label={copy?.editorCloseTab ?? "关闭标签页"}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  workspace.closeTab(tab.path);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    workspace.closeTab(tab.path);
-                  }
-                }}
-              >
-                <X size={11} />
-              </span>
+              <GitCompareArrows size={13} className="editor-tab__icon" />
+              <span className="editor-tab__name">{copy?.reviewTitle ?? "变更审阅"}</span>
             </button>
-          );
-        })}
-        {workspace.tabs.length === 0 && !reviewActive ? (
-          <p className="editor-view__empty">{copy?.editorTabEmpty ?? "从右侧文件树选择文件打开"}</p>
-        ) : null}
-        <button
-          type="button"
-          role="tab"
-          aria-selected={reviewActive}
-          className={`editor-tab editor-tab--review ${reviewActive ? "editor-tab--active" : ""}`}
-          onClick={() => onReviewActiveChange?.(!reviewActive)}
-        >
-          <GitCompareArrows size={13} className="editor-tab__icon" />
-          <span className="editor-tab__name">{copy?.reviewTitle ?? "变更审阅"}</span>
-        </button>
-      </div>
+          </div>
 
-      <div className={`editor-view__body ${reviewActive ? "editor-view__body--review" : ""}`}>
-        <div ref={containerRef} className="editor-view__monaco" />
-        {reviewActive ? <DiffReviewPanel copy={copy} resolvedTheme={resolvedTheme} /> : null}
-      </div>
+          <div className={`editor-view__body ${reviewActive ? "editor-view__body--review" : ""}`}>
+            <div
+              ref={containerRef}
+              className="editor-view__monaco"
+              style={{ display: workspace.tabs.length === 0 && !reviewActive ? "none" : "block" }}
+            />
+            {workspace.tabs.length === 0 && !reviewActive ? (
+              <div className="editor-view__empty-state">
+                <Code2 size={40} className="editor-view__empty-icon" />
+                <h3 className="editor-view__empty-title">工作区代码编辑器</h3>
+                <p className="editor-view__empty-desc">
+                  从左侧文件树直接选择并打开代码文件，或点击下方打开本地文件夹开启工程开发。
+                </p>
+                <button
+                  type="button"
+                  className="editor-view__empty-btn"
+                  onClick={() => void handlePickFolder()}
+                >
+                  <FolderPlus size={14} />
+                  <span>打开工作区文件夹</span>
+                </button>
+                <div className="editor-view__empty-hints">
+                  <span>Ctrl+S 保存</span>
+                  <span>•</span>
+                  <span>Ctrl+1 对话</span>
+                  <span>•</span>
+                  <span>Ctrl+2 编辑器</span>
+                </div>
+              </div>
+            ) : null}
+            {reviewActive ? <DiffReviewPanel copy={copy} resolvedTheme={resolvedTheme} /> : null}
+          </div>
 
-      <footer className="editor-view__statusbar">
-        <span className="editor-status__item editor-status__item--path" title={activeTab?.path ?? ""}>
-          {activeTab?.path ?? "—"}
-        </span>
-        <span className="editor-status__item">
-          {activeTab ? languageForPath(activeTab.path) : "—"}
-        </span>
-        <span className="editor-status__item">
-          Ln {cursor.line}, Col {cursor.column}
-        </span>
-        {activeTab?.readOnly ? (
-          <span className="editor-status__item editor-status__item--warn">
-            {copy?.editorReadOnly ?? "只读（大文件）"}
-          </span>
-        ) : (
-          <span className={`editor-status__item ${activeTab && activeTab.content !== activeTab.savedContent ? "editor-status__item--warn" : ""}`}>
-            {workspace.saving
-              ? copy?.editorSaving ?? "保存中…"
-              : activeTab && activeTab.content !== activeTab.savedContent
-                ? copy?.editorModified ?? "● 已修改"
-                : copy?.editorSaved ?? "已保存"}
-          </span>
-        )}
-        <span className="editor-status__item editor-status__item--hint">
-          <Save size={11} />
-          {copy?.editorSaveHint ?? "Ctrl+S 保存（write_file + checkpoint）"}
-        </span>
-      </footer>
+          <footer className="editor-view__statusbar">
+            <span className="editor-status__item editor-status__item--path" title={activeTab?.path ?? ""}>
+              {activeTab?.path ?? "—"}
+            </span>
+            <span className="editor-status__item">
+              {activeTab ? languageForPath(activeTab.path) : "—"}
+            </span>
+            <span className="editor-status__item">
+              Ln {cursor.line}, Col {cursor.column}
+            </span>
+            {activeTab?.readOnly ? (
+              <span className="editor-status__item editor-status__item--warn">
+                {copy?.editorReadOnly ?? "只读（大文件）"}
+              </span>
+            ) : (
+              <span className={`editor-status__item ${activeTab && activeTab.content !== activeTab.savedContent ? "editor-status__item--warn" : ""}`}>
+                {workspace.saving
+                  ? copy?.editorSaving ?? "保存中…"
+                  : activeTab && activeTab.content !== activeTab.savedContent
+                    ? copy?.editorModified ?? "● 已修改"
+                    : copy?.editorSaved ?? "已保存"}
+              </span>
+            )}
+            <span className="editor-status__item editor-status__item--hint">
+              <Save size={11} />
+              {copy?.editorSaveHint ?? "Ctrl+S 保存（write_file + checkpoint）"}
+            </span>
+          </footer>
+        </div>
+      </div>
     </section>
   );
 }

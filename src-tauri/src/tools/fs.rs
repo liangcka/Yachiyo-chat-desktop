@@ -294,3 +294,140 @@ pub fn list_directory(path_str: &str, workspace_root: &Path) -> Result<Vec<Strin
     results.sort();
     Ok(results)
 }
+
+/// 默认排除的大型开发与依赖目录，避免深度递归卡顿
+const SEARCH_IGNORE_DIRS: &[&str] = &[
+    ".git",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    ".yachiyo",
+    ".vscode",
+    ".idea",
+    ".gemini",
+    "coverage",
+    ".next",
+    ".nuxt",
+];
+
+/// 模糊匹配评分：返回匹配成功时的分数，None 表示不匹配
+fn score_fuzzy_match(path_lower: &str, query_lower: &str, file_name_lower: &str) -> Option<i32> {
+    if query_lower.is_empty() {
+        return Some(0);
+    }
+
+    // 1. 完全包含在文件名中（最高优先级）
+    if let Some(pos) = file_name_lower.find(query_lower) {
+        let score = 1000 - (pos as i32 * 10) - (file_name_lower.len() as i32);
+        return Some(score);
+    }
+
+    // 2. 完全包含在整段相对路径中
+    if let Some(pos) = path_lower.find(query_lower) {
+        let score = 500 - (pos as i32 * 5) - (path_lower.len() as i32);
+        return Some(score);
+    }
+
+    // 3. 子序列匹配（字符按先后顺序出现）
+    let mut q_chars = query_lower.chars().peekable();
+    let mut last_idx = 0;
+    let mut distance_penalty = 0;
+    let mut matched_count = 0;
+
+    for (i, c) in path_lower.char_indices() {
+        if let Some(&qc) = q_chars.peek() {
+            if c == qc {
+                q_chars.next();
+                if matched_count > 0 {
+                    distance_penalty += (i - last_idx).saturating_sub(1) as i32;
+                }
+                last_idx = i;
+                matched_count += 1;
+            }
+        }
+    }
+
+    if q_chars.peek().is_none() {
+        let score = 200 - distance_penalty * 2 - (path_lower.len() as i32);
+        Some(score)
+    } else {
+        None
+    }
+}
+
+/// 快速检索工作区中的文件（用于 @ 引用智能补全与模糊搜索）
+pub fn search_workspace_files(
+    query: Option<&str>,
+    limit: Option<usize>,
+    workspace_root: &Path,
+) -> Result<Vec<String>, String> {
+    let max_results = limit.unwrap_or(20).clamp(1, 100);
+    let query_trimmed = query.map(|q| q.trim()).unwrap_or("");
+    let query_lower = query_trimmed.to_lowercase();
+
+    let mut stack = vec![workspace_root.to_path_buf()];
+    let mut scanned_files = 0;
+    const MAX_SCAN_FILES: usize = 6000;
+
+    let mut candidates: Vec<(String, i32)> = Vec::new();
+
+    while let Some(dir) = stack.pop() {
+        let entries = match fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let file_type = match entry.file_type() {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+
+            let name = entry.file_name().to_string_lossy().to_string();
+
+            if file_type.is_dir() {
+                if !SEARCH_IGNORE_DIRS.contains(&name.as_str()) && !name.starts_with('.') {
+                    stack.push(entry.path());
+                }
+            } else if file_type.is_file() {
+                scanned_files += 1;
+                if scanned_files > MAX_SCAN_FILES {
+                    break;
+                }
+
+                let full_path = entry.path();
+                let rel_path = match full_path.strip_prefix(workspace_root) {
+                    Ok(p) => p.to_string_lossy().replace('\\', "/"),
+                    Err(_) => continue,
+                };
+
+                let path_lower = rel_path.to_lowercase();
+                let name_lower = name.to_lowercase();
+
+                if let Some(score) = score_fuzzy_match(&path_lower, &query_lower, &name_lower) {
+                    candidates.push((rel_path, score));
+                }
+            }
+        }
+
+        if scanned_files > MAX_SCAN_FILES {
+            break;
+        }
+    }
+
+    // 分数降序排列；分数相同则按路径升序
+    candidates.sort_by(|a, b| match b.1.cmp(&a.1) {
+        std::cmp::Ordering::Equal => a.0.cmp(&b.0),
+        other => other,
+    });
+
+    let results = candidates
+        .into_iter()
+        .take(max_results)
+        .map(|(path, _)| path)
+        .collect();
+
+    Ok(results)
+}
+

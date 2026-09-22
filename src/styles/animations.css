@@ -11,32 +11,6 @@
   }
 }
 
-@keyframes motion-nebula-drift {
-  from { opacity: 0.78; transform: translate3d(-0.35rem, 0.2rem, 0) scale(1); }
-  to { opacity: 1; transform: translate3d(0.4rem, -0.35rem, 0) scale(1.018); }
-}
-
-@keyframes motion-starfield-reveal {
-  from { opacity: 0; transform: scale(1.018); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-@keyframes motion-gate-enter {
-  from { opacity: 0; transform: translateY(calc(-50% + 0.6rem)) scale(0.96); }
-  to { opacity: 1; transform: translateY(-50%) scale(1); }
-}
-
-@keyframes motion-mark-awaken {
-  0% { opacity: 0; transform: translateY(0.3rem) scale(0.92) rotate(-4deg); }
-  65% { opacity: 1; transform: translateY(0) scale(1.03) rotate(0.5deg); }
-  100% { opacity: 1; transform: translateY(0) scale(1) rotate(0); }
-}
-
-@keyframes motion-drop-in {
-  from { opacity: 0; transform: translateY(-0.65rem); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
 @keyframes motion-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -47,21 +21,6 @@
   to { opacity: 1; }
 }
 
-@keyframes motion-message-in-left {
-  from { opacity: 0; transform: translateX(-0.55rem) scale(0.985); }
-  to { opacity: 1; transform: translateX(0) scale(1); }
-}
-
-@keyframes motion-message-in-right {
-  from { opacity: 0; transform: translateX(0.55rem) scale(0.985); }
-  to { opacity: 1; transform: translateX(0) scale(1); }
-}
-
-@keyframes motion-rise {
-  from { opacity: 0; transform: translateY(var(--motion-distance-sm)); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
 @keyframes motion-drawer-in {
   from { transform: translate3d(-100%, 0, 0); }
   to { transform: translate3d(0, 0, 0); }
@@ -70,33 +29,6 @@
 @keyframes motion-sheet-in {
   from { opacity: 0; transform: translateY(var(--motion-distance-panel)) scale(0.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-@keyframes motion-preview-in {
-  from { opacity: 0; transform: translateY(0.4rem) scale(0.97); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-@keyframes motion-image-reveal {
-  from { opacity: 0; transform: scale(0.97); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-@keyframes motion-error-nudge {
-  0% { opacity: 0; transform: translateX(0); }
-  38% { opacity: 1; transform: translateX(-0.18rem); }
-  68% { transform: translateX(0.12rem); }
-  100% { opacity: 1; transform: translateX(0); }
-}
-
-@keyframes motion-status-settle {
-  from { opacity: 0.74; transform: scale(0.985); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-@keyframes motion-stop-state {
-  from { opacity: 0.62; }
-  to { opacity: 1; }
 }
 
 @keyframes motion-camera-processing {
@@ -126,30 +58,9 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes motion-status-error-in {
-  0% { opacity: 0; transform: translateY(0.35rem) scale(0.985); }
-  70% { opacity: 1; transform: translateY(0) scale(1.01); }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
-}
-
 @keyframes motion-prompt-in {
   from { opacity: 0; transform: translateY(0.6rem) scale(0.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-@keyframes motion-icon-arrive {
-  from { opacity: 0; transform: rotate(-10deg) scale(0.92); }
-  to { opacity: 1; transform: rotate(0) scale(1); }
-}
-
-@keyframes motion-panel-content {
-  from { opacity: 0; transform: translateY(0.45rem); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes motion-toggle-selected {
-  from { opacity: 0.68; }
-  to { opacity: 1; }
 }
 
 @keyframes motion-confirm-in {
@@ -160,11 +71,6 @@
 @keyframes motion-fade-out {
   from { opacity: 1; }
   to { opacity: 0; }
-}
-
-@keyframes motion-drawer-out {
-  from { transform: translate3d(0, 0, 0); }
-  to { transform: translate3d(-100%, 0, 0); }
 }
 
 @keyframes motion-sheet-out {
@@ -182,41 +88,12 @@
   100% { opacity: 1; transform: translate3d(-50%, 0, 0) scale(1); }
 }
 
-/* ─── deepseek-harness 经典动效与双端切换动画 ─── */
-
-@keyframes hero-fish-swim {
-  0%, 100% {
-    transform: translate(0, 0) rotate(0deg);
-  }
-  35% {
-    transform: translate(-1px, -1px) rotate(-5deg);
-  }
-  70% {
-    transform: translate(1px, 0) rotate(3deg);
-  }
-}
-
 @keyframes input-pending {
   from { opacity: 0.35; }
   to { opacity: 1; }
 }
 
-@keyframes wide-in {
-  from { opacity: 0; }
-}
-
-@keyframes rail-in {
-  from {
-    opacity: 0;
-    transform: translateX(49px);
-  }
-}
-
-@keyframes rail-fade-in {
-  from { opacity: 0; }
-}
-
-/* 双端形态切换过渡容器与动效 (Desktop ↔ Mobile) */
+/* 双端形态切换过渡容器 (Desktop ↔ Mobile) */
 .layout-transition-wrapper {
   position: relative;
   width: 100%;
@@ -227,24 +104,6 @@
 .layout-transition-view {
   width: 100%;
   height: 100%;
-  animation: layout-mode-enter 220ms var(--ease-out) forwards;
-  will-change: opacity, transform;
+  animation: fadeIn 120ms ease forwards;
+  will-change: opacity;
 }
-
-@keyframes layout-mode-enter {
-  0% {
-    opacity: 0;
-    transform: scale(0.985);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .layout-transition-view {
-    animation: fadeIn 150ms ease forwards;
-  }
-}
-

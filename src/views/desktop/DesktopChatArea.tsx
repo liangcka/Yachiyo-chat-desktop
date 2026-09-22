@@ -28,6 +28,8 @@ import { SKILLS } from "../../skills";
 
 import { controllerErrorMessage, type SharedViewProps } from "../layout-types";
 import type { SettingsTabKey } from "../../components/settings/SettingsModal";
+import { FileReferencePicker } from "../../components/chat/FileReferencePicker";
+import { searchWorkspaceFiles } from "../../services/desktop-bridge";
 
 export interface DesktopChatAreaProps extends SharedViewProps {
   onOpenSettings?: (tab?: SettingsTabKey) => void;
@@ -134,7 +136,94 @@ export function DesktopChatArea({
     onSend(text);
   };
 
+  // @ 引用文件模糊搜索浮层状态
+  const [filePickerOpen, setFilePickerOpen] = useState(false);
+  const [filePickerQuery, setFilePickerQuery] = useState("");
+  const [filePickerAtIndex, setFilePickerAtIndex] = useState(-1);
+  const [filePickerItems, setFilePickerItems] = useState<string[]>([]);
+  const [filePickerIndex, setFilePickerIndex] = useState(0);
+
+  // 检索工作区文件列表
+  useEffect(() => {
+    if (!filePickerOpen) return;
+    let cancelled = false;
+    void searchWorkspaceFiles(filePickerQuery, 25).then((results) => {
+      if (cancelled) return;
+      setFilePickerItems(results ?? []);
+      setFilePickerIndex(0);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [filePickerOpen, filePickerQuery]);
+
+  const updateFilePickerTrigger = (text: string, cursorPos: number) => {
+    const beforeCursor = text.slice(0, cursorPos);
+    const match = beforeCursor.match(/(?:^|\s)@([^\s]*)$/);
+    if (match && match[1] !== undefined) {
+      const q = match[1];
+      const atIdx = cursorPos - q.length - 1;
+      setFilePickerOpen(true);
+      setFilePickerQuery(q);
+      setFilePickerAtIndex(atIdx);
+    } else {
+      setFilePickerOpen(false);
+      setFilePickerAtIndex(-1);
+    }
+  };
+
+  const handleSelectFileReference = (path: string) => {
+    const el = textareaRef.current;
+    const cursorPos = el ? el.selectionStart : composerValue.length;
+    const atIdx = filePickerAtIndex >= 0 ? filePickerAtIndex : cursorPos;
+    const before = composerValue.slice(0, atIdx);
+    const after = composerValue.slice(cursorPos);
+    const inserted = `@${path} `;
+    const nextValue = `${before}${inserted}${after}`;
+    setComposerValue(nextValue);
+    setFilePickerOpen(false);
+    setFilePickerAtIndex(-1);
+
+    queueMicrotask(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        const nextPos = before.length + inserted.length;
+        textareaRef.current.setSelectionRange(nextPos, nextPos);
+      }
+    });
+  };
+
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (filePickerOpen && filePickerItems.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setFilePickerIndex((prev) => (prev + 1) % filePickerItems.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setFilePickerIndex((prev) => (prev - 1 + filePickerItems.length) % filePickerItems.length);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        const selected = filePickerItems[filePickerIndex] || filePickerItems[0];
+        if (selected) {
+          handleSelectFileReference(selected);
+        }
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setFilePickerOpen(false);
+        return;
+      }
+    } else if (filePickerOpen && e.key === "Escape") {
+      e.preventDefault();
+      setFilePickerOpen(false);
+      return;
+    }
+
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (!isStreaming && !isCompressing && !isOffline && (composerValue.trim() || pendingImageDataUrl)) {
@@ -208,16 +297,20 @@ export function DesktopChatArea({
           onOpenSettings={() => onOpenSettings?.("project")}
           onNewChat={onNewChat}
         />
-        {controller.agentEnabled ? (
+        {controller.agentMode !== "off" ? (
           <button
             type="button"
-            className="desktop-composer-agent-badge"
-            title="Agent 模式已开启：八千代可主动探查工程并执行任务（点击可切换）"
+            className={`desktop-composer-agent-badge ${controller.agentMode === "auto" ? "desktop-composer-agent-badge--auto" : ""}`}
+            title={
+              controller.agentMode === "auto"
+                ? "自动 Agent 模式：AI 将根据任务意图自主决定是否调用工具与执行长任务（点击切换）"
+                : "Agent 模式已常开：强制搭载多步长任务与工具能力（点击切换）"
+            }
             onClick={controller.toggleAgent}
-            aria-label="Agent 模式已开启"
+            aria-label={controller.agentMode === "auto" ? "自动 Agent 模式已启用" : "Agent 模式已开启"}
           >
-            <span className="desktop-composer-agent-badge__dot" />
-            Agent 模式
+            <span className={`desktop-composer-agent-badge__dot ${controller.agentMode === "auto" ? "desktop-composer-agent-badge__dot--auto" : ""}`} />
+            {controller.agentMode === "auto" ? "自动 Agent" : "Agent 模式"}
           </button>
         ) : null}
       </div>
@@ -252,6 +345,18 @@ export function DesktopChatArea({
 
       {/* 输入框主卡片 */}
       <div className="dsh-composer-card">
+        {/* @ 引用文件模糊搜索浮层 */}
+        {filePickerOpen ? (
+          <FileReferencePicker
+            query={filePickerQuery}
+            items={filePickerItems}
+            selectedIndex={filePickerIndex}
+            onSelectedIndexChange={setFilePickerIndex}
+            onSelect={handleSelectFileReference}
+            onClose={() => setFilePickerOpen(false)}
+          />
+        ) : null}
+
         {/* 隐藏的图片上传 input */}
         <input
           ref={fileInputRef}
@@ -290,7 +395,18 @@ export function DesktopChatArea({
             ref={textareaRef}
             className="dsh-composer-card__textarea"
             value={composerValue}
-            onChange={(e) => setComposerValue(e.target.value)}
+            onChange={(e) => {
+              setComposerValue(e.target.value);
+              updateFilePickerTrigger(e.target.value, e.target.selectionStart);
+            }}
+            onKeyUp={(e) => {
+              if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
+                updateFilePickerTrigger(e.currentTarget.value, e.currentTarget.selectionStart);
+              }
+            }}
+            onClick={(e) => {
+              updateFilePickerTrigger(e.currentTarget.value, e.currentTarget.selectionStart);
+            }}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             placeholder={isOffline ? copy.offline : copy.inputHint}
@@ -339,14 +455,14 @@ export function DesktopChatArea({
             ) : null}
 
             <button
-              aria-label="Agent 模式开关"
+              aria-label="Agent 模式切换（自动 / 常开 / 关闭）"
               aria-pressed={controller.agentEnabled}
               className={controller.agentEnabled ? "desktop-toggle desktop-toggle--active" : "desktop-toggle"}
               onClick={controller.toggleAgent}
-              title="Agent 模式：八千代多步读写工作区"
+              title={`Agent 模式：${controller.agentMode === "auto" ? "自动（AI自主决定）" : controller.agentMode === "on" ? "总是开启" : "已关闭"}，点击切换`}
               type="button"
             >
-              Agent
+              {controller.agentMode === "auto" ? "⚡ Agent" : "Agent"}
             </button>
 
             {/* 技能快捷配置胶囊与浮窗 */}

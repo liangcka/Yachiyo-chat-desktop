@@ -99,11 +99,13 @@ export function LlmSettingsPanel({
   }>({ provider: selectedProvider, entries });
   if (selectedProvider !== prevSyncKey.provider || entries !== prevSyncKey.entries) {
     setPrevSyncKey({ provider: selectedProvider, entries });
-    const entry = entries.find((item) => item.provider === selectedProvider);
-    const meta = getProviderMeta(selectedProvider);
-    setApiKeyInput(entry?.apiKey ?? "");
-    setModelInput(entry?.model ?? meta.defaultModel);
-    setFeedback(undefined);
+    if (modalMode === null) {
+      const entry = entries.find((item) => item.provider === selectedProvider);
+      const meta = getProviderMeta(selectedProvider);
+      setApiKeyInput(entry?.apiKey ?? "");
+      setModelInput(entry?.model ?? meta.defaultModel);
+      setFeedback(undefined);
+    }
   }
 
   useEffect(() => {
@@ -138,8 +140,8 @@ export function LlmSettingsPanel({
     setPrevSyncKey({ provider: vendor.mappedProvider, entries });
     const entry = entries.find((item) => item.provider === vendor.mappedProvider);
     setApiKeyInput(entry?.apiKey ?? "");
-    setModelInput(vendor.defaultModel);
-    setCustomBaseUrl(vendor.defaultBaseUrl ?? "");
+    setModelInput(entry?.model || vendor.defaultModel);
+    setCustomBaseUrl(entry?.baseUrl ?? vendor.defaultBaseUrl ?? "");
     setModalMode("config");
   };
 
@@ -588,16 +590,22 @@ export function LlmSettingsPanel({
                     <span style={{ fontSize: 11, color: "var(--dsw-alias-label-tertiary)" }}>
                       可选推荐:
                     </span>
-                    {targetVendor.models.slice(0, 4).map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        className="model-tag-pill"
-                        onClick={() => setModelInput(m)}
-                      >
-                        {m}
-                      </button>
-                    ))}
+                    {targetVendor.models.slice(0, 8).map((m) => {
+                      const isActive = (isCustomModel ? customModelName : modelInput) === m;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          className={`model-tag-pill ${isActive ? "model-tag-pill--active" : ""}`}
+                          onClick={() => {
+                            if (isCustomModel) setCustomModelName(m);
+                            else setModelInput(m);
+                          }}
+                        >
+                          {m}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>

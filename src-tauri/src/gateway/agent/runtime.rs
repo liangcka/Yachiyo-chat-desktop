@@ -85,16 +85,19 @@ pub async fn run_agent_loop(
     config: AgentLoopConfig,
     executor: &dyn TurnExecutor,
     gate: &ApprovalRegistry,
-    checkpoint: &mut CheckpointStore,
+    checkpoint: &mut Option<CheckpointStore>,
     cancelled: &AtomicBool,
     sink: &EventSink,
-    workspace_root: &Path,
+    workspace_root: Option<&Path>,
     http_client: &reqwest::Client,
 ) -> Result<LoopOutcome, String> {
     let mut usage = TokenUsage::default();
     let mut session_allowed: HashSet<String> = HashSet::new();
     let fs_tracker = FsObservationTracker::new();
-    let run_id = checkpoint.run_id().to_string();
+    let run_id = checkpoint
+        .as_ref()
+        .map(|c| c.run_id().to_string())
+        .unwrap_or_else(|| "no-workspace".to_string());
 
     for turn in 1..=config.max_turns {
         if cancelled.load(Ordering::Relaxed) {
@@ -182,8 +185,10 @@ pub async fn run_agent_loop(
             let started = Instant::now();
             let (output, is_error) = if approved {
                 if call.name == "write_file" {
-                    if let Some(path) = call.arguments.get("path").and_then(|v| v.as_str()) {
-                        checkpoint.backup_before_write(path)?;
+                    if let Some(cp) = checkpoint.as_mut() {
+                        if let Some(path) = call.arguments.get("path").and_then(|v| v.as_str()) {
+                            cp.backup_before_write(path)?;
+                        }
                     }
                 }
                 match execute_tool_with_context(&call.name, &call.arguments, workspace_root, http_client, Some(&fs_tracker)).await {
@@ -404,17 +409,9 @@ pub fn run_agent_chat_stream(
                 let _ = workspace_manager.set_workspace_root(ws_path.to_path_buf());
             }
         }
-        let root = match workspace_manager.get_workspace_root() {
-            Some(r) => r,
-            None => {
-                yield Ok(encode_client_event(&ClientStreamEvent::Error {
-                    code: "WORKSPACE_REQUIRED".to_string(),
-                }));
-                return;
-            }
-        };
+        let root = workspace_manager.get_workspace_root();
 
-        let system_prompt = build_agent_system_prompt(request.locale, request.current_time.as_deref(), Some(&root));
+        let system_prompt = build_agent_system_prompt(request.locale, request.current_time.as_deref(), root.as_deref());
         let executor = HttpTurnExecutor {
             client: client.clone(),
             provider_id,
@@ -432,14 +429,18 @@ pub fn run_agent_chat_stream(
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(),
             rand::random::<u32>()
         );
-        let mut checkpoint = CheckpointStore::new(&root, &run_id);
-        let _ = checkpoint.ensure_gitignore();
+        let mut checkpoint = root.as_deref().map(|r| {
+            let cp = CheckpointStore::new(r, &run_id);
+            let _ = cp.ensure_gitignore();
+            cp
+        });
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LoopEmit>();
         let sink: EventSink = Arc::new(move |emit| { let _ = tx.send(emit); });
 
         let loop_messages = history_to_agent_messages(&request.messages);
         let exec = executor;
+        let root_for_task = root.clone();
         let handle = tokio::spawn(async move {
             run_agent_loop(
                 loop_messages,
@@ -450,7 +451,7 @@ pub fn run_agent_chat_stream(
                 &mut checkpoint,
                 &cancelled,
                 &sink,
-                &root,
+                root_for_task.as_deref(),
                 &exec.client,
             )
             .await

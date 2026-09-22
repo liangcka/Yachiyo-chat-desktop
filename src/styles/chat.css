@@ -2692,95 +2692,13 @@
   overflow-wrap: break-word;
 }
 
-/* Layered motion system: ambient, entrance, state, then direct feedback. */
+/* 入场与视图展示系统：移除过度级联延迟与消息滑入，保持即时响应 */
 .chat-stage {
-  animation: motion-fade-in var(--motion-duration-reveal) var(--motion-ease-enter) backwards;
-}
-
-.chat-stage::before {
-  transform-origin: 58% 72%;
-  animation: motion-nebula-drift var(--motion-duration-ambient) var(--motion-ease-ambient) infinite alternate;
-}
-
-.starfield {
-  animation: motion-starfield-reveal var(--motion-duration-scene) var(--motion-ease-standard) backwards;
+  animation: motion-fade-in var(--motion-duration-base) var(--ease-out) backwards;
 }
 
 .access-gate {
-  animation: motion-gate-enter var(--motion-duration-reveal) var(--motion-ease-enter) backwards;
-}
-
-.access-gate__mark {
-  animation: motion-mark-awaken var(--motion-duration-reveal) calc(var(--motion-stagger-step) * 3) var(--motion-ease-emphasized) backwards;
-}
-
-.access-gate h1,
-.access-gate__hint,
-.access-gate form {
-  animation: motion-rise var(--motion-duration-slow) var(--motion-ease-enter) backwards;
-}
-
-.access-gate h1 {
-  animation-delay: calc(var(--motion-stagger-step) * 2);
-}
-
-.access-gate__hint {
-  animation-delay: calc(var(--motion-stagger-step) * 3);
-}
-
-.access-gate form {
-  animation-delay: calc(var(--motion-stagger-step) * 4);
-}
-
-.top-controls {
-  animation: motion-drop-in var(--motion-duration-slow) calc(var(--motion-stagger-step) * 2) var(--motion-ease-enter) backwards;
-}
-
-.top-controls__menu,
-.capture-pill {
-  animation: motion-fade-in var(--motion-duration-slow) var(--motion-ease-enter) backwards;
-}
-
-.top-controls__menu {
-  animation-delay: calc(var(--motion-stagger-step) * 3);
-}
-
-.capture-pill {
-  animation-delay: calc(var(--motion-stagger-step) * 4);
-}
-
-.conversation-view {
-  animation: motion-panel-content var(--motion-duration-slow) var(--motion-ease-enter) backwards;
-}
-
-.message-list__item--assistant:nth-last-child(-n + 3) {
-  animation: motion-message-in-left var(--motion-duration-base) var(--motion-ease-enter) backwards;
-}
-
-.message-list__item--user:nth-last-child(-n + 3) {
-  animation: motion-message-in-right var(--motion-duration-base) var(--motion-ease-enter) backwards;
-}
-
-.message-list__item--assistant:nth-last-child(2) {
-  animation-delay: var(--motion-stagger-step);
-}
-
-.control-dock {
-  animation: motion-rise var(--motion-duration-slow) calc(var(--motion-stagger-step) * 4) var(--motion-ease-enter) backwards;
-}
-
-.control-dock__button {
-  animation: motion-fade-in var(--motion-duration-slow) var(--motion-ease-enter) backwards;
-  animation-delay: calc(var(--motion-stagger-step) * var(--stagger-index, 0));
-}
-
-.control-dock__button:nth-child(1) { --stagger-index: 5; }
-.control-dock__button:nth-child(2) { --stagger-index: 6; }
-.control-dock__button:nth-child(3) { --stagger-index: 7; }
-.control-dock__button:nth-child(4) { --stagger-index: 8; }
-
-.composer {
-  animation: motion-rise var(--motion-duration-slow) calc(var(--motion-stagger-step) * 5) var(--motion-ease-enter) backwards;
+  animation: motion-fade-in var(--motion-duration-base) var(--ease-out) backwards;
 }
 
 .overlay {
@@ -2805,24 +2723,19 @@
   animation: motion-sheet-in var(--motion-duration-panel) var(--ease-drawer) backwards;
 }
 
-/* 微交互过渡：按钮连续动画只用合成属性（transform/opacity），
-   颜色/边框/阴影等一次性状态变化单独声明短过渡，减少 paint 开销 */
+/* 微交互过渡：采用平稳的颜色与透明度过渡，移除晃动的 hover 弹跳 */
 .chat-stage button:not(.overlay__backdrop) {
   transition:
-    transform var(--motion-duration-base) var(--motion-ease-spring),
-    opacity var(--motion-duration-fast) var(--motion-ease-standard),
-    background-color var(--motion-duration-fast) var(--motion-ease-standard),
-    border-color var(--motion-duration-fast) var(--motion-ease-standard);
+    opacity var(--motion-duration-fast) var(--ease-out),
+    background-color var(--motion-duration-fast) var(--ease-out),
+    border-color var(--motion-duration-fast) var(--ease-out);
 }
 
 .chat-stage button:not(.overlay__backdrop) svg {
-  transition:
-    transform var(--motion-duration-base) var(--motion-ease-spring),
-    opacity var(--motion-duration-fast) var(--motion-ease-standard);
+  transition: opacity var(--motion-duration-fast) var(--ease-out);
 }
 
-/* 顶栏 / 工具坞 / 输入卡与消息菜单按钮：状态色过渡统一 0.2s smooth（覆盖上方全局按钮过渡；
-   transform 仍走全局弹簧，保留 hover 浮起与按压回弹手感） */
+/* 顶栏 / 工具坞 / 输入卡与消息菜单按钮：平滑状态过渡 */
 .chat-stage button.top-controls__menu,
 .chat-stage button.capture-pill,
 .chat-stage button.control-dock__button,
@@ -2831,11 +2744,10 @@
 .chat-stage .composer__preview button,
 .chat-stage button.message-bubble__context-item {
   transition:
-    transform var(--motion-duration-base) var(--motion-ease-spring),
-    background-color 0.2s var(--motion-ease-smooth),
-    color 0.2s var(--motion-ease-smooth),
-    opacity 0.2s var(--motion-ease-smooth),
-    filter 0.2s var(--motion-ease-smooth);
+    background-color 0.15s var(--ease-out),
+    color 0.15s var(--ease-out),
+    opacity 0.15s var(--ease-out),
+    border-color 0.15s var(--ease-out);
 }
 
 .access-gate__field,
@@ -2869,17 +2781,13 @@
   opacity: 0.48;
 }
 
-/* Apple 风格按压：按下时整体物理按压缩放，松开用弹簧缓动回弹 */
+/* 按压微反馈：按下时整体物理按压缩放，松开自然回弹 */
 .chat-stage button:not(.overlay__backdrop):not(:disabled):not([aria-disabled="true"]):active {
   transform: scale(var(--motion-scale-pressed));
   transition: transform var(--motion-duration-press) var(--ease-out);
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .chat-stage :where(button:not(.overlay__backdrop):not(:disabled):not([aria-disabled="true"])):not(:active):hover {
-    transform: scale(1.02);
-  }
-
   .drawer__actions button:not(:active):hover,
   .drawer__footer button:not(:active):hover {
     border-color: var(--yx-alias-border-l3);
@@ -2899,24 +2807,6 @@
 
 .composer__preview {
   transform-origin: 50% 100%;
-  animation: motion-preview-in var(--motion-duration-base) var(--motion-ease-enter) backwards;
-}
-
-.composer__preview img,
-.message-list__item:nth-last-child(-n + 3) .message-bubble__image {
-  animation: motion-image-reveal var(--motion-duration-base) var(--motion-ease-enter) backwards;
-}
-
-.message-list__item:nth-last-child(-n + 3) .message-bubble[data-status="failed"] {
-  animation: motion-error-nudge var(--motion-duration-base) var(--motion-ease-standard) backwards;
-}
-
-.message-list__item:nth-last-child(-n + 3) .message-bubble[data-status="stopped"] {
-  animation: motion-status-settle var(--motion-duration-base) var(--motion-ease-enter) backwards;
-}
-
-.composer__action--stop {
-  animation: motion-stop-state var(--motion-duration-base) var(--motion-ease-enter) backwards;
 }
 
 .capture-pill[aria-busy="true"] svg {
@@ -2949,71 +2839,8 @@
   animation: motion-status-in var(--motion-duration-base) var(--motion-ease-enter) backwards;
 }
 
-.status-banner--error {
-  animation-name: motion-status-error-in;
-}
-
 .pwa-prompt {
   animation: motion-prompt-in var(--motion-duration-panel) var(--motion-ease-enter) backwards;
-}
-
-.pwa-prompt > svg {
-  animation: motion-icon-arrive var(--motion-duration-slow) calc(var(--motion-stagger-step) * 2) var(--motion-ease-emphasized) backwards;
-}
-
-.access-gate__error:not(:empty) {
-  animation: motion-error-nudge var(--motion-duration-base) var(--motion-ease-standard) backwards;
-}
-
-.history-panel > header,
-.history-panel > ol,
-.llm-panel > header,
-.llm-panel__active,
-.llm-panel__field,
-.llm-panel__actions,
-.skills-panel > header,
-.skills-panel__hint,
-.skills-panel__list {
-  animation: motion-panel-content var(--motion-duration-panel) var(--motion-ease-enter) backwards;
-}
-
-.history-panel > ol,
-.llm-panel__active,
-.skills-panel__list {
-  animation-delay: var(--motion-stagger-step);
-}
-
-.llm-panel__field {
-  animation-delay: calc(var(--motion-stagger-step) * 2);
-}
-
-.llm-panel__actions {
-  animation-delay: calc(var(--motion-stagger-step) * 3);
-}
-
-.history-panel > ol > li:nth-child(-n + 4) {
-  animation: motion-fade-in var(--motion-duration-base) var(--motion-ease-enter) backwards;
-  animation-delay: calc(var(--motion-stagger-step) * var(--stagger-index, 0));
-}
-
-.history-panel > ol > li:nth-child(1) { --stagger-index: 2; }
-.history-panel > ol > li:nth-child(2) { --stagger-index: 3; }
-.history-panel > ol > li:nth-child(3) { --stagger-index: 4; }
-.history-panel > ol > li:nth-child(4) { --stagger-index: 5; }
-
-.drawer__language button[aria-pressed="true"] {
-  animation: motion-toggle-selected var(--motion-duration-base) var(--motion-ease-emphasized) backwards;
-}
-
-.drawer__confirm,
-.history-panel__confirm,
-.llm-panel__feedback,
-.history-panel__empty {
-  animation: motion-confirm-in var(--motion-duration-base) var(--motion-ease-enter) backwards;
-}
-
-.llm-panel__feedback.llm-panel__feedback--error {
-  animation-name: motion-error-nudge;
 }
 
 .overlay--closing {

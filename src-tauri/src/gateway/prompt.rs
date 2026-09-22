@@ -33,9 +33,9 @@ pub fn build_time_instruction(locale: ChatLocale, current_time: Option<&str>) ->
     }
 }
 
-const AGENT_TOOLS_INSTRUCTION_ZH: &str = "\n【桌面 Agent 干活模式】\n你正以 Agent 模式运行，拥有以下原生工具：read_file（读文件）、write_file（写文件，需彩叶批准）、list_directory（列目录）、run_command（执行终端命令，需彩叶批准）、git_status / git_diff（查看仓库状态）、web_fetch（抓取网页）。\n基本准则：\n- 接到编码、文件、终端类任务时主动组合工具完成，不要只给建议；\n- 修改文件前先读取目标确认现状，写前说明你的意图；\n- 执行命令后检查输出，出错就修复并重试；\n- 任务完成后用简洁的总结收尾（做了什么、改了哪些文件、结果如何）；\n- 依然保持月见八千代的语气与口吻，但技术内容要准确专业，输出长度按任务需要决定。\n";
+const AGENT_TOOLS_INSTRUCTION_ZH: &str = "\n【桌面 Agent 干活模式】\n你正以 Agent 模式运行，拥有以下原生工具：read_file（读文件）、write_file（写文件，需彩叶批准）、list_directory（列目录）、run_command（执行终端命令，需彩叶批准）、git_status / git_diff（查看仓库状态）、web_fetch（抓取网页）。\n基本准则：\n- 接到编码、文件、终端类任务时主动组合工具完成，不要只给建议；\n- 修改文件前先读取目标确认现状，写前说明你的意图；\n- 执行命令后检查输出，出错就修复并重试；\n- 面对系统状态、磁盘空间、硬件与网络环境查询（如“帮我看看C盘有什么”）等探查任务，主动使用 run_command 编写高效命令（如 PowerShell 的 Get-PSDrive / Get-ChildItem）获取第一手真实数据并汇报；\n- 任务完成后用简洁的总结收尾（做了什么、改了哪些文件、结果如何）；\n- 依然保持月见八千代的语气与口吻，但技术内容要准确专业，输出长度按任务需要决定。\n";
 
-const AGENT_TOOLS_INSTRUCTION_JA: &str = "\n【デスクトップAgentモード】\nAgentモードで動作しており、ネイティブツール（read_file、write_file、list_directory、run_command、git_status、git_diff、web_fetch）を利用できます。write_file と run_command は彩葉の承認が必要です。\n基本方針：\n- コーディングやファイル・ターミナル作業はツールを組み合わせて自ら完遂すること。\n- ファイル変更前に対象を読み、意図を説明してから書くこと。\n- コマンド実行後は出力を確認し、失敗したら修正して再試行すること。\n- 完了後は簡潔にまとめること。技術内容は正確に、長さは作業に応じて。\n";
+const AGENT_TOOLS_INSTRUCTION_JA: &str = "\n【デスクトップAgentモード】\nAgentモードで動作しており、ネイティブツール（read_file、write_file、list_directory、run_command、git_status、git_diff、web_fetch）を利用できます。write_file と run_command は彩葉の承認が必要です。\n基本方針：\n- コーディングやファイル・ターミナル作業はツールを組み合わせて自ら完遂すること。\n- ファイル変更前に対象を読み、意図を説明してから書くこと。\n- システム状態、ディスク容量、環境確認などの調査は、run_command（PowerShell / シェル）を使って率先して実データを取得・報告すること。\n- コマンド実行後は出力を確認し、失敗したら修正して再試行すること。\n- 完了後は簡潔にまとめること。技術内容は正確に、長さは作業に応じて。\n";
 
 const AGENT_OUTPUT_RULE_ZH: &str = "平台安全、隐私与紧急风险规则始终优先。本模式为编码/执行任务模式，输出长度按任务需要决定，不做人为压缩；保留括号动作描写。";
 const AGENT_OUTPUT_RULE_JA: &str = "プラットフォームの安全・プライバシー・緊急リスク規則を常に優先。このモードは作業実行モードのため、出力の長さはタスクに応じて決め、人為的な圧縮はしない。";
@@ -156,9 +156,15 @@ pub fn build_agent_system_prompt(
     };
     let time_rule = build_time_instruction(locale, current_time);
 
-    let priority_header = match locale {
-        ChatLocale::JaJp => "【最重要行動規則：率先調査・空想雑談厳禁】\n彩葉の「これは何？」「コードを見て」「プロジェクトを教えて」などの質問に対しては、適当な日常雑談で済ませることを固く禁じます。最初の応答は必ずツール呼び出し（list_directory や read_file）を行って現場を確認してください。\n\n",
-        ChatLocale::ZhCn => "【最高行动准则：优先亲自探查现场，严禁未查先答与闲聊敷衍】\n当彩叶提出项目/代码疑问，或发来「这是什么」、「帮我看看」、「分析项目」等简短模糊问题时：首要动作必须是直接发起工具调用（如 list_directory 列出目录，或 read_file 查看核心说明/配置文件）亲自查证！绝对严禁在未调用工具前直接输出日常闲聊（如“没看清”、“这是什么呀主人”等）凭空臆测！\n\n",
+    let priority_header = match workspace_root {
+        Some(_) => match locale {
+            ChatLocale::JaJp => "【最重要行動規則：率先調査・空想雑談厳禁】\n彩葉の「これは何？」「コードを見て」「プロジェクトを教えて」などの質問に対しては、適当な日常雑談で済ませることを固く禁じます。最初の応答は必ずツール呼び出し（list_directory や read_file）を行って現場を確認してください。\n\n",
+            ChatLocale::ZhCn => "【最高行动准则：优先亲自探查现场，严禁未查先答与闲聊敷衍】\n当彩叶提出项目/代码疑问，或发来「这是什么」、「帮我看看」、「分析项目」等简短模糊问题时：首要动作必须是直接发起工具调用（如 list_directory 列出目录，或 read_file 查看核心说明/配置文件）亲自查证！绝对严禁在未调用工具前直接输出日常闲聊（如“没看清”、“这是什么呀主人”等）凭空臆测！\n\n",
+        },
+        None => match locale {
+            ChatLocale::JaJp => "【現在の状態：プロジェクト未選択】\n現在ワークスペースは未設定です。一般的な質問への回答、技術的アドバイス、コードの執筆や推敲、思考・計画策定、および環境調査やシステム診断（PowerShell / シェルコマンドによるディスク容量確認やシステム情報取得など）をそのまま率先して実行できます。特定プロジェクトのローカルソースコードの読み書き・編集が必要な場合にのみ、彩葉にワークスペースフォルダを開くよう案内してください。\n\n",
+            ChatLocale::ZhCn => "【当前状态：未绑定工作区项目】\n当前彩叶尚未打开具体项目工作区。你可以正常思考、分析、回答长任务/技术咨询、编写代码方案或进行网络检索；当彩叶询问系统环境、磁盘状态（如查看C盘或驱动器空间）、硬件网络或运行诊断脚本时，你应当主动使用 run_command 执行 PowerShell 探查并汇报真实数据。仅当彩叶的指令需要直接读取、修改特定工程源码文件时，才向彩叶说明需要先在输入框上方选择或打开一个项目工作区。\n\n",
+        },
     };
 
     format!(

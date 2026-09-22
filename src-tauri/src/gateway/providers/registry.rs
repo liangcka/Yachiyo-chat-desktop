@@ -14,7 +14,15 @@ pub const STEPFUN_CONFIG: ProviderConfig = ProviderConfig {
     id: ProviderId::Stepfun,
     endpoint: "https://api.stepfun.com/step_plan/v1/chat/completions",
     default_model: "step-3.7-flash",
-    allowed_models: &["step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"],
+    allowed_models: &[
+        "step-3.7-flash",
+        "step-3.5-flash",
+        "step-3.5-flash-2603",
+        "step-2-16k",
+        "step-1-8k",
+        "step-1v-8k",
+        "step-plan",
+    ],
     supports_image: true,
     image_models: &["step-3.7-flash"],
 };

@@ -167,7 +167,7 @@ describe("SettingsModal", () => {
     // 侧边栏和面板标题展示真实项目名称
     const projectNameElements = screen.getAllByText("MyGameStudio");
     expect(projectNameElements.length).toBeGreaterThan(0);
-    expect(screen.getByText("D:/projects/MyGameStudio")).toBeInTheDocument();
+    expect(screen.getAllByText("D:/projects/MyGameStudio").length).toBeGreaterThanOrEqual(1);
 
     // 点击脱离工作区
     const detachBtn = screen.getByRole("button", { name: "脱离工作区" });
@@ -186,6 +186,45 @@ describe("SettingsModal", () => {
     expect(projectManager.getState().recentProjects).not.toContain("D:/projects/MyGameStudio");
     expect(screen.getByText("暂未打开任何项目目录")).toBeInTheDocument();
     expect(screen.getByText("未绑定工作区")).toBeInTheDocument();
+  });
+
+  it("支持在侧栏与项目面板中移除历史项目及清空历史记录", async () => {
+    const user = userEvent.setup();
+    const shared = createMockSharedProps();
+    const onClose = vi.fn();
+
+    // 预设两个最近项目，但当前处于未绑定状态
+    await projectManager.switchProject("D:/projects/AppAlpha");
+    await projectManager.switchProject("D:/projects/AppBeta");
+    await projectManager.switchProject(null);
+
+    render(
+      <SettingsModal
+        open={true}
+        onClose={onClose}
+        shared={shared}
+        initialTab="project"
+      />
+    );
+
+    // 侧栏展示未绑定工作区以及「最近项目」微型标题
+    expect(screen.getByText("未绑定工作区")).toBeInTheDocument();
+    expect(screen.getByText("最近项目")).toBeInTheDocument();
+
+    // 侧边栏显示移除按钮，点击可移除单个项目
+    const removeAlphaBtn = screen.getByRole("button", {
+      name: "从历史记录移除 AppAlpha",
+    });
+    await user.click(removeAlphaBtn);
+    expect(shared.showToast).toHaveBeenCalledWith("已从历史记录移除 AppAlpha", "info");
+    expect(projectManager.getState().recentProjects).not.toContain("D:/projects/AppAlpha");
+
+    // 右侧面板中点击「清空历史」
+    const clearAllBtn = screen.getByRole("button", { name: "清空历史" });
+    await user.click(clearAllBtn);
+    expect(shared.showToast).toHaveBeenCalledWith("已清空全部工作区历史记录", "info");
+    expect(projectManager.getState().recentProjects).toEqual([]);
+    expect(screen.queryByText("最近项目")).not.toBeInTheDocument();
   });
 
   it("点击各导航 Tab 能在面板之间流畅切换", async () => {

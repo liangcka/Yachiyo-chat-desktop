@@ -63,6 +63,16 @@
   }
 }
 
+.tree-row--active {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(59, 130, 246, 0.15));
+  color: var(--dsw-alias-state-business-primary, #3b82f6);
+  font-weight: 500;
+}
+
+.tree-row--active .tree-row__file-icon {
+  color: var(--dsw-alias-state-business-primary, #3b82f6);
+}
+
 .tree-row:active {
   transform: scale(var(--motion-scale-pressed));
 }

@@ -116,13 +116,8 @@ export class LlmSettingsService {
     }
     const meta = getProviderMeta(provider);
     const trimmedModel = model.trim();
-    // 无自定义端点时按厂商白名单收敛，防止静默保存错误模型名
-    const validModel =
-      baseUrl !== undefined
-        ? trimmedModel || meta.defaultModel
-        : meta.models.includes(trimmedModel)
-          ? trimmedModel
-          : meta.defaultModel;
+    // 优先采用用户填写的模型名；仅在输入为空时回退为厂商默认模型
+    const validModel = trimmedModel.length > 0 ? trimmedModel : meta.defaultModel;
     const record: LlmSettingsRecord = {
       provider,
       apiKey: trimmedKey,

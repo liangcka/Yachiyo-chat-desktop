@@ -40,6 +40,7 @@ export interface UiCopy {
   readonly retry: string;
   readonly quotaReached: string;
   readonly genericFailure: string;
+  readonly workspaceRequired: string;
   readonly sessionExpired: string;
   readonly updateReady: string;
   readonly updateAction: string;
@@ -195,6 +196,7 @@ const chinese = Object.freeze({
   retry: "重试",
   quotaReached: "今天的对话次数已用完，请明天再来。",
   genericFailure: "暂时连接不上，再试一次吧。",
+  workspaceRequired: "此任务需要先选择或打开一个项目工作区。",
   sessionExpired: "访问已过期，请重新输入访问码。",
   updateReady: "新版本已经准备好了。",
   updateAction: "立即更新",
@@ -350,6 +352,7 @@ const japanese = Object.freeze({
   retry: "もう一度",
   quotaReached: "本日の会話回数を使い切りました。また明日ね。",
   genericFailure: "今はつながらないみたい。もう一度試してね。",
+  workspaceRequired: "この操作にはプロジェクトワークスペースが必要です。",
   sessionExpired: "アクセス期限が切れました。コードを再入力してください。",
   updateReady: "新しいバージョンを利用できます。",
   updateAction: "今すぐ更新",

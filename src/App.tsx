@@ -91,6 +91,7 @@ function controllerErrorMessage(code: string, copy: UiCopy): string {
   if (code === "SESSION_REQUIRED") {
     return isDesktopApp() ? "请先在菜单「LLM 设置」中填入 API Key 并启用" : copy.sessionExpired;
   }
+  if (code === "WORKSPACE_REQUIRED") return copy.workspaceRequired;
   if (code === "NETWORK_ERROR") return copy.offline;
   if (code === "CONVERSATION_LIMIT") return copy.conversationLimit;
   if (code === "STORAGE_ERROR") return copy.storageFull;
@@ -529,10 +530,11 @@ export function App({ services, autoAiTitle }: AppProps) {
     showToast("服务端凭据已清除", "info");
   };
 
-  // 自定义端点的模型图片能力交由上游判定，此处仅对原生厂商白名单做限制
+  // 自定义端点或自定义指定的非内置模型图片能力交由上游判定，内置预设模型遵循白名单
   const activeProviderSupportsImage =
     activeLlmConfig === undefined ||
     activeLlmConfig.baseUrl !== undefined ||
+    !PROVIDER_METADATA[activeLlmConfig.provider].models.includes(activeLlmConfig.model) ||
     PROVIDER_METADATA[activeLlmConfig.provider].imageModels.includes(activeLlmConfig.model);
 
   useEffect(() => {

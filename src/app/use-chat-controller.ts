@@ -108,8 +108,11 @@ export interface ChatController extends ChatState {
   setPendingImage(image?: StoredImage): void;
   setOnline(online: boolean): void;
   clearError(): void;
-  /** Agent 模式开关（仅桌面端生效，请求体携带 agent: { enabled: true }） */
+  /** Agent 运行模式：auto (自动判定) | on (总是开启) | off (已关闭) */
+  agentMode: "auto" | "on" | "off";
+  /** 兼容原有布尔语义：agentMode !== "off" */
   agentEnabled: boolean;
+  /** 循环切换 Agent 模式：auto -> on -> off */
   toggleAgent(): void;
   approvePermission(requestId: string, approved: boolean, sessionScope?: boolean): Promise<void>;
 }
@@ -415,40 +418,46 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   useEffect(() => {
     autoAiTitleRef.current = options.autoAiTitle ?? true;
   }, [options.autoAiTitle]);
-  // Agent 开关：桌面端有项目或未显式关闭时默认开启，并持久化到本地存储
-  const STORAGE_KEY_AGENT_ENABLED = "yachiyo_desktop_agent_enabled";
-  const [agentEnabled, setAgentEnabled] = useState<boolean>(() => {
-    if (!isDesktopApp()) return false;
+  // Agent 模式：桌面端支持 auto (自动判定，默认) | on (常开) | off (关闭)，并持久化到本地存储
+  const STORAGE_KEY_AGENT_MODE = "yachiyo_desktop_agent_mode_v2";
+  const [agentMode, setAgentMode] = useState<"auto" | "on" | "off">(() => {
+    if (!isDesktopApp()) return "off";
     try {
-      const stored = typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY_AGENT_ENABLED) : null;
-      if (stored !== null) {
-        return stored === "true";
+      const stored = typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY_AGENT_MODE) : null;
+      if (stored === "auto" || stored === "on" || stored === "off") {
+        return stored;
+      }
+      // 兼容迁移旧版布尔配置
+      const legacyStored = typeof window !== "undefined" ? localStorage.getItem("yachiyo_desktop_agent_enabled") : null;
+      if (legacyStored === "false") {
+        return "off";
       }
     } catch {
       // 容错降级
     }
-    // 桌面端默认开启 Agent 模式（只要有关联工作区或首次进入）
-    return true;
+    // 桌面端默认开启「自动 Agent」模式（由 AI 自主决定是否调用工具）
+    return "auto";
   });
-  const agentEnabledRef = useRef(agentEnabled);
+  const agentModeRef = useRef(agentMode);
   useEffect(() => {
-    agentEnabledRef.current = agentEnabled;
-  }, [agentEnabled]);
+    agentModeRef.current = agentMode;
+  }, [agentMode]);
+  const agentEnabled = agentMode !== "off";
 
-  // 监听活跃项目切换：当选定项目且此前未显式禁用 Agent 时，确保自动就绪
+  // 监听活跃项目切换：当选定项目且此前处于已显式关闭状态时，自动切入就绪的 auto 模式
   useEffect(() => {
     if (!isDesktopApp()) return;
     const unsub = projectManager.subscribe((projState) => {
       if (projState.activeProject) {
         try {
-          const stored = localStorage.getItem(STORAGE_KEY_AGENT_ENABLED);
-          if (stored !== "false") {
-            setAgentEnabled(true);
-            agentEnabledRef.current = true;
+          const stored = localStorage.getItem(STORAGE_KEY_AGENT_MODE);
+          if (stored === null || stored === "off") {
+            setAgentMode("auto");
+            agentModeRef.current = "auto";
           }
         } catch {
-          setAgentEnabled(true);
-          agentEnabledRef.current = true;
+          setAgentMode("auto");
+          agentModeRef.current = "auto";
         }
       }
     });
@@ -456,11 +465,12 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   }, []);
 
   const toggleAgent = useCallback(() => {
-    setAgentEnabled((prev) => {
-      const next = !prev;
-      agentEnabledRef.current = next;
+    setAgentMode((prev) => {
+      const next = prev === "auto" ? "on" : prev === "on" ? "off" : "auto";
+      agentModeRef.current = next;
       try {
-        localStorage.setItem(STORAGE_KEY_AGENT_ENABLED, String(next));
+        localStorage.setItem(STORAGE_KEY_AGENT_MODE, next);
+        localStorage.setItem("yachiyo_desktop_agent_enabled", String(next !== "off"));
       } catch {
         // 容错降级
       }
@@ -1093,10 +1103,11 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             ...(webSearchEnabledRef.current === true && webSearchSmartRef.current === true
               ? { smartSearch: true }
               : {}),
-            ...(agentEnabledRef.current && isDesktopApp()
+            ...(agentModeRef.current !== "off" && isDesktopApp()
               ? {
                   agent: {
                     enabled: true,
+                    auto: agentModeRef.current === "auto",
                     workspace: projectManager.getState().activeProject ?? undefined,
                   },
                 }
@@ -1837,6 +1848,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   return {
     ...state,
     messages: overlayStreamedText(state),
+    agentMode,
     agentEnabled,
     approvePermission,
     clearError,

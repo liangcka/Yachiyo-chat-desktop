@@ -397,20 +397,47 @@ export function SettingsModal({
                 </button>
               )}
 
+              {otherRecentProjects.length > 0 ? (
+                <div className="settings-modal__nav-sub-header">最近项目</div>
+              ) : null}
+
               {otherRecentProjects.slice(0, 3).map((p) => (
-                <button
+                <div
                   key={p}
-                  type="button"
-                  className="settings-modal__nav-item settings-modal__nav-item--sub"
+                  className="settings-modal__nav-item settings-modal__nav-item--sub settings-modal__nav-item--recent"
                   onClick={async () => {
                     await projectManager.switchProject(p);
                     setActiveTab("project");
+                    shared.showToast(`已切换工作区至 ${getProjectDisplayName(p)}`, "info");
                   }}
                   title={`切换至项目：${p}`}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={async (e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      await projectManager.switchProject(p);
+                      setActiveTab("project");
+                      shared.showToast(`已切换工作区至 ${getProjectDisplayName(p)}`, "info");
+                    }
+                  }}
                 >
                   <span className="settings-modal__project-dot" />
                   <span className="settings-modal__nav-item-text">{getProjectDisplayName(p)}</span>
-                </button>
+                  <button
+                    type="button"
+                    className="settings-modal__nav-item-remove"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      projectManager.removeRecentProject(p);
+                      shared.showToast(`已从历史记录移除 ${getProjectDisplayName(p)}`, "info");
+                    }}
+                    title="从历史记录移除"
+                    aria-label={`从历史记录移除 ${getProjectDisplayName(p)}`}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
               ))}
 
               <button
@@ -679,6 +706,29 @@ export function SettingsModal({
                     </button>
                   </div>
                 </div>
+
+                <div className="settings-item-card">
+                  <div className="settings-item-card__lead">
+                    <strong className="settings-item-card__name">Live2D 看板娘</strong>
+                    <span className="settings-item-card__desc">
+                      在桌面右下角显示可交互的 Live2D 挂件（支持点击互动、语音与快速收起）
+                    </span>
+                  </div>
+                  <div className="settings-item-card__action">
+                    <button
+                      type="button"
+                      className={`settings-btn ${userSettings.showLive2d ? "settings-btn--primary" : "settings-btn--ghost"}`}
+                      onClick={() => {
+                        const next = !userSettings.showLive2d;
+                        saveUserSettings({ showLive2d: next });
+                        shared.showToast(next ? "已开启 Live2D 看板娘" : "已隐藏 Live2D 看板娘", "info");
+                      }}
+                      aria-pressed={userSettings.showLive2d}
+                    >
+                      {userSettings.showLive2d ? "已开启" : "已关闭"}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           ) : null}
@@ -880,7 +930,80 @@ export function SettingsModal({
                     )}
                   </div>
 
-                  {/* 2. 智能体工程规则 (真实规则与契约展示) */}
+                  {/* 2. 历史工作区记录 (提供直接切换与一键从历史移除) */}
+                  {recentProjects.length > 0 ? (
+                    <div className="settings-card-group">
+                      <div className="settings-card-group__header-row">
+                        <h4 className="settings-card-group__title">
+                          历史打开记录 ({recentProjects.length})
+                        </h4>
+                        <button
+                          type="button"
+                          className="settings-link-btn"
+                          onClick={() => {
+                            projectManager.clearRecentProjects();
+                            shared.showToast("已清空全部工作区历史记录", "info");
+                          }}
+                        >
+                          清空历史
+                        </button>
+                      </div>
+                      <div className="settings-recent-list">
+                        {recentProjects.map((p) => {
+                          const isCurrent = activeProject?.toLowerCase() === p.toLowerCase();
+                          return (
+                            <div key={p} className="settings-item-card settings-recent-card">
+                              <div className="settings-item-card__lead">
+                                <div className="settings-recent-title-row">
+                                  <Folder size={14} className="settings-recent-icon" />
+                                  <strong className="settings-item-card__name">
+                                    {getProjectDisplayName(p)}
+                                  </strong>
+                                  {isCurrent ? (
+                                    <span className="settings-tag settings-tag--active">当前工作区</span>
+                                  ) : null}
+                                </div>
+                                <span
+                                  className="settings-item-card__desc"
+                                  style={{ fontFamily: "monospace", wordBreak: "break-all" }}
+                                  title={p}
+                                >
+                                  {p}
+                                </span>
+                              </div>
+                              <div className="settings-item-card__action">
+                                {!isCurrent ? (
+                                  <button
+                                    type="button"
+                                    className="settings-btn"
+                                    onClick={async () => {
+                                      await projectManager.switchProject(p);
+                                      shared.showToast(`已切换工作区至 ${getProjectDisplayName(p)}`, "info");
+                                    }}
+                                  >
+                                    打开
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  className="settings-btn settings-btn--ghost"
+                                  onClick={() => {
+                                    projectManager.removeRecentProject(p);
+                                    shared.showToast(`已从历史记录移除 ${getProjectDisplayName(p)}`, "info");
+                                  }}
+                                  title="从历史记录移除"
+                                >
+                                  移除
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* 3. 智能体工程规则 (真实规则与契约展示) */}
                   <div className="settings-card-group">
                     <h4 className="settings-card-group__title">工程契约与安全规则</h4>
                     <div className="settings-item-card">

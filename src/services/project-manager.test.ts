@@ -72,6 +72,17 @@ describe("project-manager", () => {
       expect(state.recentProjects).toContain("D:\\b");
     });
 
+    it("clears recent projects list via clearRecentProjects()", async () => {
+      vi.spyOn(desktopBridge, "setDesktopWorkspaceRoot").mockResolvedValue(true);
+      await projectManager.switchProject("D:\\a");
+      await projectManager.switchProject("D:\\b");
+
+      projectManager.clearRecentProjects();
+      const state = projectManager.getState();
+      expect(state.recentProjects).toEqual([]);
+      expect(localStorage.getItem("yachiyo_recent_projects")).toBeNull();
+    });
+
     it("clears all project state and storage via clear()", async () => {
       const setRootSpy = vi.spyOn(desktopBridge, "setDesktopWorkspaceRoot").mockResolvedValue(true);
       await projectManager.switchProject("D:\\work\\project-1");

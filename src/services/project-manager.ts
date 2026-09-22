@@ -191,6 +191,12 @@ class ProjectManager {
     this.updateSnapshot();
   }
 
+  /** 清空所有历史项目记录 */
+  public clearRecentProjects(): void {
+    this.recentProjects = [];
+    this.updateSnapshot();
+  }
+
   /** 快速开始 */
   public async quickStart(defaultFolder?: string): Promise<string | undefined> {
     if (defaultFolder) {

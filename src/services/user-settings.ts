@@ -10,6 +10,8 @@ export interface LocalUserSettings {
   avatar: string;
   /** 用户称号/身份等级；默认为“Lite”，支持快捷预设或自定义输入 */
   badge: string;
+  /** Live2D 看板娘显示开关；默认为 true */
+  showLive2d: boolean;
 }
 
 const STORAGE_KEY = "yachiyo-local-user-settings";
@@ -19,6 +21,7 @@ export const DEFAULT_USER_SETTINGS: LocalUserSettings = {
   username: "酒寄彩叶",
   avatar: "",
   badge: "Lite",
+  showLive2d: true,
 };
 
 function readStorage(): LocalUserSettings {
@@ -39,6 +42,10 @@ function readStorage(): LocalUserSettings {
         typeof parsed.badge === "string" && parsed.badge.trim().length > 0
           ? parsed.badge.trim()
           : DEFAULT_USER_SETTINGS.badge,
+      showLive2d:
+        typeof parsed.showLive2d === "boolean"
+          ? parsed.showLive2d
+          : DEFAULT_USER_SETTINGS.showLive2d,
     };
   } catch {
     return { ...DEFAULT_USER_SETTINGS };
@@ -66,6 +73,10 @@ export function saveLocalUserSettings(partial: Partial<LocalUserSettings>): Loca
       partial.badge !== undefined
         ? partial.badge.trim() || DEFAULT_USER_SETTINGS.badge
         : current.badge,
+    showLive2d:
+      partial.showLive2d !== undefined
+        ? partial.showLive2d
+        : current.showLive2d,
   };
 
   if (typeof window !== "undefined" && window.localStorage) {

@@ -5,6 +5,8 @@ import { listWorkspaceEntries, type WorkspaceEntry } from "../../services/deskto
 
 export interface FileTreeProps {
   copy?: UiCopy;
+  /** 当前激活打开的文件路径（用于在树中高亮显示） */
+  activePath?: string | null;
   /** 点击文件：交由上层打开编辑器 tab */
   onOpenFile: (path: string) => void;
   /** @ 引用到对话（可选，未提供时隐藏引用按钮） */
@@ -13,6 +15,7 @@ export interface FileTreeProps {
 
 interface TreeNodeProps {
   copy?: UiCopy;
+  activePath?: string | null;
   /** 父目录路径（"" 表示工作区根） */
   dir: string;
   entry: WorkspaceEntry;
@@ -30,6 +33,7 @@ function joinPath(dir: string, name: string): string {
 
 function TreeNode({
   copy,
+  activePath,
   dir,
   entry,
   entriesByDir,
@@ -44,12 +48,13 @@ function TreeNode({
   const expanded = expandedDirs.has(path);
   const loading = loadingDirs.has(path);
   const children = entriesByDir.get(path);
+  const isActive = !isDir && activePath !== undefined && activePath !== null && activePath === path;
 
   if (!isDir) {
     return (
       <button
         type="button"
-        className="tree-row tree-row--file"
+        className={`tree-row tree-row--file ${isActive ? "tree-row--active" : ""}`}
         onClick={() => onOpenFile(path)}
         title={path}
       >
@@ -104,6 +109,7 @@ function TreeNode({
               <TreeNode
                 key={child.name}
                 copy={copy}
+                activePath={activePath}
                 dir={path}
                 entry={child}
                 entriesByDir={entriesByDir}
@@ -125,7 +131,7 @@ function TreeNode({
   );
 }
 
-export function FileTree({ copy, onOpenFile, onReferenceFile }: FileTreeProps) {
+export function FileTree({ copy, activePath, onOpenFile, onReferenceFile }: FileTreeProps) {
   const [rootEntries, setRootEntries] = useState<WorkspaceEntry[] | null>(null);
   const [entriesByDir, setEntriesByDir] = useState<ReadonlyMap<string, WorkspaceEntry[]>>(new Map());
   const [expandedDirs, setExpandedDirs] = useState<ReadonlySet<string>>(new Set());
@@ -192,6 +198,7 @@ export function FileTree({ copy, onOpenFile, onReferenceFile }: FileTreeProps) {
           <TreeNode
             key={entry.name}
             copy={copy}
+            activePath={activePath}
             dir=""
             entry={entry}
             entriesByDir={entriesByDir}

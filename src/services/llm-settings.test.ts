@@ -53,10 +53,16 @@ describe("LlmSettingsService", () => {
     expect(await service.getActiveProvider()).toBe("claude");
   });
 
-  it("falls back to default model when given an unknown model", async () => {
-    const record = await service.saveProvider("gemini", VALID_KEY, "gemini-nonexistent");
+  it("falls back to default model when model name is empty or blank", async () => {
+    const record = await service.saveProvider("gemini", VALID_KEY, "   ");
 
     expect(record.model).toBe("gemini-3.7-flash");
+  });
+
+  it("preserves custom and newly released official models without base URL", async () => {
+    const record = await service.saveProvider("stepfun", VALID_KEY, "step-2-16k");
+
+    expect(record.model).toBe("step-2-16k");
   });
 
   it("keeps an arbitrary model name when a base URL is configured", async () => {
