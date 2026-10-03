@@ -1,11 +1,14 @@
 import {
-  Brain,
-  Cpu,
+  Code2,
   FolderCode,
-  Settings,
-  Sparkles,
+  GitCompareArrows,
+  Layers,
   X,
 } from "lucide-react";
+import type { EditorWorkspaceController } from "../../app/use-editor-workspace";
+import { ArtifactsPaneView } from "../../components/desktop/ArtifactsPaneView";
+import { DiffReviewPanel } from "../../components/editor/DiffReviewPanel";
+import { EditorView } from "../../components/editor/EditorView";
 import { LlmSettingsPanel } from "../../components/LlmSettingsPanel";
 import { SkillsPanel } from "../../components/SkillsPanel";
 import { UserMemoryPanel } from "../../components/UserMemoryPanel";
@@ -13,7 +16,7 @@ import { WorkspacePanel } from "../../components/desktop/WorkspacePanel";
 import type { SettingsTabKey } from "../../components/settings/SettingsModal";
 import { SKILLS } from "../../skills";
 import type { SharedViewProps } from "../layout-types";
-import type { DesktopRightTab } from "./DesktopSidebar";
+import type { DesktopRightTab } from "./sidebar/types";
 
 export interface DesktopRightPaneProps {
   activeTab: DesktopRightTab;
@@ -25,6 +28,8 @@ export interface DesktopRightPaneProps {
   onReferenceFile?: (path: string) => void;
   onSelectTab: (tab: DesktopRightTab) => void;
   shared: SharedViewProps;
+  editorWorkspace?: EditorWorkspaceController;
+  resolvedTheme?: "light" | "dark";
 }
 
 export function DesktopRightPane({
@@ -32,91 +37,69 @@ export function DesktopRightPane({
   onClose,
   onOpenFile,
   onOpenReview,
-  onOpenSettings,
   onReferenceFile,
   onSelectTab,
   shared,
+  editorWorkspace,
+  resolvedTheme = "dark",
 }: DesktopRightPaneProps) {
-
   if (activeTab === "none") return null;
 
   return (
-    <aside className="desktop-right-pane" aria-label="桌面多功能工具面板">
+    <aside className="desktop-right-pane" aria-label="成果与多功能审阅面板">
       {/* 顶部标签切换与关闭 */}
       <div className="desktop-right-pane__header">
-        <div className="desktop-right-pane__tabs">
+        <div className="desktop-right-pane__tabs" role="tablist" aria-label="成果与审阅标签">
+          {/* 1. 代码差异审阅 (Codex 式 Hunk 审阅) */}
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === "review"}
+            className={`desktop-right-pane__tab ${activeTab === "review" ? "desktop-right-pane__tab--active" : ""}`}
+            onClick={() => onSelectTab("review")}
+            title="代码差异与逐块审阅 (Codex Review)"
+          >
+            <GitCompareArrows size={14} />
+            <span>代码审阅</span>
+          </button>
+
+          {/* 2. 代码编辑器预览 */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "editor"}
+            className={`desktop-right-pane__tab ${activeTab === "editor" ? "desktop-right-pane__tab--active" : ""}`}
+            onClick={() => onSelectTab("editor")}
+            title="源码预览与就地编辑 (Monaco Editor)"
+          >
+            <Code2 size={14} />
+            <span>代码预览</span>
+          </button>
+
+          {/* 3. 产物工件画廊 */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "artifacts"}
+            className={`desktop-right-pane__tab ${activeTab === "artifacts" ? "desktop-right-pane__tab--active" : ""}`}
+            onClick={() => onSelectTab("artifacts")}
+            title="多模态生成产物与活动步骤"
+          >
+            <Layers size={14} />
+            <span>成果工件</span>
+          </button>
+
+          {/* 4. 工作区与终端 */}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "workspace"}
             className={`desktop-right-pane__tab ${activeTab === "workspace" ? "desktop-right-pane__tab--active" : ""}`}
             onClick={() => onSelectTab("workspace")}
-            title="工作区与终端"
+            title="工作区文件树与快捷终端"
           >
-            <FolderCode size={15} />
+            <FolderCode size={14} />
             <span>工作区</span>
-          </button>
-
-          <button
-            type="button"
-            className={`desktop-right-pane__tab ${activeTab === "llm" ? "desktop-right-pane__tab--active" : ""}`}
-            onClick={() => {
-              if (onOpenSettings) {
-                onOpenSettings("models");
-              } else {
-                onSelectTab("llm");
-              }
-            }}
-            title="模型设置"
-          >
-            <Cpu size={15} />
-            <span>LLM</span>
-          </button>
-
-          <button
-            type="button"
-            className={`desktop-right-pane__tab ${activeTab === "skills" ? "desktop-right-pane__tab--active" : ""}`}
-            onClick={() => {
-              if (onOpenSettings) {
-                onOpenSettings("custom");
-              } else {
-                onSelectTab("skills");
-              }
-            }}
-            title="技能配置"
-          >
-            <Sparkles size={15} />
-            <span>技能</span>
-          </button>
-
-          <button
-            type="button"
-            className={`desktop-right-pane__tab ${activeTab === "memory" ? "desktop-right-pane__tab--active" : ""}`}
-            onClick={() => {
-              if (onOpenSettings) {
-                onOpenSettings("custom");
-              } else {
-                onSelectTab("memory");
-              }
-            }}
-            title="长期记忆"
-          >
-            <Brain size={15} />
-            <span>记忆</span>
-          </button>
-
-          <button
-            type="button"
-            className={`desktop-right-pane__tab ${activeTab === "settings" ? "desktop-right-pane__tab--active" : ""}`}
-            onClick={() => {
-              if (onOpenSettings) {
-                onOpenSettings("general");
-              } else {
-                onSelectTab("settings");
-              }
-            }}
-            title="偏好设置"
-          >
-            <Settings size={15} />
-            <span>设置</span>
           </button>
         </div>
 
@@ -124,25 +107,68 @@ export function DesktopRightPane({
           type="button"
           className="desktop-right-pane__close-btn"
           onClick={onClose}
-          title="关闭右侧面板 (Esc / Ctrl+B)"
+          title="关闭右侧面板 (Ctrl+B / Esc)"
+          aria-label="关闭成果面板"
         >
-          <X size={16} />
+          <X size={15} />
         </button>
       </div>
 
       {/* 面板内容容器 */}
       <div className="desktop-right-pane__body">
+        {/* 1. 代码差异审阅 Tab */}
+        {activeTab === "review" ? (
+          <DiffReviewPanel copy={shared.copy} resolvedTheme={resolvedTheme} />
+        ) : null}
+
+        {/* 2. 代码编辑器 Tab */}
+        {activeTab === "editor" && editorWorkspace ? (
+          <EditorView
+            workspace={editorWorkspace}
+            copy={shared.copy}
+            resolvedTheme={resolvedTheme}
+            hidden={false}
+            reviewActive={false}
+          />
+        ) : null}
+
+        {/* 3. 成果工件 Tab */}
+        {activeTab === "artifacts" ? (
+          <ArtifactsPaneView
+            messages={shared.controller.messages}
+            imageUrls={shared.imageUrls}
+            onOpenReview={onOpenReview ?? (() => onSelectTab("review"))}
+            onOpenFile={(path) => {
+              if (editorWorkspace) {
+                void editorWorkspace.openFile(path);
+                onSelectTab("editor");
+              } else {
+                onOpenFile?.(path);
+              }
+            }}
+          />
+        ) : null}
+
+        {/* 4. 工作区与终端 Tab */}
         {activeTab === "workspace" ? (
           <WorkspacePanel
             copy={shared.copy}
             open={true}
             onClose={onClose}
-            onOpenFile={onOpenFile}
-            onOpenReview={onOpenReview}
+            onOpenFile={(path) => {
+              if (editorWorkspace) {
+                void editorWorkspace.openFile(path);
+                onSelectTab("editor");
+              } else {
+                onOpenFile?.(path);
+              }
+            }}
+            onOpenReview={onOpenReview ?? (() => onSelectTab("review"))}
             onReferenceFile={onReferenceFile}
           />
         ) : null}
 
+        {/* 兼容旧版 Tab 映射 */}
         {activeTab === "llm" ? (
           <LlmSettingsPanel
             activeProvider={shared.llmActiveProvider}

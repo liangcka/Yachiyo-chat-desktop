@@ -222,3 +222,19 @@ fn test_plain_prompt_no_longer_contains_text_tool_protocol() {
     assert!(!zh.contains("```tool_call"));
     assert!(zh.contains("输出最多200个Unicode字符"));
 }
+
+#[test]
+fn test_agent_system_prompt_evidence_verification_rule() {
+    use yachiyo_desktop_lib::gateway::prompt::build_agent_system_prompt;
+
+    let zh = build_agent_system_prompt(ChatLocale::ZhCn, Some("2026-09-02"), None);
+    assert!(zh.contains("证据闭环与存疑交叉验证铁律"));
+    assert!(zh.contains("严禁依赖 Win32_VideoController.AdapterRAM"));
+    assert!(zh.contains("HardwareInformation.qwMemorySize"));
+    assert!(zh.contains("nvidia-smi"));
+
+    let ja = build_agent_system_prompt(ChatLocale::JaJp, None, None);
+    assert!(ja.contains("エビデンス閉ループと疑問点の交差検証原則"));
+    assert!(ja.contains("HardwareInformation.qwMemorySize"));
+}
+

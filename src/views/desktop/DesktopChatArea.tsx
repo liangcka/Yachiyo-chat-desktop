@@ -1,11 +1,12 @@
 import {
   ArrowUp,
+  Bot,
   Camera,
   Check,
   Globe,
-
   PanelLeft,
   PanelLeftOpen,
+  PanelRight,
   Pencil,
   Plus,
   Sparkles,
@@ -29,12 +30,19 @@ import { SKILLS } from "../../skills";
 import { controllerErrorMessage, type SharedViewProps } from "../layout-types";
 import type { SettingsTabKey } from "../../components/settings/SettingsModal";
 import { FileReferencePicker } from "../../components/chat/FileReferencePicker";
+import {
+  SlashCommandPicker,
+  type SlashActionItem,
+  type SlashItem,
+} from "../../components/chat/SlashCommandPicker";
 import { searchWorkspaceFiles } from "../../services/desktop-bridge";
 
 export interface DesktopChatAreaProps extends SharedViewProps {
   onOpenSettings?: (tab?: SettingsTabKey) => void;
   onRenameConversation?: (id: string, title: string) => Promise<void>;
   onToggleSidebar?: () => void;
+  onToggleRightPane?: () => void;
+  rightPaneOpen?: boolean;
   resolvedTheme?: "light" | "dark";
   sidebarCollapsed?: boolean;
 }
@@ -59,8 +67,11 @@ export function DesktopChatArea({
   onSend,
   onSkillToggle,
   onToggleSidebar,
+  onToggleRightPane,
+  onWebSearchSettingsChange,
   pendingImageDataUrl,
   processImage,
+  rightPaneOpen = false,
   setComposerValue,
   setPendingImageDataUrl,
   showToast,
@@ -100,7 +111,7 @@ export function DesktopChatArea({
 
   useEffect(() => {
     if (!skillPopoverOpen) return;
-    const handlePointerDownDoc = (e: MouseEvent | PointerEvent) => {
+    const handleMouseDownDoc = (e: MouseEvent) => {
       if (skillPopoverRef.current && !skillPopoverRef.current.contains(e.target as Node)) {
         setSkillPopoverOpen(false);
       }
@@ -108,10 +119,10 @@ export function DesktopChatArea({
     const handleKeyDownDoc = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape") setSkillPopoverOpen(false);
     };
-    document.addEventListener("pointerdown", handlePointerDownDoc, true);
+    document.addEventListener("mousedown", handleMouseDownDoc);
     document.addEventListener("keydown", handleKeyDownDoc);
     return () => {
-      document.removeEventListener("pointerdown", handlePointerDownDoc, true);
+      document.removeEventListener("mousedown", handleMouseDownDoc);
       document.removeEventListener("keydown", handleKeyDownDoc);
     };
   }, [skillPopoverOpen]);
@@ -143,6 +154,11 @@ export function DesktopChatArea({
   const [filePickerItems, setFilePickerItems] = useState<string[]>([]);
   const [filePickerIndex, setFilePickerIndex] = useState(0);
 
+  // / 快捷指令与技能浮层状态
+  const [slashPickerOpen, setSlashPickerOpen] = useState(false);
+  const [slashPickerQuery, setSlashPickerQuery] = useState("");
+  const [slashPickerIndex, setSlashPickerIndex] = useState(0);
+
   // 检索工作区文件列表
   useEffect(() => {
     if (!filePickerOpen) return;
@@ -157,19 +173,32 @@ export function DesktopChatArea({
     };
   }, [filePickerOpen, filePickerQuery]);
 
-  const updateFilePickerTrigger = (text: string, cursorPos: number) => {
+  const updatePickersTrigger = (text: string, cursorPos: number) => {
     const beforeCursor = text.slice(0, cursorPos);
-    const match = beforeCursor.match(/(?:^|\s)@([^\s]*)$/);
-    if (match && match[1] !== undefined) {
-      const q = match[1];
+
+    // 检查 @ 触发
+    const atMatch = beforeCursor.match(/(?:^|\s)@([^\s]*)$/);
+    if (atMatch && atMatch[1] !== undefined) {
+      const q = atMatch[1];
       const atIdx = cursorPos - q.length - 1;
       setFilePickerOpen(true);
       setFilePickerQuery(q);
       setFilePickerAtIndex(atIdx);
-    } else {
-      setFilePickerOpen(false);
-      setFilePickerAtIndex(-1);
+      setSlashPickerOpen(false);
+      return;
     }
+    setFilePickerOpen(false);
+    setFilePickerAtIndex(-1);
+
+    // 检查 / 触发
+    const slashMatch = beforeCursor.match(/(?:^|\s)\/([^\s]*)$/);
+    if (slashMatch && slashMatch[1] !== undefined) {
+      setSlashPickerOpen(true);
+      setSlashPickerQuery(slashMatch[1]);
+      setSlashPickerIndex(0);
+      return;
+    }
+    setSlashPickerOpen(false);
   };
 
   const handleSelectFileReference = (path: string) => {
@@ -191,6 +220,82 @@ export function DesktopChatArea({
         textareaRef.current.setSelectionRange(nextPos, nextPos);
       }
     });
+  };
+
+  const slashActions = useMemo<SlashActionItem[]>(() => [
+    {
+      id: "action:agent",
+      type: "action",
+      name: "切换 Agent 模式",
+      command: "/agent",
+      description: `当前模式：${controller.agentMode === "auto" ? "自动（AI自主决定）" : controller.agentMode === "on" ? "总是开启" : "已关闭"} (点击切换)`,
+      icon: "bot",
+      onExecute: () => {
+        controller.toggleAgent();
+        const nextMode = controller.agentMode === "auto" ? "常开" : controller.agentMode === "on" ? "关闭" : "自动";
+        showToast(`已切换 Agent 模式为：${nextMode}`);
+      },
+    },
+    {
+      id: "action:web",
+      type: "action",
+      name: "切换联网搜索",
+      command: "/web",
+      description: `当前状态：${webSearchSettings.enabled ? "已开启" : "已关闭"} (点击切换)`,
+      icon: "globe",
+      onExecute: () => {
+        onWebSearchSettingsChange?.({ enabled: !webSearchSettings.enabled });
+        showToast(webSearchSettings.enabled ? "联网搜索已关闭" : "联网搜索已开启");
+      },
+    },
+    {
+      id: "action:new-chat",
+      type: "action",
+      name: "新建对话",
+      command: "/clear",
+      description: "重置当前工作台并开启新对话",
+      icon: "plus",
+      onExecute: () => {
+        void onNewChat();
+      },
+    },
+  ], [controller, onNewChat, onWebSearchSettingsChange, showToast, webSearchSettings.enabled]);
+
+  const handleSelectSlashItem = (item: SlashItem) => {
+    if (item.type === "action") {
+      item.onExecute();
+    } else {
+      const nextActive = !activeSkillIds.includes(item.skill.id);
+      void onSkillToggle?.(item.skill.id, nextActive);
+      showToast(nextActive ? `已加载「${item.name}」技能` : `已卸载「${item.name}」技能`);
+    }
+
+    // 移除触发词 /xxx
+    const el = textareaRef.current;
+    const cursorPos = el ? el.selectionStart : composerValue.length;
+    const beforeCursor = composerValue.slice(0, cursorPos);
+    const slashIdx = beforeCursor.lastIndexOf("/");
+    if (slashIdx >= 0) {
+      const nextValue = composerValue.slice(0, slashIdx) + composerValue.slice(cursorPos);
+      setComposerValue(nextValue);
+      queueMicrotask(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          textareaRef.current.setSelectionRange(slashIdx, slashIdx);
+        }
+      });
+    }
+    setSlashPickerOpen(false);
+  };
+
+  const handleSlashButtonClick = () => {
+    if (slashPickerOpen) {
+      setSlashPickerOpen(false);
+      return;
+    }
+    setSlashPickerOpen(true);
+    setSlashPickerQuery("");
+    textareaRef.current?.focus();
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -222,6 +327,24 @@ export function DesktopChatArea({
       e.preventDefault();
       setFilePickerOpen(false);
       return;
+    }
+
+    if (slashPickerOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashPickerIndex((prev) => prev + 1);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashPickerIndex((prev) => Math.max(0, prev - 1));
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSlashPickerOpen(false);
+        return;
+      }
     }
 
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -357,6 +480,23 @@ export function DesktopChatArea({
           />
         ) : null}
 
+        {/* / 快捷指令与技能快速选择浮层 */}
+        {slashPickerOpen ? (
+          <SlashCommandPicker
+            query={slashPickerQuery}
+            skills={SKILLS}
+            activeSkillIds={activeSkillIds}
+            actions={slashActions}
+            selectedIndex={slashPickerIndex}
+            onSelectedIndexChange={setSlashPickerIndex}
+            onSelect={handleSelectSlashItem}
+            onToggleSkill={(id, next) => {
+              void onSkillToggle?.(id, next);
+            }}
+            onClose={() => setSlashPickerOpen(false)}
+          />
+        ) : null}
+
         {/* 隐藏的图片上传 input */}
         <input
           ref={fileInputRef}
@@ -397,15 +537,15 @@ export function DesktopChatArea({
             value={composerValue}
             onChange={(e) => {
               setComposerValue(e.target.value);
-              updateFilePickerTrigger(e.target.value, e.target.selectionStart);
+              updatePickersTrigger(e.target.value, e.target.selectionStart);
             }}
             onKeyUp={(e) => {
               if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
-                updateFilePickerTrigger(e.currentTarget.value, e.currentTarget.selectionStart);
+                updatePickersTrigger(e.currentTarget.value, e.currentTarget.selectionStart);
               }
             }}
             onClick={(e) => {
-              updateFilePickerTrigger(e.currentTarget.value, e.currentTarget.selectionStart);
+              updatePickersTrigger(e.currentTarget.value, e.currentTarget.selectionStart);
             }}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
@@ -415,10 +555,10 @@ export function DesktopChatArea({
           />
         </div>
 
-        {/* 底部工具行：左侧功能 + 右侧模型选择 / ContextMeter / 34px 发送按钮 */}
+        {/* 底部工具行：极简专注布局（附件 + 快捷指令 + 上下文计量 + 发送） */}
         <div className="dsh-composer-card__toolbar">
           <div className="dsh-composer-card__tools-left">
-            {/* 附件/图片上传与指令唤起按钮 */}
+            {/* 附件/图片上传 */}
             <button
               type="button"
               className="dsh-composer-card__add-btn"
@@ -430,140 +570,19 @@ export function DesktopChatArea({
               <Plus size={15} />
             </button>
 
+            {/* / 快捷指令唤醒按钮 */}
             <button
               type="button"
-              className="dsh-composer-card__slash-btn"
-              title="输入 / 查看快捷指令"
+              className={`dsh-composer-card__slash-btn ${slashPickerOpen ? "dsh-composer-card__slash-btn--active" : ""}`}
+              title="快捷指令与技能 (/)"
               aria-label="快捷指令"
-              onClick={() => {
-                if (composerValue.startsWith("/")) {
-                  setComposerValue("");
-                } else {
-                  setComposerValue("/" + composerValue);
-                }
-                textareaRef.current?.focus();
-              }}
+              onClick={handleSlashButtonClick}
             >
               <span>/</span>
             </button>
-
-            {webSearchSettings.enabled ? (
-              <span className="dsh-chip dsh-chip--active" title="联网搜索已启用">
-                <Globe size={12} />
-                <span>联网搜索</span>
-              </span>
-            ) : null}
-
-            <button
-              aria-label="Agent 模式切换（自动 / 常开 / 关闭）"
-              aria-pressed={controller.agentEnabled}
-              className={controller.agentEnabled ? "desktop-toggle desktop-toggle--active" : "desktop-toggle"}
-              onClick={controller.toggleAgent}
-              title={`Agent 模式：${controller.agentMode === "auto" ? "自动（AI自主决定）" : controller.agentMode === "on" ? "总是开启" : "已关闭"}，点击切换`}
-              type="button"
-            >
-              {controller.agentMode === "auto" ? "⚡ Agent" : "Agent"}
-            </button>
-
-            {/* 技能快捷配置胶囊与浮窗 */}
-            <div className="dsh-skill-trigger-wrapper" ref={skillPopoverRef}>
-              <button
-                type="button"
-                className={`desktop-toggle ${activeSkillIds.length > 0 ? "desktop-toggle--active" : ""}`}
-                onClick={() => setSkillPopoverOpen((prev) => !prev)}
-                title={
-                  activeSkillIds.length > 0
-                    ? `已加载 ${activeSkillIds.length} 项技能 (点击展开配置)`
-                    : "加载技能 (点击配置)"
-                }
-                aria-label="技能快捷配置"
-                aria-expanded={skillPopoverOpen}
-              >
-                <Sparkles size={12} />
-                <span>技能</span>
-                {activeSkillIds.length > 0 ? (
-                  <span className="dsh-skill-count-badge">{activeSkillIds.length}</span>
-                ) : null}
-              </button>
-
-              {skillPopoverOpen ? (
-                <div className="dsh-skill-popover" role="dialog" aria-label="快捷加载技能">
-                  <div className="dsh-skill-popover__header">
-                    <div className="dsh-skill-popover__title">
-                      <Sparkles size={13} />
-                      <span>加载技能</span>
-                    </div>
-                    <button
-                      type="button"
-                      className="dsh-skill-popover__close"
-                      onClick={() => setSkillPopoverOpen(false)}
-                      title="关闭"
-                      aria-label="关闭技能面板"
-                    >
-                      <X size={12} />
-                    </button>
-                  </div>
-                  <ul className="dsh-skill-popover__list">
-                    {SKILLS.map((skill) => {
-                      const isActive = activeSkillIds.includes(skill.id);
-                      return (
-                        <li key={skill.id} className="dsh-skill-popover__item">
-                          <button
-                            type="button"
-                            role="checkbox"
-                            aria-checked={isActive}
-                            onClick={() => {
-                              if (onSkillToggle) {
-                                void onSkillToggle(skill.id, !isActive);
-                              }
-                            }}
-                            className="dsh-skill-popover__btn"
-                          >
-                            <span className={`dsh-skill-popover__checkbox-custom ${isActive ? "dsh-skill-popover__checkbox-custom--checked" : ""}`}>
-                              {isActive ? <Check size={11} strokeWidth={3} /> : null}
-                            </span>
-                            <div className="dsh-skill-popover__item-meta">
-                              <span className="dsh-skill-popover__item-name">{skill.name}</span>
-                              <span className="dsh-skill-popover__item-desc">{skill.description}</span>
-                            </div>
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                  {onOpenSettings ? (
-                    <div className="dsh-skill-popover__footer">
-                      <button
-                        type="button"
-                        className="dsh-skill-popover__more-btn"
-                        onClick={() => {
-                          setSkillPopoverOpen(false);
-                          onOpenSettings("custom");
-                        }}
-                      >
-                        管理全部技能 &rarr;
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
           </div>
 
           <div className="dsh-composer-card__tools-right">
-            {/* 模型选择器紧挨着发送按钮 */}
-            <ModelSelect
-              activeProvider={llmActiveProvider}
-              entries={llmEntries}
-              onSelect={(provider) => {
-                void onLlmActivate(provider);
-              }}
-              onOpenSettings={() => {
-                onOpenSettings?.("models");
-              }}
-              disabled={isOffline || isStreaming}
-            />
-
             {/* 上下文用量指示器 */}
             <ContextMeter messages={controller.messages} />
 
@@ -687,6 +706,150 @@ export function DesktopChatArea({
               </span>
             ) : null}
           </div>
+        </div>
+
+        {/* 顶栏右侧：高级控制区（从输入框收拢的高级设置，保持核心输入干净） */}
+        <div className="desktop-chat-header__actions">
+          {/* 联网搜索快捷切换 */}
+          <button
+            type="button"
+            className={`desktop-toggle desktop-header-pill ${webSearchSettings.enabled ? "desktop-toggle--active desktop-header-pill--active" : ""}`}
+            onClick={() => {
+              if (onWebSearchSettingsChange) {
+                onWebSearchSettingsChange({ enabled: !webSearchSettings.enabled });
+              }
+            }}
+            title={webSearchSettings.enabled ? "联网搜索已开启 (点击关闭)" : "联网搜索已关闭 (点击开启)"}
+            aria-label="联网搜索快捷切换"
+          >
+            <Globe size={13} />
+            <span>联网</span>
+          </button>
+
+          {/* Agent 模式切换 */}
+          <button
+            aria-label="Agent 模式切换（自动 / 常开 / 关闭）"
+            aria-pressed={controller.agentEnabled}
+            className={`desktop-toggle desktop-header-pill ${controller.agentEnabled ? "desktop-toggle--active desktop-header-pill--active" : ""}`}
+            onClick={controller.toggleAgent}
+            title={`Agent 模式：${controller.agentMode === "auto" ? "自动（AI自主决定）" : controller.agentMode === "on" ? "总是开启" : "已关闭"}，点击切换`}
+            type="button"
+          >
+            <Bot size={13} />
+            <span>{controller.agentMode === "auto" ? "自动 Agent" : controller.agentMode === "on" ? "常开 Agent" : "Agent 关"}</span>
+          </button>
+
+          {/* 技能快捷配置与 Popover */}
+          <div className="dsh-skill-trigger-wrapper" ref={skillPopoverRef}>
+            <button
+              type="button"
+              className={`desktop-toggle desktop-header-pill ${activeSkillIds.length > 0 ? "desktop-toggle--active desktop-header-pill--active" : ""}`}
+              onClick={() => setSkillPopoverOpen((prev) => !prev)}
+              title={
+                activeSkillIds.length > 0
+                  ? `已加载 ${activeSkillIds.length} 项技能 (点击展开配置)`
+                  : "加载技能 (点击配置)"
+              }
+              aria-label="技能快捷配置"
+              aria-expanded={skillPopoverOpen}
+            >
+              <Sparkles size={13} />
+              <span>技能</span>
+              {activeSkillIds.length > 0 ? (
+                <span className="dsh-skill-count-badge">{activeSkillIds.length}</span>
+              ) : null}
+            </button>
+
+            {skillPopoverOpen ? (
+              <div className="dsh-skill-popover" role="dialog" aria-label="快捷加载技能">
+                <div className="dsh-skill-popover__header">
+                  <div className="dsh-skill-popover__title">
+                    <Sparkles size={13} />
+                    <span>加载技能</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="dsh-skill-popover__close"
+                    onClick={() => setSkillPopoverOpen(false)}
+                    title="关闭"
+                    aria-label="关闭技能面板"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+                <ul className="dsh-skill-popover__list">
+                  {SKILLS.map((skill) => {
+                    const isActive = activeSkillIds.includes(skill.id);
+                    return (
+                      <li key={skill.id} className="dsh-skill-popover__item">
+                        <button
+                          type="button"
+                          role="checkbox"
+                          aria-checked={isActive}
+                          onClick={() => {
+                            if (onSkillToggle) {
+                              void onSkillToggle(skill.id, !isActive);
+                            }
+                          }}
+                          className="dsh-skill-popover__btn"
+                        >
+                          <span className={`dsh-skill-popover__checkbox-custom ${isActive ? "dsh-skill-popover__checkbox-custom--checked" : ""}`}>
+                            {isActive ? <Check size={11} strokeWidth={3} /> : null}
+                          </span>
+                          <div className="dsh-skill-popover__item-meta">
+                            <span className="dsh-skill-popover__item-name">{skill.name}</span>
+                            <span className="dsh-skill-popover__item-desc">{skill.description}</span>
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {onOpenSettings ? (
+                  <div className="dsh-skill-popover__footer">
+                    <button
+                      type="button"
+                      className="dsh-skill-popover__more-btn"
+                      onClick={() => {
+                        setSkillPopoverOpen(false);
+                        onOpenSettings("custom");
+                      }}
+                    >
+                      管理全部技能 &rarr;
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          {/* 模型选择器 */}
+          <ModelSelect
+            activeProvider={llmActiveProvider}
+            entries={llmEntries}
+            onSelect={(provider) => {
+              void onLlmActivate(provider);
+            }}
+            onOpenSettings={() => {
+              onOpenSettings?.("models");
+            }}
+            disabled={isOffline || isStreaming}
+          />
+
+          {/* 成果与审阅台快捷切换 (Ctrl+B) */}
+          {onToggleRightPane ? (
+            <button
+              type="button"
+              className={`desktop-toggle desktop-header-pill ${rightPaneOpen ? "desktop-toggle--active desktop-header-pill--active" : ""}`}
+              onClick={onToggleRightPane}
+              title={rightPaneOpen ? "收起成果审阅台 (Ctrl+B)" : "展开成果审阅台 (Ctrl+B)"}
+              aria-label="成果与审阅台快捷切换"
+              aria-pressed={rightPaneOpen}
+            >
+              <PanelRight size={13} />
+              <span>成果审阅</span>
+            </button>
+          ) : null}
         </div>
       </header>
 

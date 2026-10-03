@@ -8,6 +8,8 @@ import type { SharedViewProps } from "../layout-types";
 import { DesktopChatArea } from "./DesktopChatArea";
 import { DesktopSidebar } from "./sidebar";
 import { DesktopTopBar } from "./DesktopTopBar";
+import { DesktopRightPane } from "./DesktopRightPane";
+import type { DesktopRightTab } from "./sidebar/types";
 import { SettingsModal, type SettingsTabKey } from "../../components/settings/SettingsModal";
 
 /* ── 列宽约束与持久化 Key ─────────────────────────────── */
@@ -21,7 +23,15 @@ const SIDEBAR_COLLAPSED = 64;
 /** 视口窄于该宽度时侧栏在显示层强制折叠为 rail（不改写用户偏好与持久化宽度） */
 const NARROW_VIEWPORT = 900;
 
+const RIGHT_PANE_MIN = 320;
+const RIGHT_PANE_MAX = 760;
+const RIGHT_PANE_DEFAULT = 460;
+
 const STORAGE_SIDEBAR_WIDTH = "yachiyo-sidebar-width";
+const STORAGE_RIGHT_PANE_WIDTH = "yachiyo-right-pane-width";
+const STORAGE_RIGHT_PANE_OPEN = "yachiyo-right-pane-open";
+const STORAGE_RIGHT_PANE_TAB = "yachiyo-right-pane-tab";
+
 /** 中栏视图偏好（chat / editor），与列宽同一套 localStorage 持久化模式 */
 const STORAGE_CENTER_VIEW = "yachiyo-center-view";
 
@@ -41,6 +51,26 @@ function writeStoredCenterView(view: CenterView): void {
   } catch {
     /* 隐私模式下 localStorage 不可用 */
   }
+}
+
+function readStoredRightPaneOpen(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_RIGHT_PANE_OPEN) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function readStoredRightTab(): DesktopRightTab {
+  try {
+    const raw = localStorage.getItem(STORAGE_RIGHT_PANE_TAB);
+    if (raw === "review" || raw === "editor" || raw === "artifacts" || raw === "workspace") {
+      return raw;
+    }
+  } catch {
+    /* 隐私模式下 localStorage 不可用 */
+  }
+  return "artifacts";
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -94,6 +124,34 @@ export function DesktopLayout(props: SharedViewProps) {
     clamp(readStoredWidth(STORAGE_SIDEBAR_WIDTH, SIDEBAR_DEFAULT), SIDEBAR_MIN, SIDEBAR_MAX),
   );
 
+  // 右侧成果面板状态
+  const [rightPaneOpen, setRightPaneOpen] = useState(readStoredRightPaneOpen);
+  const [rightPaneWidth, setRightPaneWidth] = useState(() =>
+    clamp(readStoredWidth(STORAGE_RIGHT_PANE_WIDTH, RIGHT_PANE_DEFAULT), RIGHT_PANE_MIN, RIGHT_PANE_MAX),
+  );
+  const [rightPaneTab, setRightPaneTab] = useState<DesktopRightTab>(readStoredRightTab);
+
+  const toggleRightPane = useCallback(() => {
+    setRightPaneOpen((current) => {
+      const next = !current;
+      try {
+        localStorage.setItem(STORAGE_RIGHT_PANE_OPEN, String(next));
+      } catch {
+        /* 隐私模式下 localStorage 不可用 */
+      }
+      return next;
+    });
+  }, []);
+
+  const handleSelectRightTab = useCallback((tab: DesktopRightTab) => {
+    setRightPaneTab(tab);
+    try {
+      localStorage.setItem(STORAGE_RIGHT_PANE_TAB, tab);
+    } catch {
+      /* 隐私模式下 localStorage 不可用 */
+    }
+  }, []);
+
   // 拖拽态标志：拖拽期间禁用 grid 过渡动画防止抖动
   const [dragging, setDragging] = useState(false);
   const layoutRef = useRef<HTMLDivElement>(null);
@@ -117,7 +175,7 @@ export function DesktopLayout(props: SharedViewProps) {
     setSettingsOpen(true);
   }, []);
 
-  // 桌面端全局快捷键支持 (Ctrl/Cmd+N 新建, Ctrl/Cmd+1/2 切换视图, Ctrl/Cmd+[ 折叠侧边栏, Ctrl/Cmd+, 打开设置, Esc 关闭设置)
+  // 桌面端全局快捷键支持 (Ctrl/Cmd+N 新建, Ctrl/Cmd+1/2 切换视图, Ctrl/Cmd+B 切换成果面板, Ctrl/Cmd+[ 折叠侧边栏, Ctrl/Cmd+, 打开设置, Esc 关闭设置)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isModifier = e.ctrlKey || e.metaKey;
@@ -139,6 +197,13 @@ export function DesktopLayout(props: SharedViewProps) {
       if (isModifier && (e.code === "Digit2" || e.key === "2")) {
         e.preventDefault();
         switchCenterView("editor");
+        return;
+      }
+
+      // 成果面板快捷切换：Ctrl+B
+      if (isModifier && (e.key === "b" || e.key === "B")) {
+        e.preventDefault();
+        toggleRightPane();
         return;
       }
 
@@ -170,7 +235,7 @@ export function DesktopLayout(props: SharedViewProps) {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [handleOpenSettings, props, settingsOpen, switchCenterView]);
+  }, [handleOpenSettings, props, settingsOpen, switchCenterView, toggleRightPane]);
 
   /* ── 拖拽回调 ─────────────────────────────────────── */
 
@@ -186,6 +251,18 @@ export function DesktopLayout(props: SharedViewProps) {
     setDragging(false);
     setSidebarWidth((w) => {
       writeStoredWidth(STORAGE_SIDEBAR_WIDTH, w);
+      return w;
+    });
+  }, []);
+
+  const handleRightPaneDrag = useCallback((dx: number) => {
+    setRightPaneWidth((w) => clamp(w - dx, RIGHT_PANE_MIN, RIGHT_PANE_MAX));
+  }, []);
+
+  const handleRightPaneDragEnd = useCallback(() => {
+    setDragging(false);
+    setRightPaneWidth((w) => {
+      writeStoredWidth(STORAGE_RIGHT_PANE_WIDTH, w);
       return w;
     });
   }, []);
@@ -212,7 +289,9 @@ export function DesktopLayout(props: SharedViewProps) {
   /* ── 渲染 ─────────────────────────────────────────── */
 
   const effectiveSidebarWidth = sidebarCollapsed ? SIDEBAR_COLLAPSED : sidebarWidth;
-  const gridColumns = `${effectiveSidebarWidth}px minmax(0, 1fr)`;
+  const gridColumns = rightPaneOpen
+    ? `${effectiveSidebarWidth}px minmax(0, 1fr) ${rightPaneWidth}px`
+    : `${effectiveSidebarWidth}px minmax(0, 1fr)`;
 
   return (
     <div className="desktop-shell-root">
@@ -223,6 +302,8 @@ export function DesktopLayout(props: SharedViewProps) {
         onNewChat={props.onNewChat}
         onSwitchView={switchCenterView}
         onToggleSidebar={() => setUserSidebarCollapsed((current) => !current)}
+        onToggleRightPane={toggleRightPane}
+        rightPaneOpen={rightPaneOpen}
         sidebarCollapsed={sidebarCollapsed}
       />
 
@@ -272,22 +353,59 @@ export function DesktopLayout(props: SharedViewProps) {
             <DesktopChatArea
               {...props}
               onOpenSettings={handleOpenSettings}
-            onRenameConversation={props.onRename}
-            onToggleSidebar={() => setUserSidebarCollapsed((current) => !current)}
-            resolvedTheme={resolved}
-            sidebarCollapsed={sidebarCollapsed}
-          />
+              onRenameConversation={props.onRename}
+              onToggleSidebar={() => setUserSidebarCollapsed((current) => !current)}
+              onToggleRightPane={toggleRightPane}
+              rightPaneOpen={rightPaneOpen}
+              resolvedTheme={resolved}
+              sidebarCollapsed={sidebarCollapsed}
+            />
+          </div>
+
+          {editorMounted ? (
+            <EditorView
+              workspace={editorWorkspace}
+              copy={props.copy}
+              resolvedTheme={resolved}
+              hidden={centerView !== "editor"}
+              reviewActive={reviewActive}
+              onReviewActiveChange={setReviewActive}
+            />
+          ) : null}
         </div>
 
-        {editorMounted ? (
-          <EditorView
-            workspace={editorWorkspace}
-            copy={props.copy}
-            resolvedTheme={resolved}
-            hidden={centerView !== "editor"}
-            reviewActive={reviewActive}
-            onReviewActiveChange={setReviewActive}
-          />
+        {/* 右列：成果审阅与工件预览面板（Codex 风格差异审阅、工件画廊、工作区终端） */}
+        {rightPaneOpen ? (
+          <div className="desktop-shell__details">
+            <DragHandle
+              disabled={false}
+              onDrag={handleRightPaneDrag}
+              onDragEnd={handleRightPaneDragEnd}
+              onDragStart={handleDragStart}
+              position="right"
+            />
+            <DesktopRightPane
+              activeTab={rightPaneTab}
+              editorWorkspace={editorWorkspace}
+              onClose={() => {
+                setRightPaneOpen(false);
+                try {
+                  localStorage.setItem(STORAGE_RIGHT_PANE_OPEN, "false");
+                } catch {
+                  /* 隐私模式下 localStorage 不可用 */
+                }
+              }}
+              onOpenFile={(path) => {
+                void editorWorkspace.openFile(path);
+                switchCenterView("editor");
+              }}
+              onOpenReview={() => handleSelectRightTab("review")}
+              onOpenSettings={handleOpenSettings}
+              onSelectTab={handleSelectRightTab}
+              resolvedTheme={resolved}
+              shared={props}
+            />
+          </div>
         ) : null}
       </div>
 
@@ -308,6 +426,5 @@ export function DesktopLayout(props: SharedViewProps) {
       {/* Live2D 看板娘：视口右下角悬浮挂件（自建 #waifu DOM，经 CSS 层叠覆盖置于 IDE 内容之上） */}
       <Live2DWaifu />
     </div>
-  </div>
   );
 }

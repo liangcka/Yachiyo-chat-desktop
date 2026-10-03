@@ -310,4 +310,34 @@ describe("DesktopLayout", () => {
     expect(within(header as HTMLElement).queryByRole("button", { name: "设置与偏好" })).not.toBeInTheDocument();
     expect(within(header as HTMLElement).queryByRole("button", { name: "拍摄" })).not.toBeInTheDocument();
   });
+
+  it("toggles right artifacts and review pane via Ctrl+B and header button", async () => {
+    const user = userEvent.setup();
+    const props = createMockProps();
+    render(<DesktopLayout {...props} />);
+
+    // 初始状态：右侧面板关闭
+    expect(screen.queryByRole("complementary", { name: "成果与多功能审阅面板" })).not.toBeInTheDocument();
+
+    // 1. 点击顶栏成果审阅按钮展开
+    const toggleBtn = screen.getByRole("button", { name: "成果与审阅台快捷切换" });
+    await user.click(toggleBtn);
+
+    expect(screen.getByRole("complementary", { name: "成果与多功能审阅面板" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "代码审阅" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "成果工件" })).toBeInTheDocument();
+
+    // 2. 使用快捷键 Ctrl+B 关闭
+    await user.keyboard("{Control>}b{/Control}");
+    expect(screen.queryByRole("complementary", { name: "成果与多功能审阅面板" })).not.toBeInTheDocument();
+
+    // 3. 再次使用快捷键 Ctrl+B 重新展开
+    await user.keyboard("{Control>}b{/Control}");
+    expect(screen.getByRole("complementary", { name: "成果与多功能审阅面板" })).toBeInTheDocument();
+
+    // 4. 点击面板右上角关闭按钮收起
+    const closeBtn = screen.getByRole("button", { name: "关闭成果面板" });
+    await user.click(closeBtn);
+    expect(screen.queryByRole("complementary", { name: "成果与多功能审阅面板" })).not.toBeInTheDocument();
+  });
 });

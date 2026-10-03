@@ -11,6 +11,15 @@ export interface ModelSelectProps {
   disabled?: boolean;
 }
 
+const PROVIDER_SHORT_LABELS: Record<ProviderId, string> = {
+  stepfun: "StepFun",
+  deepseek: "DeepSeek",
+  glm: "智谱 GLM",
+  openai: "OpenAI",
+  claude: "Claude",
+  gemini: "Gemini",
+};
+
 export function ModelSelect({
   activeProvider,
   activeModel,
@@ -40,24 +49,41 @@ export function ModelSelect({
   }, [open]);
 
   const activeEntry = entries.find((e) => e.provider === activeProvider);
-  const displayLabel = activeEntry
-    ? `${PROVIDER_METADATA[activeEntry.provider].label} (${activeEntry.model || activeModel})`
-    : activeProvider
-      ? PROVIDER_METADATA[activeProvider].label
-      : "选择模型 (Default)";
+  const activeMeta = activeProvider ? PROVIDER_METADATA[activeProvider] : undefined;
+  const vendorShort = activeProvider ? (PROVIDER_SHORT_LABELS[activeProvider] || activeMeta?.label) : undefined;
+  const currentModel = activeEntry?.model || activeModel || activeMeta?.defaultModel;
+
+  const fullLabel = activeMeta
+    ? currentModel
+      ? `${activeMeta.label} (${currentModel})`
+      : activeMeta.label
+    : "选择模型 (Default)";
 
   return (
     <div ref={rootRef} className="dsh-model-select">
       <button
         type="button"
-        className="dsh-model-select__trigger"
-        onClick={() => !disabled && setOpen(!open)}
+        className={`dsh-model-select__trigger ${open ? "dsh-model-select__trigger--active" : ""}`}
+        onClick={() => !disabled && setOpen((prev) => !prev)}
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={displayLabel}
+        title={`${fullLabel} - 点击切换模型`}
       >
-        <span className="dsh-model-select__label">{displayLabel}</span>
+        <Cpu size={13} className="dsh-model-select__icon" />
+        {vendorShort ? (
+          <span className="dsh-model-select__label-group">
+            <span className="dsh-model-select__vendor">{vendorShort}</span>
+            {currentModel ? (
+              <>
+                <span className="dsh-model-select__divider">/</span>
+                <span className="dsh-model-select__model">{currentModel}</span>
+              </>
+            ) : null}
+          </span>
+        ) : (
+          <span className="dsh-model-select__placeholder">选择模型</span>
+        )}
         <ChevronDown size={12} className={`dsh-model-select__chevron ${open ? "dsh-model-select__chevron--open" : ""}`} />
       </button>
 

@@ -1,4 +1,14 @@
-import { Copy, Minus, PanelLeftClose, PanelLeftOpen, Sparkles, Square, X } from "lucide-react";
+import {
+  Copy,
+  Minus,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  Sparkles,
+  Square,
+  X,
+} from "lucide-react";
 import type { MouseEvent } from "react";
 import { useCallback, useEffect, useState } from "react";
 import type { UiCopy } from "../../i18n/messages";
@@ -16,6 +26,8 @@ export interface DesktopTopBarProps {
   onNewChat: () => Promise<void>;
   onSwitchView: (view: "chat" | "editor") => void;
   onToggleSidebar?: () => void;
+  onToggleRightPane?: () => void;
+  rightPaneOpen?: boolean;
   sidebarCollapsed?: boolean;
 }
 
@@ -25,6 +37,8 @@ export function DesktopTopBar({
   onNewChat,
   onSwitchView,
   onToggleSidebar,
+  onToggleRightPane,
+  rightPaneOpen = false,
   sidebarCollapsed = false,
 }: DesktopTopBarProps) {
   const isDesktop = isDesktopApp();
@@ -163,6 +177,19 @@ export function DesktopTopBar({
 
       {/* 3. 弹性空白区域：充当窗口拖拽手柄 */}
       <div className="desktop-topbar__spacer" data-tauri-drag-region />
+
+      {/* 右侧面板展开/收起按钮 */}
+      {onToggleRightPane ? (
+        <button
+          type="button"
+          className="desktop-topbar__collapse-btn"
+          onClick={onToggleRightPane}
+          title={rightPaneOpen ? "收起右侧成果面板 (Ctrl+B)" : "展开右侧成果面板 (Ctrl+B)"}
+          aria-label={rightPaneOpen ? "收起成果面板" : "展开成果面板"}
+        >
+          {rightPaneOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+        </button>
+      ) : null}
 
       {/* 4. 右侧：原生感桌面窗口控制三件套（仅在桌面环境下渲染） */}
       {isDesktop ? (

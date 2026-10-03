@@ -245,7 +245,7 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
             "type": "function",
             "function": {
                 "name": "run_command",
-                "description": "Execute a terminal shell command (PowerShell on Windows, sh on Unix) (requires user approval). 在终端执行命令（需彩叶批准）。用于运行构建、测试、包安装、系统环境检测、磁盘查询（如通过 PowerShell 获取盘符与文件信息）或执行诊断脚本。若未打开特定工作区，将在默认用户环境中执行。",
+                "description": "Execute a terminal shell command (PowerShell on Windows, sh on Unix) (requires user approval). 在终端执行命令（需彩叶批准）。用于运行构建、测试、包安装、系统环境检测、磁盘查询（如通过 PowerShell 获取盘符与文件信息）或执行诊断脚本。若未打开特定工作区，将在默认用户环境中执行。（宿主探查准则：遇到存疑、溢出或冲突数据必须多步交叉求证；Windows 下查询显存请使用 nvidia-smi 或注册表 HardwareInformation.qwMemorySize，避免使用有 4GB 截断限制的 Win32_VideoController.AdapterRAM）。",
                 "parameters": {
                     "type": "object",
                     "properties": {

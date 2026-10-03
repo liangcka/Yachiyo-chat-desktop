@@ -2,7 +2,16 @@ import type { Conversation, Locale } from "../../../domain/chat";
 import type { UiCopy } from "../../../i18n/messages";
 import type { SettingsTabKey } from "../../../components/settings/SettingsModal";
 
-export type DesktopRightTab = "workspace" | "llm" | "skills" | "memory" | "settings" | "none";
+export type DesktopRightTab =
+  | "review"
+  | "editor"
+  | "artifacts"
+  | "workspace"
+  | "llm"
+  | "skills"
+  | "memory"
+  | "settings"
+  | "none";
 
 export type TimeGroupKey = "pinned" | "today" | "yesterday" | "previous7Days" | "older";
 

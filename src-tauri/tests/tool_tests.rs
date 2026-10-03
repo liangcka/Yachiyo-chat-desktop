@@ -374,4 +374,47 @@ fn test_search_workspace_files_fuzzy() {
     fs::remove_dir_all(&temp_dir).ok();
 }
 
+#[test]
+fn test_detect_and_append_host_environment_hints_video_controller() {
+    use yachiyo_desktop_lib::tools::shell::detect_and_append_host_environment_hints;
+
+    let cmd = "Get-CimInstance Win32_VideoController | Select-Object Name, AdapterRAM";
+    let mut output = "Name: NVIDIA GeForce RTX 3060 Laptop GPU\nAdapterRAM: 4293918720".to_string();
+
+    detect_and_append_host_environment_hints(cmd, &mut output);
+
+    assert!(output.contains("系统环境纠偏提示"));
+    assert!(output.contains("32 位 uint32 字段"));
+    assert!(output.contains("nvidia-smi"));
+    assert!(output.contains("HardwareInformation.qwMemorySize"));
+}
+
+#[test]
+fn test_detect_and_append_host_environment_hints_ignored_for_other_commands() {
+    use yachiyo_desktop_lib::tools::shell::detect_and_append_host_environment_hints;
+
+    let cmd = "Get-PSDrive -PSProvider FileSystem";
+    let mut output = "Name Used Free\nC 50GB 100GB".to_string();
+
+    detect_and_append_host_environment_hints(cmd, &mut output);
+
+    assert!(!output.contains("系统环境纠偏提示"));
+}
+
+#[test]
+fn test_run_command_schema_includes_vram_and_verification_hints() {
+    use yachiyo_desktop_lib::tools::get_agent_tools_schema;
+
+    let schemas = get_agent_tools_schema();
+    let run_cmd = schemas
+        .iter()
+        .find(|s| s["function"]["name"] == "run_command")
+        .expect("run_command tool must exist");
+
+    let desc = run_cmd["function"]["description"].as_str().unwrap();
+    assert!(desc.contains("交叉求证"));
+    assert!(desc.contains("HardwareInformation.qwMemorySize"));
+}
+
+
 
