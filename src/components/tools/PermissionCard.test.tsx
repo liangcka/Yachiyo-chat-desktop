@@ -66,19 +66,19 @@ describe("PermissionCard", () => {
     expect(onDeny).toHaveBeenCalledTimes(1);
   });
 
-  it("点击批准一次触发 onApprove(false)", () => {
+  it("点击本次允许触发 onApprove(false)", () => {
     const onApprove = vi.fn();
     render(<PermissionCard {...defaultProps} onApprove={onApprove} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /批准一次/ }));
+    fireEvent.click(screen.getByRole("button", { name: /本次允许/ }));
     expect(onApprove).toHaveBeenCalledWith(false);
   });
 
-  it("点击批准并本会话记住触发 onApprove(true)", () => {
+  it("点击总是允许此类命令触发 onApprove(true)", () => {
     const onApprove = vi.fn();
     render(<PermissionCard {...defaultProps} onApprove={onApprove} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /批准并本会话记住/ }));
+    fireEvent.click(screen.getByRole("button", { name: /总是允许此类命令/ }));
     expect(onApprove).toHaveBeenCalledWith(true);
   });
 
@@ -90,12 +90,12 @@ describe("PermissionCard", () => {
     expect(onDeny).toHaveBeenCalledTimes(1);
   });
 
-  it("按下 Ctrl+Enter 触发 onApprove(true)", () => {
+  it("按下 Ctrl+Enter 只允许本次操作", () => {
     const onApprove = vi.fn();
     render(<PermissionCard {...defaultProps} onApprove={onApprove} />);
 
     fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
-    expect(onApprove).toHaveBeenCalledWith(true);
+    expect(onApprove).toHaveBeenCalledWith(false);
   });
 
   it("点击复制按钮调用剪贴板 API", async () => {

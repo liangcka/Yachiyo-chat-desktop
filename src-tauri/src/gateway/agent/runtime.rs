@@ -1,7 +1,7 @@
 use crate::crypto::keys::KeyStore;
 use crate::gateway::agent::checkpoint::CheckpointStore;
 use crate::gateway::agent::messages::{history_to_agent_messages, AgentMessage};
-use crate::gateway::agent::permission::ApprovalRegistry;
+use crate::gateway::agent::permission::{approval_key, ApprovalRegistry};
 use crate::gateway::agent::pruner::{
     prune_agent_messages, DEFAULT_PRUNE_HEAD_CHARS, DEFAULT_PRUNE_TAIL_CHARS,
     DEFAULT_PRUNE_THRESHOLD_CHARS,
@@ -10,15 +10,14 @@ use crate::gateway::prompt::build_agent_system_prompt;
 use crate::gateway::providers::registry::get_provider_config;
 use crate::gateway::stream::{encode_client_event, encode_ping};
 use crate::tools::{
-    execute_tool_with_context, preview_tool_output, process_tool_output, tool_risk,
-    FsObservationTracker, ToolRisk, WorkspaceManager,
+    authorize_tool, execute_tool_with_context, preview_tool_output, process_tool_output, tool_risk,
+    FsObservationTracker, ToolAuthorization, ToolRisk, WorkspaceManager,
 };
-use crate::types::{ClientChatRequest, ClientStreamEvent, ProviderId, TokenUsage, ToolInvocation};
+use crate::types::{AgentExecutionMode, ClientChatRequest, ClientStreamEvent, ProviderId, TokenUsage, ToolInvocation};
 
 use async_stream::stream;
 use futures::Stream;
 use futures_util::StreamExt;
-use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -35,11 +34,12 @@ pub enum LoopEmit {
 pub struct AgentLoopConfig {
     pub max_turns: u32,
     pub permission_timeout_secs: u64,
+    pub execution_mode: AgentExecutionMode,
 }
 
 impl Default for AgentLoopConfig {
     fn default() -> Self {
-        Self { max_turns: 12, permission_timeout_secs: 300 }
+        Self { max_turns: 12, permission_timeout_secs: 300, execution_mode: AgentExecutionMode::Confirm }
     }
 }
 
@@ -79,6 +79,34 @@ fn accumulate_usage(acc: &mut TokenUsage, inc: &Option<TokenUsage>) {
 const DENIED_TOOL_RESULT: &str = "用户拒绝了本次操作。不要立即重试同一动作；请改用其他方案，或向用户说明需要该操作的理由。";
 
 pub async fn run_agent_loop(
+    messages: Vec<AgentMessage>,
+    tools_schema: Vec<serde_json::Value>,
+    config: AgentLoopConfig,
+    executor: &dyn TurnExecutor,
+    gate: &ApprovalRegistry,
+    checkpoint: &mut Option<CheckpointStore>,
+    cancelled: &AtomicBool,
+    sink: &EventSink,
+    workspace_root: Option<&Path>,
+    http_client: &reqwest::Client,
+) -> Result<LoopOutcome, String> {
+    run_agent_loop_ext(
+        messages,
+        tools_schema,
+        config,
+        executor,
+        gate,
+        checkpoint,
+        cancelled,
+        sink,
+        workspace_root,
+        http_client,
+        None,
+    )
+    .await
+}
+
+pub async fn run_agent_loop_ext(
     mut messages: Vec<AgentMessage>,
     // 契约要求的保留参数：schema 由执行器自带，循环内核不消费
     _tools_schema: Vec<serde_json::Value>,
@@ -90,16 +118,17 @@ pub async fn run_agent_loop(
     sink: &EventSink,
     workspace_root: Option<&Path>,
     http_client: &reqwest::Client,
+    mcp_manager: Option<&Arc<crate::mcp::McpManager>>,
 ) -> Result<LoopOutcome, String> {
     let mut usage = TokenUsage::default();
-    let mut session_allowed: HashSet<String> = HashSet::new();
     let fs_tracker = FsObservationTracker::new();
     let run_id = checkpoint
         .as_ref()
         .map(|c| c.run_id().to_string())
-        .unwrap_or_else(|| "no-workspace".to_string());
+        .unwrap_or_else(|| format!("no-workspace-{:016x}", rand::random::<u64>()));
 
     for turn in 1..=config.max_turns {
+        let mut turn_checkpoint_created = false;
         if cancelled.load(Ordering::Relaxed) {
             return Ok(LoopOutcome::Cancelled);
         }
@@ -124,6 +153,7 @@ pub async fn run_agent_loop(
         });
 
         for call in &outcome.tool_calls {
+            if cancelled.load(Ordering::Relaxed) { return Ok(LoopOutcome::Cancelled); }
             sink(LoopEmit::Event(ClientStreamEvent::ToolCall {
                 id: call.id.clone(),
                 name: call.name.clone(),
@@ -132,8 +162,12 @@ pub async fn run_agent_loop(
 
             let approved = match tool_risk(&call.name) {
                 Some(ToolRisk::Read) | None => true,
+                Some(ToolRisk::Write) if config.execution_mode == AgentExecutionMode::Readonly => false,
+                Some(ToolRisk::Write) if workspace_root.is_none() && call.name == "write_file" => false,
+                Some(ToolRisk::Write) if config.execution_mode == AgentExecutionMode::FullAuto => true,
                 Some(ToolRisk::Write) => {
-                    if session_allowed.contains(&call.name) {
+                    let key = approval_key(&call.name, &call.arguments, workspace_root)?;
+                    if gate.is_allowed(&key) {
                         true
                     } else {
                         let request_id = format!("{}-{}", run_id, call.id);
@@ -166,6 +200,7 @@ pub async fn run_agent_loop(
                             }
                         };
                         let approved = decision.as_ref().map(|d| d.approved).unwrap_or(false);
+                        gate.cancel(&request_id);
                         sink(LoopEmit::Event(ClientStreamEvent::PermissionResolved {
                             request_id,
                             approved,
@@ -173,7 +208,9 @@ pub async fn run_agent_loop(
                         if approved {
                             if let Some(d) = decision {
                                 if d.session_scope {
-                                    session_allowed.insert(call.name.clone());
+                                    if let Err(error) = gate.remember(key) {
+                                        tracing::warn!("长期授权保存失败，本次调用仍按单次批准执行: {}", error);
+                                    }
                                 }
                             }
                         }
@@ -182,28 +219,63 @@ pub async fn run_agent_loop(
                 }
             };
 
+            if cancelled.load(Ordering::Relaxed) { return Ok(LoopOutcome::Cancelled); }
+
             let started = Instant::now();
             let (output, is_error) = if approved {
-                if call.name == "write_file" {
-                    if let Some(cp) = checkpoint.as_mut() {
-                        if let Some(path) = call.arguments.get("path").and_then(|v| v.as_str()) {
-                            cp.backup_before_write(path)?;
+                let auth = ToolAuthorization::Agent { mode: config.execution_mode, approved };
+                let preparation = authorize_tool(&call.name, auth).and_then(|_| {
+                    if tool_risk(&call.name) == Some(ToolRisk::Write) && !turn_checkpoint_created {
+                        if let Some(cp) = checkpoint.as_mut() {
+                            cp.capture_turn(turn)?;
                         }
+                        turn_checkpoint_created = true;
+                    }
+                    Ok(())
+                });
+                if let Err(error) = preparation {
+                    (error, true)
+                } else if call.name.starts_with("mcp__") {
+                    if let Some(mcp) = mcp_manager {
+                        match mcp.execute_tool(&call.name, &call.arguments).await {
+                            Ok(out) => (out, false),
+                            Err(err) => (err, true),
+                        }
+                    } else {
+                        ("未配置或不可用的 MCP 管理器".to_string(), true)
+                    }
+                } else {
+                    match execute_tool_with_context(
+                        &call.name,
+                        &call.arguments,
+                        workspace_root,
+                        http_client,
+                        Some(&fs_tracker),
+                        // 授权凭据显式随调用下发：执行边界按 `approved` 独立判定，
+                        // 循环内的门禁只用于给出面向模型的拒绝话术
+                        auth,
+                    )
+                    .await
+                    {
+                        Ok(out) => (out, false),
+                        Err(err) => (err, true),
                     }
                 }
-                match execute_tool_with_context(&call.name, &call.arguments, workspace_root, http_client, Some(&fs_tracker)).await {
-                    Ok(out) => (out, false),
-                    Err(err) => (err, true),
-                }
             } else {
-                (DENIED_TOOL_RESULT.to_string(), true)
+                (if config.execution_mode == AgentExecutionMode::Readonly {
+                    "当前为只读模式，该操作不会执行。请用户显式切换执行模式后再操作。"
+                } else if call.name == "write_file" && workspace_root.is_none() {
+                    "当前未选择工作区项目，无法写入文件。请先在界面选择或打开一个项目工作区。"
+                } else {
+                    DENIED_TOOL_RESULT
+                }.to_string(), true)
             };
             let duration_ms = started.elapsed().as_millis() as u64;
 
             let model_output = if is_error {
                 output.clone()
             } else {
-                process_tool_output(&call.name, &output, workspace_root)
+                process_tool_output(&call.name, &output, if config.execution_mode == AgentExecutionMode::Readonly { None } else { workspace_root })
             };
             sink(LoopEmit::Event(ClientStreamEvent::ToolResult {
                 id: call.id.clone(),
@@ -373,6 +445,7 @@ pub fn run_agent_chat_stream(
     key_store: Arc<KeyStore>,
     workspace_manager: Arc<WorkspaceManager>,
     approvals: Arc<ApprovalRegistry>,
+    mcp_manager: Arc<crate::mcp::McpManager>,
 ) -> impl Stream<Item = Result<String, axum::Error>> {
     stream! {
         let provider_id = request.provider.unwrap_or(ProviderId::Stepfun);
@@ -403,13 +476,43 @@ pub fn run_agent_chat_stream(
         let _guard = CancelOnDrop(Arc::clone(&cancelled));
 
         // 若客户端显式传递了当前活跃工作区路径，强行对齐 workspace_manager
-        if let Some(ws) = request.agent.as_ref().and_then(|a| a.workspace.as_deref()) {
+        let root = if let Some(ws) = request.agent.as_ref().and_then(|a| a.workspace.as_deref()) {
             let ws_path = std::path::Path::new(ws);
-            if ws_path.exists() && ws_path.is_dir() {
-                let _ = workspace_manager.set_workspace_root(ws_path.to_path_buf());
+            let requested = ws_path.canonicalize().and_then(|path| if path.is_dir() { Ok(path) } else { Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "工作区不是目录")) });
+            let requested = match requested {
+                Ok(path) => path,
+                Err(error) => {
+                tracing::warn!("Agent 工作区无效: {}", error);
+                yield Ok(encode_client_event(&ClientStreamEvent::Error { code: "INVALID_REQUEST".to_string() }));
+                return;
+                }
+            };
+            if let Err(error) = workspace_manager.set_workspace_root(requested.clone()) {
+                tracing::warn!("Agent 工作区无效: {}", error);
+                yield Ok(encode_client_event(&ClientStreamEvent::Error { code: "INVALID_REQUEST".to_string() }));
+                return;
             }
+            Some(requested)
+        } else { workspace_manager.get_workspace_root() };
+
+        let workspace_lease = match root.as_deref().map(|root| workspace_manager.acquire_workspace(root)).transpose() {
+            Ok(lease) => lease,
+            Err(error) => {
+                tracing::warn!("Agent 工作区忙: {}", error);
+                yield Ok(encode_client_event(&ClientStreamEvent::Error { code: "WORKSPACE_BUSY".to_string() }));
+                return;
+            }
+        };
+
+        let execution_mode = request.agent.as_ref().map(|config| config.execution_mode).unwrap_or_default();
+        let mut tools_schema = crate::tools::get_agent_tools_schema();
+        if execution_mode == AgentExecutionMode::Readonly {
+            tools_schema.retain(|schema| schema.get("function").and_then(|function| function.get("name")).and_then(|name| name.as_str())
+                .map(|name| tool_risk(name) == Some(ToolRisk::Read)).unwrap_or(false));
+        } else {
+            let mcp_schema = mcp_manager.get_agent_tools_schema().await;
+            tools_schema.extend(mcp_schema);
         }
-        let root = workspace_manager.get_workspace_root();
 
         let system_prompt = build_agent_system_prompt(request.locale, request.current_time.as_deref(), root.as_deref());
         let executor = HttpTurnExecutor {
@@ -418,22 +521,18 @@ pub fn run_agent_chat_stream(
             api_key,
             model,
             system_prompt,
-            tools_schema: crate::tools::get_agent_tools_schema(),
+            tools_schema,
         };
 
         let agent_config = request.agent.as_ref()
-            .map(|a| AgentLoopConfig { max_turns: a.max_turns.unwrap_or(12), permission_timeout_secs: 300 })
+            .map(|a| AgentLoopConfig { max_turns: a.max_turns.unwrap_or(12), permission_timeout_secs: 300, execution_mode: a.execution_mode })
             .unwrap_or_default();
         let run_id = format!(
             "{}-{}",
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(),
             rand::random::<u32>()
         );
-        let mut checkpoint = root.as_deref().map(|r| {
-            let cp = CheckpointStore::new(r, &run_id);
-            let _ = cp.ensure_gitignore();
-            cp
-        });
+        let mut checkpoint = root.as_deref().map(|r| CheckpointStore::new(r, &run_id));
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LoopEmit>();
         let sink: EventSink = Arc::new(move |emit| { let _ = tx.send(emit); });
@@ -441,8 +540,11 @@ pub fn run_agent_chat_stream(
         let loop_messages = history_to_agent_messages(&request.messages);
         let exec = executor;
         let root_for_task = root.clone();
+        let mcp_for_loop = Arc::clone(&mcp_manager);
         let handle = tokio::spawn(async move {
-            run_agent_loop(
+            // 租约归执行任务持有，SSE 断开后也不能提前允许恢复。
+            let _workspace_lease = workspace_lease;
+            run_agent_loop_ext(
                 loop_messages,
                 exec.tools_schema.clone(),
                 agent_config,
@@ -453,6 +555,7 @@ pub fn run_agent_chat_stream(
                 &sink,
                 root_for_task.as_deref(),
                 &exec.client,
+                Some(&mcp_for_loop),
             )
             .await
         });

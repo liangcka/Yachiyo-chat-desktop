@@ -1,12 +1,12 @@
 # Yachiyo IDE 演进差距分析
 
-本文档以"**带 Live2D 看板娘的代码 IDE**"为目标形态（UI 对标 Codex / Claude Code / Antigravity / Trae Work），对仓库当前状态做系统性差距分析，作为后续演进规划的基准。
+本文档保留早期 IDE 演进规划与实施标记，部分条目属于历史设计，不应作为当前功能清单。当前交付目标为桌面对话与开发工作区，统一采用桌面布局，已移除移动版界面与 Live2D 挂件；当前操作入口见 [桌面使用指南](DESKTOP_GUIDE.md)。
 
 ***
 
 ## 1. 目标形态定义
 
-- **产品定位**：面向开发者的 AI 代码 IDE，差异化在于二次元看板娘陪伴与星空玻璃视觉体系。
+- **产品定位**：围绕角色对话、代码编辑和项目协作的桌面工作区，沿用现有深海蓝主题，以清晰的内容层级呈现任务和成果。
 
 - **能力基线**（判定"是否达成"的标准）：
 
@@ -41,7 +41,7 @@
 | A3 | ✅   | **工具结果走四层手写协议**（Rust 塞 markdown 代码块 → SSE → 前端正则解析渲染），契约脆弱，任一层变动全链路断裂 —— **已实施（2026-09-02 阶段一落地，`ChatMessage.toolSteps`** **结构化渲染）**                                                           | `src/components/MessageBubble.tsx` L29                                  |
 | A4 | ✅   | **无权限确认门 / 无 checkpoint 回滚**。写文件、执行命令前无人工审批；无法回滚 Agent 破坏性操作 —— **已实施（2026-09-02 阶段一落地，`ApprovalRegistry`** **+** **`CheckpointStore`）**                                                       | `src-tauri/src/tools/mod.rs`（`execute_tool` 直通执行）                       |
 | A5 | 🟠  | **无任务规划与待办体系**。对标 Claude Code plan 模式 / Trae Work 任务面板，缺少可暂停、可审阅的任务结构                                                                                                                          | 全局缺失                                                                    |
-| A6 | 🟠  | **云端路径零工具能力**。请求模型无 tool 字段，Web/移动端为纯聊天                                                                                                                                                        | `functions/_shared/validation.ts` L26-L38                               |
+| A6 | 🟠  | **云端路径零工具能力**。请求模型无 tool 字段，浏览器路径不提供本地工具                                                                                                                                                        | `functions/_shared/validation.ts` L26-L38                               |
 
 ### B. IDE UI 层
 
@@ -52,14 +52,14 @@
 | B3 | ✅   | **文件浏览仅一层平铺**。只列根目录，无递归树、无工作区搜索、无 `@` 文件引用 —— **已实施（2026-09-02 阶段二落地，递归懒加载文件树 + @ 引用注入对话，`src/components/desktop/FileTree.tsx`）**（工作区搜索仍缺，归阶段三增强）                                  | `WorkspacePanel.tsx` L29                        |
 | B4 | 🟠  | **终端非 PTY**。为"日志窗 + 单命令输入"，交互式命令不可用，无会话保持与命令历史                                                                                                                                     | `WorkspacePanel.tsx` L63-L76                    |
 | B5 | 🟠  | **布局是聊天应用三栏，非 IDE 骨架**。缺活动栏、面板 dock 体系、状态栏、命令面板（Ctrl+K/Ctrl+P）                                                                                                                     | `src/views/desktop/DesktopLayout.tsx` L196-L281 |
-| B6 | 🔶  | **Live2D 看板娘零集成**。`index.html` 静态脚本注入、固定右侧定位，与 React 布局无通信，无法随任务状态联动 —— **部分实施（2026-09-02 落地 React 接入第一步：`Live2DWaifu`** **组件随桌面布局动态注入 + 视口右下角悬浮层叠策略；任务状态联动仍缺）**                   | `src/components/desktop/Live2DWaifu.tsx`        |
+| B6 | — | **Live2D 挂件已退出当前范围**。历史方案曾通过 React 动态加载；当前已移除加载组件和设置入口，不再作为待实施项。 | 见 [桌面使用指南](DESKTOP_GUIDE.md) |
 
 ### C. 架构债（IDE 化的承载瓶颈）
 
 | #  | 严重度 | 差距                                                                                                         | 证据                                            |
 | :- | :-- | :--------------------------------------------------------------------------------------------------------- | :-------------------------------------------- |
 | C1 | 🟠  | **巨型文件**：`use-chat-controller.ts` 1252 行、`SettingsModal.tsx` 1008 行、`App.tsx` 651 行。向现有结构叠加编辑器/终端/面板会率先失控  | `src/app/use-chat-controller.ts` 等            |
-| C2 | 🟡  | **设置体系新旧并存**：`LlmSettingsPanel.tsx`（637 行）同时被 MobileLayout、DesktopRightPane、SettingsModal 引用，模型管理存在两个入口未收口 | `src/components/LlmSettingsPanel.tsx` 及 4 处引用 |
+| C2 | 🟡  | **设置体系新旧并存**：`LlmSettingsPanel.tsx` 由 DesktopRightPane 与 SettingsModal 共用，模型管理仍有两个入口；原 MobileLayout 引用已随移动界面移除 | `src/components/LlmSettingsPanel.tsx` |
 | C3 | 🟡  | **云端 provider 分支重复**：自带 key 与 StepFun fallback 两分支的错误映射与流代理逻辑高度相似                                          | `functions/api/chat.ts` L172-L285             |
 | C4 | 🟡  | **消息管道三层并存**：云端 SSE 事件、桌面网关 SSE 事件、markdown 假协议，`MessageBubble` 同时承担解析器职责                                  | `src/components/MessageBubble.tsx`            |
 
@@ -80,7 +80,7 @@
 ─────────────────      ─────────────────        ─────────────────         ─────────────────
 A1 多步 Agent 循环      B1 Monaco 编辑器          B5 IDE 布局/dock 体系        D1 桌面 CI + release
 A2 原生 function call    B2 diff 审阅+逐块采纳      C1 巨型文件拆分             D2 自动更新
-A3 结构化工具协议        B3 递归文件树+@引用        B6 Live2D React 集成        D3 CSP 收紧
+A3 结构化工具协议        B3 递归文件树+@引用        B6 历史挂件（已退出范围）        D3 CSP 收紧
 A4 权限门+checkpoint     B4 PTY 终端               C2 设置体系收口             D4 桌面 E2E
   （顺带拆 C3/C4）                                  A5 任务规划面板             D5 崩溃上报
 ```
@@ -103,5 +103,5 @@ A4 权限门+checkpoint     B4 PTY 终端               C2 设置体系收口   
 2. **工具协议**：全量切换原生 function calling，还是保留文本协议作为不支持 tools 的 Provider 的降级路径？
 3. **编辑器选型**：Monaco（重、VS Code 同源）vs CodeMirror 6（轻、可定制星空视觉）？
 4. **权限门粒度**：每次工具调用确认 vs 写操作确认 vs 会话级白名单？
-5. **Live2D 集成方式**：封装为 React 组件接入布局系统，还是保留独立挂件层 + 事件总线通信？
+5. **Live2D 挂件**：已退出当前产品范围，不再作为待实施项。历史 B6 记录仅用于说明早期方案。
 

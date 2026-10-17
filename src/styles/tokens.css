@@ -26,12 +26,12 @@
   --border-l1: rgba(255, 255, 255, 0.08);
   --border-l2: rgba(135, 172, 238, 0.14);
 
-  --surface-sidebar: #071436;
+  --surface-sidebar: #17191d;
   --surface-card: var(--glass);
   --surface-input: var(--glass);
   --shadow-elevated: 0 4px 24px rgba(0, 0, 0, 0.35);
 
-  --bubble-user-bg: rgb(56 108 194 / 48%);
+  --bubble-user-bg: #2a2d32;
   --bubble-user-border: rgba(255, 255, 255, 0.16);
   --bubble-assistant-bg: rgba(14, 25, 48, 0.65);
   --bubble-assistant-border: rgba(255, 255, 255, 0.09);
@@ -40,7 +40,7 @@
   --accent-brand: #4b8bf5;
   --accent-brand-soft: rgba(75, 139, 245, 0.18);
 
-  --focus-ring: rgb(210 228 255 / 92%);
+  --focus-ring: #c4c4c8;
 
   /* Yachiyo 角色动作与专属视觉 Tokens */
   --yachiyo-emote-bg: rgba(168, 85, 247, 0.12);
@@ -127,13 +127,13 @@
   --border-l1: rgba(255, 255, 255, 0.08);
   --border-l2: rgba(135, 172, 238, 0.14);
 
-  --surface-sidebar: #071436;
+  --surface-sidebar: #17191d;
   --surface-card: #0b1a42;
   --surface-input: #0b1a42;
   --shadow-elevated: 0 4px 24px rgba(0, 0, 0, 0.35);
 
   /* 用户胶囊：Yachiyo 蓝（原版 rgb(80 125 187 / 45%) 毛玻璃）在深蓝背景上的实底等效色 */
-  --bubble-user-bg: #294a7e;
+  --bubble-user-bg: #2a2d32;
   --bubble-user-border: rgba(255, 255, 255, 0.14);
   --bubble-assistant-bg: #071436;
   --bubble-assistant-border: rgba(255, 255, 255, 0.09);
@@ -141,7 +141,7 @@
   --accent-brand: #4b8bf5;
   --accent-brand-soft: rgba(75, 139, 245, 0.18);
 
-  --focus-ring: rgb(210 228 255 / 92%);
+  --focus-ring: #c4c4c8;
 
   /* 角色情绪与动作高亮色（深色） */
   --yachiyo-emote-bg: rgba(168, 85, 247, 0.18);
@@ -265,14 +265,14 @@
   --border-l1: rgba(16, 54, 109, 0.06);
   --border-l2: rgba(16, 54, 109, 0.11);
 
-  --surface-sidebar: #f0f4fb;
+  --surface-sidebar: #f7f7f7;
   --surface-card: #ffffff;
   --surface-input: #ffffff;
   --shadow-elevated: 0 4px 20px rgba(16, 54, 109, 0.07);
 
-  /* Yachiyo 主题色气泡：用户微透清透冰晶蓝，助手纯净琉璃白卡片 */
-  --bubble-user-bg: #e5efff;
-  --bubble-user-border: #bfdbfe;
+  /* 用户消息使用中性色，正文与气泡保持清晰对比。 */
+  --bubble-user-bg: #f1f1ef;
+  --bubble-user-border: transparent;
   --bubble-assistant-bg: rgba(255, 255, 255, 0.95);
   --bubble-assistant-border: rgba(16, 54, 109, 0.08);
 
@@ -280,7 +280,7 @@
   --accent-brand: #10366d;
   --accent-brand-soft: rgba(16, 54, 109, 0.08);
 
-  --focus-ring: #10366d;
+  --focus-ring: #c4c4c8;
 
   /* 角色情绪与动作高亮色（浅色） */
   --yachiyo-emote-bg: rgba(147, 51, 234, 0.08);

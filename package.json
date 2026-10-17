@@ -1,7 +1,7 @@
 {
   "name": "yachiyo-chat",
   "version": "0.1.0",
-  "description": "Mobile-first PWA for roleplay chat with Tsukimi Yachiyo, featuring starfield glass UI, multi-provider LLM support, web search, and offline capabilities.",
+  "description": "Desktop chat and developer workspace for Tsukimi Yachiyo, built with Tauri, React, multi-provider LLM support, and local conversation storage.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

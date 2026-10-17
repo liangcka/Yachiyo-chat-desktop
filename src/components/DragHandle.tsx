@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 
 interface DragHandleProps {
   position: "left" | "right";
@@ -8,12 +8,7 @@ interface DragHandleProps {
   disabled?: boolean;
 }
 
-/**
- * 可拖拽分隔条 —— 用于调整左右面板宽度。
- *
- * 使用 Pointer Capture 保证拖拽期间即使光标移出元素也能持续接收事件，
- * 通过 rAF 节流避免高频 pointermove 导致的布局抖动。
- */
+/** 指针捕获保证越过面板边界后仍可拖动；每帧合并位移，并在松开时提交最后一段。 */
 const DragHandle = React.memo(function DragHandle({
   position,
   onDrag,
@@ -21,113 +16,93 @@ const DragHandle = React.memo(function DragHandle({
   onDragEnd,
   disabled = false,
 }: DragHandleProps) {
-  // 拖拽基准 X 坐标，每次 move 后更新为最新位置以计算增量
   const baseXRef = useRef(0);
-  // rAF ID，用于节流和组件卸载 / pointerup 时取消待执行帧
+  const latestXRef = useRef(0);
   const rafIdRef = useRef(0);
-  // 标记当前是否处于拖拽状态，避免 pointerup 后残余的 rAF 回调仍调用 onDrag
-  const draggingRef = useRef(false);
-  // 分隔条 DOM 引用
+  const pointerIdRef = useRef<number | null>(null);
   const handleRef = useRef<HTMLDivElement>(null);
 
-  const handlePointerDown = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      if (disabled) return;
+  useEffect(() => () => {
+    if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+    pointerIdRef.current = null;
+  }, []);
 
-      // 仅响应主按键（鼠标左键 / 触屏主手指）
-      if (e.button !== 0) return;
+  const flushDrag = useCallback(() => {
+    const dx = latestXRef.current - baseXRef.current;
+    baseXRef.current = latestXRef.current;
+    if (dx !== 0) onDrag(dx);
+  }, [onDrag]);
 
-      e.preventDefault();
-      const el = e.currentTarget;
-      el.setPointerCapture(e.pointerId);
+  const finishDrag = useCallback((element: HTMLDivElement) => {
+    const pointerId = pointerIdRef.current;
+    if (pointerId === null) return;
+    pointerIdRef.current = null;
+    if (rafIdRef.current) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = 0;
+    }
+    flushDrag();
+    if (element.hasPointerCapture?.(pointerId)) element.releasePointerCapture(pointerId);
+    delete element.dataset.active;
+    onDragEnd?.();
+  }, [flushDrag, onDragEnd]);
 
-      baseXRef.current = e.clientX;
-      draggingRef.current = true;
-      el.dataset.active = "";
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (disabled || event.button !== 0 || pointerIdRef.current !== null) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    pointerIdRef.current = event.pointerId;
+    baseXRef.current = event.clientX;
+    latestXRef.current = event.clientX;
+    event.currentTarget.dataset.active = "";
+    onDragStart?.();
+  }, [disabled, onDragStart]);
 
-      onDragStart?.();
-    },
-    [disabled, onDragStart],
-  );
-
-  const handlePointerMove = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      if (!draggingRef.current) return;
-
-      const clientX = e.clientX;
-
-      // 取消上一帧尚未执行的回调，保证每帧最多触发一次 onDrag
-      if (rafIdRef.current) {
-        cancelAnimationFrame(rafIdRef.current);
-      }
-
+  const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerId !== pointerIdRef.current) return;
+    latestXRef.current = event.clientX;
+    if (!rafIdRef.current) {
       rafIdRef.current = requestAnimationFrame(() => {
-        if (!draggingRef.current) return;
-
-        const dx = clientX - baseXRef.current;
-        if (dx !== 0) {
-          baseXRef.current = clientX;
-          onDrag(dx);
-        }
-      });
-    },
-    [onDrag],
-  );
-
-  const handlePointerUp = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      if (!draggingRef.current) return;
-
-      draggingRef.current = false;
-
-      // 清除可能残留的 rAF 回调
-      if (rafIdRef.current) {
-        cancelAnimationFrame(rafIdRef.current);
         rafIdRef.current = 0;
-      }
+        if (pointerIdRef.current !== null) flushDrag();
+      });
+    }
+  }, [flushDrag]);
 
-      const el = e.currentTarget;
-      el.releasePointerCapture(e.pointerId);
-      delete el.dataset.active;
+  const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerId !== pointerIdRef.current) return;
+    latestXRef.current = event.clientX;
+    finishDrag(event.currentTarget);
+  }, [finishDrag]);
 
-      onDragEnd?.();
-    },
-    [onDragEnd],
-  );
+  const handlePointerCancel = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerId === pointerIdRef.current) finishDrag(event.currentTarget);
+  }, [finishDrag]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (disabled) return;
-
-      const STEP = 10;
-      let dx = 0;
-
-      if (e.key === "ArrowLeft") {
-        dx = -STEP;
-      } else if (e.key === "ArrowRight") {
-        dx = STEP;
-      }
-
-      if (dx !== 0) {
-        e.preventDefault();
-        onDrag(dx);
-      }
-    },
-    [disabled, onDrag],
-  );
+  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (disabled) return;
+    const dx = event.key === "ArrowLeft" ? -10 : event.key === "ArrowRight" ? 10 : 0;
+    if (dx === 0) return;
+    event.preventDefault();
+    onDragStart?.();
+    onDrag(dx);
+    onDragEnd?.();
+  }, [disabled, onDrag, onDragStart, onDragEnd]);
 
   return (
-    // ARIA: focusable separator 是合法的交互模式（用于调节面板大小）
     // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <div
       ref={handleRef}
       className={`drag-handle drag-handle--${position}`}
       role="separator"
+      aria-label={position === "left" ? "调整侧栏宽度" : "调整审阅面板宽度"}
       aria-orientation="vertical"
       tabIndex={disabled ? -1 : 0}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+      onLostPointerCapture={handlePointerCancel}
       onKeyDown={handleKeyDown}
       style={disabled ? { pointerEvents: "none" } : undefined}
     >

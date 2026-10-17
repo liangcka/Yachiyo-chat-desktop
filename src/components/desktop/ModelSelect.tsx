@@ -11,14 +11,7 @@ export interface ModelSelectProps {
   disabled?: boolean;
 }
 
-const PROVIDER_SHORT_LABELS: Record<ProviderId, string> = {
-  stepfun: "StepFun",
-  deepseek: "DeepSeek",
-  glm: "智谱 GLM",
-  openai: "OpenAI",
-  claude: "Claude",
-  gemini: "Gemini",
-};
+
 
 export function ModelSelect({
   activeProvider,
@@ -50,8 +43,8 @@ export function ModelSelect({
 
   const activeEntry = entries.find((e) => e.provider === activeProvider);
   const activeMeta = activeProvider ? PROVIDER_METADATA[activeProvider] : undefined;
-  const vendorShort = activeProvider ? (PROVIDER_SHORT_LABELS[activeProvider] || activeMeta?.label) : undefined;
   const currentModel = activeEntry?.model || activeModel || activeMeta?.defaultModel;
+  const modelLabel = currentModel?.replace(/^glm-/i, "GLM-").replace(/-flash$/i, " Flash");
 
   const fullLabel = activeMeta
     ? currentModel
@@ -71,15 +64,9 @@ export function ModelSelect({
         title={`${fullLabel} - 点击切换模型`}
       >
         <Cpu size={13} className="dsh-model-select__icon" />
-        {vendorShort ? (
+        {modelLabel ? (
           <span className="dsh-model-select__label-group">
-            <span className="dsh-model-select__vendor">{vendorShort}</span>
-            {currentModel ? (
-              <>
-                <span className="dsh-model-select__divider">/</span>
-                <span className="dsh-model-select__model">{currentModel}</span>
-              </>
-            ) : null}
+            <span className="dsh-model-select__model">{modelLabel}</span>
           </span>
         ) : (
           <span className="dsh-model-select__placeholder">选择模型</span>

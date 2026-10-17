@@ -1,4 +1,4 @@
-import { User } from "lucide-react";
+import { Settings, User } from "lucide-react";
 import { useState } from "react";
 import type { Locale } from "../../../domain/chat";
 import type { SettingsTabKey } from "../../../components/settings/SettingsModal";
@@ -81,6 +81,17 @@ export function SidebarFooter({
             {currentBadge}
           </span>
         </button>
+        {onOpenSettings ? (
+          <button
+            type="button"
+            className="desktop-sidebar__settings-btn"
+            onClick={() => onOpenSettings("general")}
+            aria-label={locale === "ja-JP" ? "設定を開く" : "打开设置"}
+            title={locale === "ja-JP" ? "設定" : "设置"}
+          >
+            <Settings size={17} aria-hidden="true" />
+          </button>
+        ) : null}
       </div>
     </div>
   );

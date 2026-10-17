@@ -51,6 +51,115 @@ fn test_dangerous_command_blocking() {
     assert!(!is_dangerous_command("echo hello world"));
 }
 
+/// 常见变体与跨 shell 形态：字母顺序、分离写法、长选项、引号干扰、PowerShell 别名与编码执行。
+/// 样本只保留命令形态而不内嵌可解码的真实载荷，检测逻辑本身也只依据形态判定。
+#[test]
+fn test_dangerous_command_variants_blocked() {
+    let samples = [
+        "rm -fr /",
+        "rm  -r   -f /",
+        "rm --recursive --force /",
+        "rm -rf \"/\"",
+        "rm -rf / *",
+        "/bin/rm -rf /",
+        "Remove-Item -Recurse -Force C:\\",
+        "ri -Recurse C:\\*",
+        "rd /s /q C:\\Windows\\System32",
+        "rmdir /s C:\\",
+        "del /f /s /q C:\\",
+        "Format-Volume -DriveLetter C",
+        "diskpart /s script.txt",
+        "mkfs.ext4 /dev/sda1",
+        "Stop-Computer",
+        "powershell -EncodedCommand $encodedPayload",
+        "powershell -e QUFBQUFBQUFBQUFBQUFBQUFBQUE=",
+        "Invoke-Expression $payload",
+        "iex $payload",
+        "certutil -decode input.b64 output.txt",
+        "[Convert]::FromBase64String($raw)",
+        "taskkill /im worker.exe > C:\\",
+        "dir /b >> C:\\",
+        "Out-File -FilePath C:\\Windows\\Temp\\hosts",
+        "sqlcmd -Q \"DROP DATABASE production\"",
+    ];
+    for sample in samples {
+        assert!(is_dangerous_command(sample), "应被拦截: {}", sample);
+    }
+}
+
+/// 日常开发命令不得被误伤，包括含 format/递归/重定向形态的合法用法
+#[test]
+fn test_develop_commands_not_blocked() {
+    let samples = [
+        "npm install",
+        "cargo test --manifest-path src-tauri/Cargo.toml",
+        "git status",
+        "ls -la",
+        "nvidia-smi",
+        "nvidia-smi --query-gpu=name,memory.total --format=csv",
+        "docker images --format \"{{.Repository}}:{{.Tag}}\"",
+        "dotnet format",
+        "Get-Process | Format-Table Id, ProcessName",
+        "rm -rf node_modules",
+        "rm -rf ./dist",
+        "git rm -r --cached src/generated",
+        "docker run --rm -it ubuntu bash",
+        "node -e \"console.log('hi')\"",
+        "python -c \"import json\"",
+        "npm test > build.log 2>&1",
+        "ls /",
+        "cat /etc/hosts",
+        "du -sh /tmp",
+        "Get-ChildItem -Recurse -Filter *.log",
+        "Remove-Item -Recurse .\\node_modules",
+        "del C:\\Temp\\old.log",
+        "cargo run --bin yachiyo-desktop",
+    ];
+    for sample in samples {
+        assert!(!is_dangerous_command(sample), "不应被拦截: {}", sample);
+    }
+}
+
+#[tokio::test]
+async fn test_write_tool_requires_approval_at_execution_boundary() {
+    use yachiyo_desktop_lib::tools::{execute_tool_with_context, ToolAuthorization};
+
+    let temp_dir = std::env::temp_dir().join("yachiyo_authz_boundary");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let http = reqwest::Client::new();
+    let args = serde_json::json!({ "path": "authz.txt", "content": "x" });
+
+    let denied = execute_tool_with_context(
+        "write_file",
+        &args,
+        Some(temp_dir.as_path()),
+        &http,
+        None,
+        ToolAuthorization::ModelInitiated { approved: false },
+    )
+    .await
+    .expect_err("未获批的写类工具必须在执行边界被拒绝");
+    assert!(denied.contains("未获得用户授权"), "实际错误: {}", denied);
+    assert!(
+        !temp_dir.join("authz.txt").exists(),
+        "被拒的写操作不得落地"
+    );
+
+    execute_tool_with_context(
+        "write_file",
+        &args,
+        Some(temp_dir.as_path()),
+        &http,
+        None,
+        ToolAuthorization::ModelInitiated { approved: true },
+    )
+    .await
+    .expect("已获批的写类工具应正常执行");
+    assert!(temp_dir.join("authz.txt").exists());
+
+    fs::remove_dir_all(&temp_dir).ok();
+}
+
 #[tokio::test]
 async fn test_safe_command_execution() {
     let temp_dir = std::env::temp_dir();
@@ -62,15 +171,22 @@ async fn test_safe_command_execution() {
 
 #[tokio::test]
 async fn test_run_command_fallback_cwd_without_workspace() {
-    use yachiyo_desktop_lib::tools::execute_tool_with_context;
+    use yachiyo_desktop_lib::tools::{execute_tool_with_context, ToolAuthorization};
 
     let http = reqwest::Client::new();
     let args = serde_json::json!({
         "command": "echo 'fallback_cwd_success'"
     });
-    let result = execute_tool_with_context("run_command", &args, None, &http, None)
-        .await
-        .expect("Command should succeed without workspace via fallback cwd");
+    let result = execute_tool_with_context(
+        "run_command",
+        &args,
+        None,
+        &http,
+        None,
+        ToolAuthorization::HumanInitiated,
+    )
+    .await
+    .expect("Command should succeed without workspace via fallback cwd");
     assert!(result.contains("fallback_cwd_success"));
 }
 
@@ -239,10 +355,11 @@ fn test_fs_observation_policy() {
 
 #[tokio::test]
 async fn test_todo_write_execution() {
-    use yachiyo_desktop_lib::tools::execute_tool;
+    use yachiyo_desktop_lib::tools::{execute_tool, ToolAuthorization};
 
     let temp_dir = std::env::temp_dir();
     let http = reqwest::Client::new();
+    let auth = ToolAuthorization::HumanInitiated;
 
     let args = serde_json::json!({
         "todos": [
@@ -252,7 +369,7 @@ async fn test_todo_write_execution() {
         ]
     });
 
-    let res = execute_tool("todo_write", &args, &temp_dir, &http).await.expect("todo_write should succeed");
+    let res = execute_tool("todo_write", &args, &temp_dir, &http, auth).await.expect("todo_write should succeed");
     assert_eq!(res, "Updated todo list: 1 pending, 1 in progress, 1 completed.");
 
     // 状态非法时报错
@@ -261,7 +378,7 @@ async fn test_todo_write_execution() {
             { "content": "Bad task", "status": "unknown_status" }
         ]
     });
-    let err = execute_tool("todo_write", &bad_status_args, &temp_dir, &http).await.unwrap_err();
+    let err = execute_tool("todo_write", &bad_status_args, &temp_dir, &http, auth).await.unwrap_err();
     assert!(err.contains("invalid status"));
 
     // 内容为空时报错
@@ -270,7 +387,7 @@ async fn test_todo_write_execution() {
             { "content": "   ", "status": "pending" }
         ]
     });
-    let err_empty = execute_tool("todo_write", &empty_content_args, &temp_dir, &http).await.unwrap_err();
+    let err_empty = execute_tool("todo_write", &empty_content_args, &temp_dir, &http, auth).await.unwrap_err();
     assert!(err_empty.contains("cannot be empty"));
 }
 

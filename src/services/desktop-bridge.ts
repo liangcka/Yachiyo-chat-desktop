@@ -220,3 +220,66 @@ export async function closeDesktopWindow(): Promise<boolean> {
   return exitDesktopApp();
 }
 
+/** 显示系统级全屏控制覆盖层（通知桌面 Overlay 窗口并向其同步控制状态） */
+export async function showControlOverlay(toolName: string, detail: string): Promise<boolean> {
+  if (!isDesktopApp()) return false;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("show_control_overlay", { toolName, detail });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 隐藏系统级全屏控制覆盖层 */
+export async function hideControlOverlay(): Promise<boolean> {
+  if (!isDesktopApp()) return false;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("hide_control_overlay");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 切换系统级全屏覆盖层的鼠标穿透行为 */
+export async function setOverlayIgnoreCursor(ignore: boolean): Promise<boolean> {
+  if (!isDesktopApp()) return false;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("set_overlay_ignore_cursor", { ignore });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 紧急接管并中止控制 */
+export async function stopActiveControl(): Promise<boolean> {
+  if (!isDesktopApp()) return false;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("stop_active_control");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 监听来自 Overlay 或全局的中止控制广播事件 */
+export async function onEmergencyStopControl(callback: () => void): Promise<() => void> {
+  if (!isDesktopApp()) return () => {};
+  try {
+    const { listen } = await import("@tauri-apps/api/event");
+    const unlisten = await listen("emergency_stop_control", () => {
+      callback();
+    });
+    return unlisten;
+  } catch {
+    return () => {};
+  }
+}
+
+

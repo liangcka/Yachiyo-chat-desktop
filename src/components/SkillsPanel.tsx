@@ -1,4 +1,4 @@
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useClosing } from "../app/use-closing";
 import type { UiCopy } from "../i18n/messages";
@@ -55,7 +55,7 @@ function WebSearchItem({
   const isDataActive = dataActive ?? active;
 
   return (
-    <li className={itemClassName} data-active={isDataActive ? "true" : undefined}>
+    <li className={itemClassName} data-active={isDataActive ? "true" : undefined} data-disabled={disabled}>
       <div className="skills-panel__summary">
         <div className="skills-panel__meta">
           <strong className="skills-panel__name">{title}</strong>
@@ -92,14 +92,20 @@ export function SkillsPanel({
   hideWebSearch = false,
   onlyWebSearch = false,
 }: SkillsPanelProps) {
-  const closeRef = useRef<HTMLButtonElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const [expandedId, setExpandedId] = useState<string>();
 
   const { render, closing } = useClosing(open, 300);
 
   useEffect(() => {
-    if (open && !embedded) closeRef.current?.focus();
-  }, [open, embedded]);
+    if (!open || embedded) return;
+    cardRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, embedded, onClose]);
 
   if (!render) return null;
 
@@ -107,24 +113,6 @@ export function SkillsPanel({
 
   const innerContent = (
     <div className={`skills-panel-content ${embedded ? "skills-panel-content--embedded" : ""}`}>
-      {!embedded && (
-        <header className="skills-modal-card__header">
-          <div className="skills-modal-card__title-wrap">
-            <h3 className="skills-modal-card__title">{copy.skillsTitle}</h3>
-            <p className="skills-modal-card__hint">{copy.skillsDescription}</p>
-          </div>
-          <button
-            ref={closeRef}
-            aria-label={copy.closeMenu}
-            className="skills-modal-card__close"
-            onClick={onClose}
-            type="button"
-          >
-            <X aria-hidden="true" size={18} />
-          </button>
-        </header>
-      )}
-
       {!onlyWebSearch && skills.length > 0 && (
         <ul className="skills-panel__list">
           {skills.map((skill) => {
@@ -237,7 +225,7 @@ export function SkillsPanel({
         onClick={onClose}
         aria-label={copy.closeMenu}
       />
-      <div className="model-modal-card skills-modal-card">
+      <div ref={cardRef} tabIndex={-1} className="model-modal-card skills-modal-card">
         {innerContent}
       </div>
     </div>

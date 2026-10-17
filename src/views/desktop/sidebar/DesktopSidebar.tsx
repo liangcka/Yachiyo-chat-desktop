@@ -1,3 +1,4 @@
+import { ProjectSelector } from "../../../components/desktop/ProjectSelector";
 import { useState } from "react";
 import { SidebarBrandHeader } from "./SidebarBrandHeader";
 import { SidebarFooter } from "./SidebarFooter";
@@ -57,6 +58,7 @@ export function DesktopSidebar({
         onLocale={onLocale}
         onNewChat={onNewChat}
         onOpenSettings={onOpenSettings}
+        onOpenWorkspace={() => onSelectRightTab?.("workspace")}
         onSignOut={onSignOut}
         onToggleCollapse={onToggleCollapse}
         onToggleTheme={onToggleTheme}
@@ -87,8 +89,9 @@ export function DesktopSidebar({
       <SidebarNewChat
         copy={copy}
         onNewChat={onNewChat}
-        onOpenSettings={() => onOpenSettings?.("project")}
       />
+
+      <ProjectSelector variant="sidebar" onNewChat={onNewChat} onOpenSettings={() => onSelectRightTab?.("workspace")} />
 
       {/* 3. 历史会话实时搜索过滤 */}
       <SidebarSearch locale={locale} onChange={setSearchQuery} value={searchQuery} />

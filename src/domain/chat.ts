@@ -14,6 +14,17 @@ export interface Conversation {
   compressedUpTo?: number;
   /** 最后一条已压缩消息的 id；用于消息级精确因果回溯 */
   compressedUpToId?: string;
+  branches?: MessageBranch[];
+}
+
+/** 备选路径保留完整消息及其摘要边界，避免恢复时混入另一版本的上下文。 */
+export interface MessageBranch {
+  rootId: string;
+  version: number;
+  messages: ChatMessage[];
+  summary?: string;
+  compressedUpTo?: number;
+  compressedUpToId?: string;
 }
 
 /** 联网搜索返回的参考来源 */
@@ -40,6 +51,12 @@ export interface ToolStep {
     readonly durationMs: number;
   };
 }
+
+/** 按流事件到达顺序引用正文、思考切片与工具；偏移使用 UTF-16 字符索引。 */
+export type MessageContentSegment =
+  | { readonly type: "text"; readonly start: number; readonly end: number }
+  | { readonly type: "thought"; readonly start: number; readonly end: number; readonly startedAtMs?: number; readonly endedAtMs?: number }
+  | { readonly type: "tool"; readonly toolId: string };
 
 export type TodoStatus = "pending" | "in_progress" | "completed";
 
@@ -75,6 +92,8 @@ export function extractLatestTodos(
 
 export interface ChatMessage {
   id: string;
+  branchRootId?: string;
+  branchVersion?: number;
   conversationId: string;
   role: "user" | "assistant";
   text: string;
@@ -99,6 +118,8 @@ export interface ChatMessage {
   interrupted?: boolean;
   /** Agent 模式下该消息内的工具调用步骤序列 */
   toolSteps?: ReadonlyArray<ToolStep>;
+  /** 旧记录缺省；新回复按此顺序展示，text/thought 仍供复制与请求历史使用。 */
+  contentSegments?: ReadonlyArray<MessageContentSegment>;
   /** 生成该消息时生效的技能列表（名称快照） */
   skills?: ReadonlyArray<string>;
 }

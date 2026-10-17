@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { FullscreenControlOverlayWindow } from "./components/desktop/FullscreenControlOverlayWindow";
 import "./styles/global.css";
 
 const rootElement = document.getElementById("root");
@@ -17,8 +18,11 @@ if (import.meta.env.DEV && "serviceWorker" in navigator) {
   });
 }
 
+const isControlOverlayWindow = typeof window !== "undefined" && window.location.search.includes("window=overlay");
+
 createRoot(rootElement).render(
   <StrictMode>
-    <App />
+    {isControlOverlayWindow ? <FullscreenControlOverlayWindow /> : <App />}
   </StrictMode>,
 );
+

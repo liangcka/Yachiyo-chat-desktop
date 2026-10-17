@@ -24,6 +24,19 @@
         "transparent": true,
         "visible": true,
         "focus": true
+      },
+      {
+        "label": "control_overlay",
+        "title": "Yachiyo Computer Control",
+        "url": "index.html?window=overlay",
+        "fullscreen": true,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "shadow": false
       }
     ],
     "security": {

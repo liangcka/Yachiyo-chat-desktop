@@ -37,7 +37,8 @@ pub async fn read_head_file(path_str: &str, cwd: &Path) -> Result<HeadFile, Stri
 
 pub async fn git_status(cwd: &Path) -> Result<String, String> {
     let mut cmd = Command::new("git");
-    cmd.args(["status", "--short"]);
+    cmd.args(["-c", "core.fsmonitor=false", "status", "--short"]);
+    cmd.env("GIT_OPTIONAL_LOCKS", "0");
     cmd.current_dir(cwd);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
@@ -59,7 +60,8 @@ pub async fn git_status(cwd: &Path) -> Result<String, String> {
 
 pub async fn git_diff(cwd: &Path) -> Result<String, String> {
     let mut cmd = Command::new("git");
-    cmd.args(["diff"]);
+    cmd.args(["-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv"]);
+    cmd.env("GIT_OPTIONAL_LOCKS", "0");
     cmd.current_dir(cwd);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());

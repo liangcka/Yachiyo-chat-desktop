@@ -187,6 +187,23 @@ export function DiffReviewPanel({ copy, resolvedTheme }: DiffReviewPanelProps) {
 
   const isModifiable = selected?.status === "modified";
 
+  if (changes?.length === 0) {
+    return (
+      <section className="review-panel review-panel--empty" aria-label="变更审阅">
+        <p>{copy?.reviewEmpty ?? "工作区无未提交变更"}</p>
+        <button
+          type="button"
+          className="review-ghost-btn review-empty-refresh"
+          onClick={() => setRefreshKey((key) => key + 1)}
+          title={copy?.refreshFileTree ?? "刷新变更列表"}
+          aria-label={copy?.refreshFileTree ?? "刷新变更列表"}
+        >
+          <RefreshCw size={13} />
+        </button>
+      </section>
+    );
+  }
+
   return (
     <section className="review-panel" aria-label="变更审阅">
       <div className="review-panel__toolbar">

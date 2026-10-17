@@ -48,7 +48,6 @@ export function SidebarGroupSection({
         </span>
         {isPinnedGroup ? <Pin size={12} className="desktop-sidebar__group-pin-icon" /> : null}
         <span className="desktop-sidebar__group-label">{group.label}</span>
-        <span className="desktop-sidebar__group-badge">{group.items.length}</span>
       </button>
 
       {!isCollapsed ? (

@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent, Ref } from "react";
 import { Bot, Check, Globe, Minimize2, Plus, Sparkles, Terminal, X } from "lucide-react";
+import type { Locale } from "../../domain/chat";
 import type { SkillDefinition } from "../../skills";
 
 export interface SlashActionItem {
@@ -26,7 +28,14 @@ export interface SlashSkillItem {
 
 export type SlashItem = SlashActionItem | SlashSkillItem;
 
+export interface SlashCommandPickerHandle {
+  /** 输入框保留焦点时转交按键；返回是否已消费该事件。 */
+  handleKeyDown: (event: KeyboardEvent<HTMLElement>) => boolean;
+}
+
 export interface SlashCommandPickerProps {
+  ref?: Ref<SlashCommandPickerHandle>;
+  locale?: Locale;
   /** 当前 / 之后的检索关键词 */
   query: string;
   /** 所有支持的技能列表 */
@@ -75,6 +84,8 @@ function HighlightMatchedText({ text, query }: { text: string; query: string }) 
 }
 
 export function SlashCommandPicker({
+  ref,
+  locale = "zh-CN",
   query,
   skills,
   activeSkillIds,
@@ -87,7 +98,7 @@ export function SlashCommandPicker({
 }: SlashCommandPickerProps) {
   const [uncontrolledIndex, setUncontrolledIndex] = useState(0);
   const isControlled = controlledIndex !== undefined;
-  const activeIndex = isControlled ? controlledIndex : uncontrolledIndex;
+  const requestedIndex = isControlled ? controlledIndex : uncontrolledIndex;
 
   const setActiveIndex = (idx: number) => {
     if (!isControlled) {
@@ -131,6 +142,35 @@ export function SlashCommandPicker({
     });
   }, [allItems, query]);
 
+  const activeIndex = Math.max(0, Math.min(requestedIndex, filteredList.length - 1));
+  const isJapanese = locale === "ja-JP";
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLElement>): boolean => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return false;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return true;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (filteredList.length > 0) {
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        setActiveIndex((activeIndex + direction + filteredList.length) % filteredList.length);
+      }
+      return true;
+    }
+    if ((event.key === "Enter" || event.key === "Tab") && !event.shiftKey) {
+      event.preventDefault();
+      const selected = filteredList[activeIndex];
+      if (selected) onSelect(selected);
+      return true;
+    }
+    return false;
+  };
+
+  useImperativeHandle(ref, () => ({ handleKeyDown }));
+
   const listRef = useRef<HTMLUListElement>(null);
 
   // 滚动确保激活项可见
@@ -140,7 +180,7 @@ export function SlashCommandPicker({
     if (activeEl) {
       activeEl.scrollIntoView({ block: "nearest" });
     }
-  }, [activeIndex]);
+  }, [activeIndex, query]);
 
   const renderIcon = (item: SlashItem) => {
     if (item.type === "skill") {
@@ -164,24 +204,24 @@ export function SlashCommandPicker({
     <div
       className="slash-cmd-picker"
       role="listbox"
-      aria-label="快捷指令与技能选择"
+      aria-label={isJapanese ? "コマンドとスキルの選択" : "快捷指令与技能选择"}
       tabIndex={-1}
     >
       <div className="slash-cmd-picker__header">
         <div className="slash-cmd-picker__title">
           <Terminal size={13} />
-          <span>快捷指令与技能</span>
+          <span>{isJapanese ? "コマンドとスキル" : "快捷指令与技能"}</span>
           {query ? <span className="slash-cmd-picker__query-tag">/{query}</span> : null}
         </div>
         <div className="slash-cmd-picker__hints">
-          <span className="slash-cmd-picker__hint-badge">↑↓ 移动</span>
-          <span className="slash-cmd-picker__hint-badge">Enter 选取</span>
+          <span className="slash-cmd-picker__hint-badge">{isJapanese ? "↑↓ 移動" : "↑↓ 移动"}</span>
+          <span className="slash-cmd-picker__hint-badge">{isJapanese ? "Enter / Tab で選択" : "Enter / Tab 选取"}</span>
           <button
             type="button"
             className="slash-cmd-picker__close-btn"
             onClick={onClose}
-            title="关闭浮层 (Esc)"
-            aria-label="关闭快捷指令浮层"
+            title={isJapanese ? "閉じる (Esc)" : "关闭浮层 (Esc)"}
+            aria-label={isJapanese ? "コマンド選択を閉じる" : "关闭快捷指令浮层"}
           >
             <X size={12} />
           </button>
@@ -190,7 +230,7 @@ export function SlashCommandPicker({
 
       <ul className="slash-cmd-picker__list" ref={listRef}>
         {filteredList.length === 0 ? (
-          <li className="slash-cmd-picker__empty">未找到匹配的快捷指令或技能</li>
+          <li className="slash-cmd-picker__empty">{isJapanese ? "一致するコマンドやスキルがありません" : "未找到匹配的快捷指令或技能"}</li>
         ) : (
           filteredList.map((item, idx) => {
             const isSelected = idx === activeIndex;
@@ -207,6 +247,7 @@ export function SlashCommandPicker({
                 onMouseEnter={() => setActiveIndex(idx)}
                 onClick={() => onSelect(item)}
                 onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     onSelect(item);
@@ -228,7 +269,7 @@ export function SlashCommandPicker({
                           item.isActive ? "slash-cmd-picker__status-tag--active" : ""
                         }`}
                       >
-                        {item.isActive ? "已加载" : "未加载"}
+                        {item.isActive ? (isJapanese ? "有効" : "已加载") : (isJapanese ? "無効" : "未加载")}
                       </span>
                     ) : item.badge ? (
                       <span className="slash-cmd-picker__badge">{item.badge}</span>

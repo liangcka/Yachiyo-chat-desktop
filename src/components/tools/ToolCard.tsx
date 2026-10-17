@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Check, CheckCircle, ChevronDown, ChevronRight, Copy, FileCode, Globe, Play, Terminal, XCircle } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, FileCode, Globe, Play, Server, Terminal, XCircle } from "lucide-react";
+import type { Locale } from "../../domain/chat";
 
 export interface ToolCardProps {
   toolName: string;
@@ -7,13 +8,17 @@ export interface ToolCardProps {
   output?: string;
   isError?: boolean;
   isRunning?: boolean;
+  locale?: Locale;
 }
 
-export function ToolCard({ toolName, args, output, isError, isRunning }: ToolCardProps) {
+export function ToolCard({ toolName, args, output, isError, isRunning, locale = "zh-CN" }: ToolCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const getToolIcon = () => {
+    if (toolName.startsWith("mcp__")) {
+      return <Server size={14} className="tool-card__icon" />;
+    }
     switch (toolName) {
       case "run_command":
         return <Terminal size={14} className="tool-card__icon" />;
@@ -33,7 +38,7 @@ export function ToolCard({ toolName, args, output, isError, isRunning }: ToolCar
       return (
         <span className="tool-card__status tool-card__status--running">
           <span className="tool-card__spinner" />
-          <span>执行中</span>
+          <span>{locale === "ja-JP" ? "実行中" : "执行中"}</span>
         </span>
       );
     }
@@ -41,16 +46,11 @@ export function ToolCard({ toolName, args, output, isError, isRunning }: ToolCar
       return (
         <span className="tool-card__status tool-card__status--error">
           <XCircle size={11} />
-          <span>失败</span>
+          <span>{locale === "ja-JP" ? "失敗" : "失败"}</span>
         </span>
       );
     }
-    return (
-      <span className="tool-card__status tool-card__status--success">
-        <CheckCircle size={11} />
-        <span>完成</span>
-      </span>
-    );
+    return null;
   };
 
   const getArgPreview = (): string | null => {
@@ -81,7 +81,26 @@ export function ToolCard({ toolName, args, output, isError, isRunning }: ToolCar
         <div className="tool-card__title-group">
           <span className="tool-card__chevron">{expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</span>
           {getToolIcon()}
-          <span className="tool-card__name">{toolName}</span>
+          {toolName.startsWith("mcp__") ? (
+            <>
+              <span
+                style={{
+                  fontSize: "10.5px",
+                  padding: "1px 5px",
+                  borderRadius: "3px",
+                  background: "rgba(59, 130, 246, 0.15)",
+                  color: "var(--accent-brand, #3b82f6)",
+                  fontWeight: 600,
+                  fontFamily: "monospace",
+                }}
+              >
+                MCP: {toolName.split("__")[1] || "mcp"}
+              </span>
+              <span className="tool-card__name">{toolName.split("__").slice(2).join("__") || toolName}</span>
+            </>
+          ) : (
+            <span className="tool-card__name">{toolName}</span>
+          )}
           {argPreview ? <span className="tool-card__arg-pill">{argPreview}</span> : null}
         </div>
         {getStatusBadge()}

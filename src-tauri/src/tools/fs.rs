@@ -56,6 +56,47 @@ pub fn resolve_in_workspace(path_str: &str, workspace_root: &Path) -> Result<Pat
     })
 }
 
+/// 文件工具不得读取或改写用于恢复的私有元数据，也不接受带父级跳转的路径。
+pub fn resolve_tool_path(path_str: &str, workspace_root: &Path) -> Result<PathBuf, String> {
+    use std::path::Component;
+    let target = resolve_in_workspace(path_str, workspace_root)?;
+    let lexical = Path::new(path_str);
+    let relative = if lexical.is_relative() { Some(lexical) } else { target.strip_prefix(workspace_root).ok() };
+    if relative.map(is_checkpoint_path).unwrap_or(false) {
+        return Err("Access denied: 检查点存储仅允许通过恢复接口访问".to_string());
+    }
+    if target.components().any(|part| matches!(part, Component::ParentDir))
+        || !is_path_inside_workspace(&target, workspace_root)
+    {
+        return Err(format!("Access denied: Path '{}' is outside workspace boundary", path_str));
+    }
+    let root = workspace_root.canonicalize().map_err(|e| e.to_string())?;
+    let mut ancestor = target.as_path();
+    let mut missing = Vec::new();
+    while fs::symlink_metadata(ancestor).is_err() {
+        missing.push(ancestor.file_name().ok_or("无效文件路径")?.to_os_string());
+        ancestor = ancestor.parent().ok_or("无效文件路径")?;
+    }
+    let mut canonical = ancestor.canonicalize().map_err(|e| e.to_string())?;
+    for part in missing.into_iter().rev() {
+        canonical.push(part);
+    }
+    let relative = canonical.strip_prefix(&root).map_err(|_| "文件路径越界")?;
+    if is_checkpoint_path(relative) || crate::gateway::agent::checkpoint::is_private_storage_path(&canonical) {
+        return Err("Access denied: 检查点存储仅允许通过恢复接口访问".to_string());
+    }
+    Ok(canonical)
+}
+
+fn is_checkpoint_path(relative: &Path) -> bool {
+    let mut components = relative.components().filter_map(|part| match part {
+        std::path::Component::Normal(name) => Some(name.to_string_lossy().to_lowercase()),
+        _ => None,
+    });
+    components.next().as_deref() == Some(".yachiyo")
+        && components.next().as_deref() == Some("checkpoints")
+}
+
 /// 对齐 DSH fs-observation-policy 规约：
 /// 追踪会话内文件读取版本，在写入时强制“编辑前先读 (Read-before-edit)”与 CAS 乐观锁防篡改。
 #[derive(Debug, Default, Clone)]
@@ -160,7 +201,7 @@ pub fn read_file_guarded(
     workspace_root: &Path,
     tracker: Option<&FsObservationTracker>,
 ) -> Result<String, String> {
-    let resolved = resolve_in_workspace(path_str, workspace_root)?;
+    let resolved = resolve_tool_path(path_str, workspace_root)?;
 
     if !is_path_inside_workspace(&resolved, workspace_root) {
         return Err(format!("Access denied: Path '{}' is outside workspace boundary", path_str));
@@ -191,7 +232,7 @@ pub fn write_file_guarded(
     workspace_root: &Path,
     tracker: Option<&FsObservationTracker>,
 ) -> Result<String, String> {
-    let resolved = resolve_in_workspace(path_str, workspace_root)?;
+    let resolved = resolve_tool_path(path_str, workspace_root)?;
 
     if !is_path_inside_workspace(&resolved, workspace_root) {
         return Err(format!("Access denied: Path '{}' is outside workspace boundary", path_str));
@@ -212,8 +253,20 @@ pub fn write_file_guarded(
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create directories: {}", e))?;
     }
 
-    fs::write(&resolved, content)
+    // 替换目录项，避免硬链接把写入传播到工作区外的同一文件。
+    let temporary = resolved.with_file_name(format!(".yachiyo-write-{:016x}", rand::random::<u64>()));
+    use std::io::Write;
+    let mut output = fs::OpenOptions::new().write(true).create_new(true).open(&temporary)
         .map_err(|e| format!("Failed to write file '{}': {}", path_str, e))?;
+    let result = output.write_all(content.as_bytes()).and_then(|_| {
+        if exists { fs::set_permissions(&temporary, fs::metadata(&resolved)?.permissions())?; }
+        Ok(())
+    });
+    drop(output);
+    if let Err(error) = result.and_then(|_| fs::rename(&temporary, &resolved)) {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("Failed to write file '{}': {}", path_str, error));
+    }
 
     if let Some(t) = tracker {
         let current_mtime = fs::metadata(&resolved)

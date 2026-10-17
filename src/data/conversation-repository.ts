@@ -26,6 +26,16 @@ function requireTitle(title: string): string {
 export class ConversationRepository {
   constructor(private readonly db: YachiyoDatabase) {}
 
+  async saveBranchState(conversation: Conversation, messages: ChatMessage[]): Promise<void> {
+    if (messages.some((message) => message.conversationId !== conversation.id)) throw new Error("消息不属于当前会话");
+    await this.db.transaction("rw", [this.db.conversations, this.db.messages], async () => {
+      if (!(await this.db.conversations.get(conversation.id))) throw new Error("会话不存在");
+      await this.db.messages.where("conversationId").equals(conversation.id).delete();
+      await this.db.messages.bulkPut(messages);
+      await this.db.conversations.put(conversation);
+    });
+  }
+
   async createConversation(locale: Locale, now = Date.now()): Promise<Conversation> {
     return this.db.transaction("rw", this.db.conversations, async () => {
       if ((await this.db.conversations.count()) >= MAX_CONVERSATIONS) {

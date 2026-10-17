@@ -134,7 +134,7 @@ describe("ProjectSelector", () => {
     await user.click(trigger);
     expect(screen.getByRole("menu", { name: "项目选择菜单" })).toBeInTheDocument();
 
-    const gearBtn = screen.getByRole("button", { name: "项目配置" });
+    const gearBtn = screen.getByRole("button", { name: "打开文件与终端" });
     expect(gearBtn).toBeInTheDocument();
     await user.click(gearBtn);
     expect(onOpenSettings).toHaveBeenCalledTimes(1);

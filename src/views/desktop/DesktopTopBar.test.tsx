@@ -24,7 +24,6 @@ describe("DesktopTopBar", () => {
     );
 
     expect(screen.getByText("月见八千代")).toBeInTheDocument();
-    expect(screen.getByText("IDE")).toBeInTheDocument();
 
     const brandBtn = screen.getByRole("button", { name: "月见八千代" });
     await user.click(brandBtn);

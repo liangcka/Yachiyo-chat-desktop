@@ -5,7 +5,6 @@ import type { useChatController } from "../../app/use-chat-controller";
 import type { Conversation } from "../../domain/chat";
 import { copyFor } from "../../i18n/messages";
 import { defaultWebSearchSettings } from "../../services/web-search-settings";
-import { projectManager } from "../../services/project-manager";
 import type { SharedViewProps } from "../../views/layout-types";
 import { SettingsModal } from "./SettingsModal";
 
@@ -147,84 +146,14 @@ describe("SettingsModal", () => {
     expect(screen.queryByText("xychunliang@gmail.com")).not.toBeInTheDocument();
   });
 
-  it("当存在活跃工作区时，项目面板与侧边栏展示真实工作区名称与脱离逻辑", async () => {
+  it("设置不再包含工作区管理和返回会话入口，联网搜索名称一致", async () => {
     const user = userEvent.setup();
-    const shared = createMockSharedProps();
-    const onClose = vi.fn();
-
-    // 模拟 projectManager 的活跃工作区
-    await projectManager.switchProject("D:/projects/MyGameStudio");
-
-    render(
-      <SettingsModal
-        open={true}
-        onClose={onClose}
-        shared={shared}
-        initialTab="project"
-      />
-    );
-
-    // 侧边栏和面板标题展示真实项目名称
-    const projectNameElements = screen.getAllByText("MyGameStudio");
-    expect(projectNameElements.length).toBeGreaterThan(0);
-    expect(screen.getAllByText("D:/projects/MyGameStudio").length).toBeGreaterThanOrEqual(1);
-
-    // 点击脱离工作区
-    const detachBtn = screen.getByRole("button", { name: "脱离工作区" });
-    await user.click(detachBtn);
-
-    // 出现二次确认按钮
-    const confirmBtn = screen.getByRole("button", { name: "确认脱离" });
-    expect(confirmBtn).toBeInTheDocument();
-
-    // 点击确认脱离
-    await user.click(confirmBtn);
-    expect(shared.showToast).toHaveBeenCalledWith("已分离当前工作区，返回独立会话模式", "info");
-
-    // 活跃项目已被清空，并从最近列表脱离
-    expect(projectManager.getState().activeProject).toBeNull();
-    expect(projectManager.getState().recentProjects).not.toContain("D:/projects/MyGameStudio");
-    expect(screen.getByText("暂未打开任何项目目录")).toBeInTheDocument();
-    expect(screen.getByText("未绑定工作区")).toBeInTheDocument();
-  });
-
-  it("支持在侧栏与项目面板中移除历史项目及清空历史记录", async () => {
-    const user = userEvent.setup();
-    const shared = createMockSharedProps();
-    const onClose = vi.fn();
-
-    // 预设两个最近项目，但当前处于未绑定状态
-    await projectManager.switchProject("D:/projects/AppAlpha");
-    await projectManager.switchProject("D:/projects/AppBeta");
-    await projectManager.switchProject(null);
-
-    render(
-      <SettingsModal
-        open={true}
-        onClose={onClose}
-        shared={shared}
-        initialTab="project"
-      />
-    );
-
-    // 侧栏展示未绑定工作区以及「最近项目」微型标题
-    expect(screen.getByText("未绑定工作区")).toBeInTheDocument();
-    expect(screen.getByText("最近项目")).toBeInTheDocument();
-
-    // 侧边栏显示移除按钮，点击可移除单个项目
-    const removeAlphaBtn = screen.getByRole("button", {
-      name: "从历史记录移除 AppAlpha",
-    });
-    await user.click(removeAlphaBtn);
-    expect(shared.showToast).toHaveBeenCalledWith("已从历史记录移除 AppAlpha", "info");
-    expect(projectManager.getState().recentProjects).not.toContain("D:/projects/AppAlpha");
-
-    // 右侧面板中点击「清空历史」
-    const clearAllBtn = screen.getByRole("button", { name: "清空历史" });
-    await user.click(clearAllBtn);
-    expect(shared.showToast).toHaveBeenCalledWith("已清空全部工作区历史记录", "info");
-    expect(projectManager.getState().recentProjects).toEqual([]);
-    expect(screen.queryByText("最近项目")).not.toBeInTheDocument();
+    render(<SettingsModal open onClose={vi.fn()} shared={createMockSharedProps()} />);
+    expect(screen.queryByRole("button", { name: "返回当前会话" })).not.toBeInTheDocument();
+    expect(screen.queryByText("工作区与项目环境")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "联网搜索" }));
+    expect(screen.getByRole("heading", { name: "联网搜索" })).toBeInTheDocument();
+    expect(screen.queryByText(/管道|级联容灾/)).not.toBeInTheDocument();
   });
 
   it("点击各导航 Tab 能在面板之间流畅切换", async () => {

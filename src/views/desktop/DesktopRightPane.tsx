@@ -1,15 +1,17 @@
 import {
-  Code2,
   FolderCode,
   GitCompareArrows,
   Layers,
   X,
 } from "lucide-react";
+import { lazy, Suspense } from "react";
 import type { EditorWorkspaceController } from "../../app/use-editor-workspace";
 import { ArtifactsPaneView } from "../../components/desktop/ArtifactsPaneView";
-import { DiffReviewPanel } from "../../components/editor/DiffReviewPanel";
-import { EditorView } from "../../components/editor/EditorView";
 import { LlmSettingsPanel } from "../../components/LlmSettingsPanel";
+
+const DiffReviewPanel = lazy(() =>
+  import("../../components/editor/DiffReviewPanel").then((m) => ({ default: m.DiffReviewPanel })),
+);
 import { SkillsPanel } from "../../components/SkillsPanel";
 import { UserMemoryPanel } from "../../components/UserMemoryPanel";
 import { WorkspacePanel } from "../../components/desktop/WorkspacePanel";
@@ -26,6 +28,7 @@ export interface DesktopRightPaneProps {
   onOpenReview?: () => void;
   onOpenSettings?: (tab?: SettingsTabKey) => void;
   onReferenceFile?: (path: string) => void;
+  onCheckpointRestored?: () => void;
   onSelectTab: (tab: DesktopRightTab) => void;
   shared: SharedViewProps;
   editorWorkspace?: EditorWorkspaceController;
@@ -38,12 +41,13 @@ export function DesktopRightPane({
   onOpenFile,
   onOpenReview,
   onReferenceFile,
+  onCheckpointRestored,
   onSelectTab,
   shared,
-  editorWorkspace,
   resolvedTheme = "dark",
 }: DesktopRightPaneProps) {
   if (activeTab === "none") return null;
+  const visibleTab = activeTab === "editor" ? "workspace" : activeTab;
 
   return (
     <aside className="desktop-right-pane" aria-label="成果与多功能审阅面板">
@@ -63,19 +67,6 @@ export function DesktopRightPane({
             <span>代码审阅</span>
           </button>
 
-          {/* 2. 代码编辑器预览 */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "editor"}
-            className={`desktop-right-pane__tab ${activeTab === "editor" ? "desktop-right-pane__tab--active" : ""}`}
-            onClick={() => onSelectTab("editor")}
-            title="源码预览与就地编辑 (Monaco Editor)"
-          >
-            <Code2 size={14} />
-            <span>代码预览</span>
-          </button>
-
           {/* 3. 产物工件画廊 */}
           <button
             type="button"
@@ -93,8 +84,8 @@ export function DesktopRightPane({
           <button
             type="button"
             role="tab"
-            aria-selected={activeTab === "workspace"}
-            className={`desktop-right-pane__tab ${activeTab === "workspace" ? "desktop-right-pane__tab--active" : ""}`}
+            aria-selected={visibleTab === "workspace"}
+            className={`desktop-right-pane__tab ${visibleTab === "workspace" ? "desktop-right-pane__tab--active" : ""}`}
             onClick={() => onSelectTab("workspace")}
             title="工作区文件树与快捷终端"
           >
@@ -118,18 +109,9 @@ export function DesktopRightPane({
       <div className="desktop-right-pane__body">
         {/* 1. 代码差异审阅 Tab */}
         {activeTab === "review" ? (
-          <DiffReviewPanel copy={shared.copy} resolvedTheme={resolvedTheme} />
-        ) : null}
-
-        {/* 2. 代码编辑器 Tab */}
-        {activeTab === "editor" && editorWorkspace ? (
-          <EditorView
-            workspace={editorWorkspace}
-            copy={shared.copy}
-            resolvedTheme={resolvedTheme}
-            hidden={false}
-            reviewActive={false}
-          />
+          <Suspense fallback={<div className="desktop-right-pane__loading" />}>
+            <DiffReviewPanel copy={shared.copy} resolvedTheme={resolvedTheme} />
+          </Suspense>
         ) : null}
 
         {/* 3. 成果工件 Tab */}
@@ -138,33 +120,21 @@ export function DesktopRightPane({
             messages={shared.controller.messages}
             imageUrls={shared.imageUrls}
             onOpenReview={onOpenReview ?? (() => onSelectTab("review"))}
-            onOpenFile={(path) => {
-              if (editorWorkspace) {
-                void editorWorkspace.openFile(path);
-                onSelectTab("editor");
-              } else {
-                onOpenFile?.(path);
-              }
-            }}
+            onOpenFile={onOpenFile}
           />
         ) : null}
 
         {/* 4. 工作区与终端 Tab */}
-        {activeTab === "workspace" ? (
+        {visibleTab === "workspace" ? (
           <WorkspacePanel
             copy={shared.copy}
             open={true}
             onClose={onClose}
-            onOpenFile={(path) => {
-              if (editorWorkspace) {
-                void editorWorkspace.openFile(path);
-                onSelectTab("editor");
-              } else {
-                onOpenFile?.(path);
-              }
-            }}
+            onOpenFile={onOpenFile}
             onOpenReview={onOpenReview ?? (() => onSelectTab("review"))}
             onReferenceFile={onReferenceFile}
+            isAgentRunning={shared.controller.phase === "streaming" || shared.controller.phase === "loading"}
+            onCheckpointRestored={onCheckpointRestored}
           />
         ) : null}
 

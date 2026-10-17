@@ -118,18 +118,14 @@ describe("DesktopLayout", () => {
     expect(props.onNewChat).toHaveBeenCalledTimes(1);
   });
 
-  it("opens SettingsModal when clicking bottom settings in sidebar", async () => {
+  it("通过侧栏的独立设置入口打开设置并切换分类", async () => {
     const user = userEvent.setup();
     const props = createMockProps();
     render(<DesktopLayout {...props} />);
 
     expect(screen.queryByRole("dialog", { name: "设置中心" })).not.toBeInTheDocument();
 
-    // 点击侧边栏底部的用户资料展开浮层，再点击设置
-    const userBar = screen.getByLabelText("用户资料与菜单");
-    await user.click(userBar);
-    const settingsBtn = screen.getByTitle("系统设置与偏好");
-    await user.click(settingsBtn);
+    await user.click(screen.getByRole("button", { name: "打开设置" }));
 
     expect(screen.getByRole("dialog", { name: "设置中心" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "常规" })).toBeInTheDocument();
@@ -162,6 +158,99 @@ describe("DesktopLayout", () => {
     await user.type(input, "重命名后的标题{Enter}");
 
     expect(props.onRename).toHaveBeenCalledWith("conv-1", "重命名后的标题");
+  });
+
+  it.each(["button", "Escape"])("取消标题编辑时不保存：%s", async (method) => {
+    const user = userEvent.setup();
+    const props = createMockProps();
+    render(<DesktopLayout {...props} />);
+
+    await user.click(screen.getByTitle("重命名会话"));
+    const input = screen.getByLabelText("重命名当前会话");
+    await user.clear(input);
+    await user.type(input, "尚未保存的标题");
+    if (method === "button") {
+      await user.click(screen.getByTitle(copy.cancel));
+    } else {
+      await user.keyboard("{Escape}");
+    }
+
+    expect(props.onRename).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("重命名当前会话")).not.toBeInTheDocument();
+  });
+
+  it("标题保存完成前重复确认只提交一次", async () => {
+    const user = userEvent.setup();
+    const props = createMockProps();
+    props.onRename = vi.fn(() => new Promise<void>(() => undefined));
+    render(<DesktopLayout {...props} />);
+
+    await user.click(screen.getByTitle("重命名会话"));
+    const input = screen.getByLabelText("重命名当前会话");
+    await user.clear(input);
+    await user.type(input, "新标题");
+    await user.dblClick(screen.getByTitle(copy.confirm));
+
+    expect(props.onRename).toHaveBeenCalledExactlyOnceWith("conv-1", "新标题");
+  });
+
+  it.each(["Enter", "Tab"])("在输入框中用 %s 选择筛选后的快捷指令而不发送消息", async (key) => {
+    const user = userEvent.setup();
+    const props = createMockProps();
+    props.composerValue = "/web";
+    render(<DesktopLayout {...props} />);
+    const input = screen.getByPlaceholderText(copy.inputHint);
+    await user.click(input);
+    await user.keyboard(`{${key}}`);
+
+    expect(props.onWebSearchSettingsChange).toHaveBeenCalledExactlyOnceWith({
+      enabled: !props.webSearchSettings.enabled,
+    });
+    expect(props.onSend).not.toHaveBeenCalled();
+    expect(props.setComposerValue).toHaveBeenCalledWith("");
+    expect(screen.queryByRole("listbox", { name: "快捷指令与技能选择" })).not.toBeInTheDocument();
+  });
+
+  it("筛选只有一条指令时方向键不会丢失选中项，输入法确认不执行指令", async () => {
+    const user = userEvent.setup();
+    const props = createMockProps();
+    props.composerValue = "/web";
+    render(<DesktopLayout {...props} />);
+    const input = screen.getByPlaceholderText(copy.inputHint);
+    await user.click(input);
+    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowUp}");
+    expect(screen.getByRole("option", { name: "切换联网搜索" })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+    expect(props.onWebSearchSettingsChange).not.toHaveBeenCalled();
+    expect(props.onSend).not.toHaveBeenCalled();
+    await user.keyboard("{Enter}");
+    expect(props.onWebSearchSettingsChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("加载会话时显示加载状态并禁用发送入口", async () => {
+    const user = userEvent.setup();
+    const props = createMockProps();
+    props.controller.phase = "loading";
+    props.composerValue = "待发送草稿";
+    render(<DesktopLayout {...props} />);
+
+    expect(screen.getByPlaceholderText("正在加载对话…")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: copy.inputHint })).toBeDisabled();
+    expect(screen.getByRole("button", { name: copy.send })).toBeDisabled();
+    await user.click(screen.getByText("看看工作区"));
+    expect(props.onSend).not.toHaveBeenCalled();
+  });
+
+  it("为桌面输入框提供日语标签，默认不显示快捷键提示", () => {
+    const props = createMockProps();
+    props.controller.locale = "ja-JP";
+    props.copy = copyFor("ja-JP");
+    render(<DesktopLayout {...props} />);
+
+    expect(screen.getByRole("textbox", { name: props.copy.inputHint })).not.toHaveAttribute("aria-describedby");
+    expect(screen.queryByText("Enter で送信 · Shift+Enter で改行")).not.toBeInTheDocument();
   });
 
   it("handles desktop keyboard shortcuts Ctrl+N, Ctrl+1, Ctrl+2, Ctrl+,, and Ctrl+[", async () => {
@@ -206,7 +295,7 @@ describe("DesktopLayout", () => {
     expect(screen.getByRole("complementary", { name: "紧凑导航栏" })).toBeInTheDocument();
 
     const expandBtns = screen.getAllByTitle("展开侧边栏 (Ctrl+[)");
-    expect(expandBtns.length).toBeGreaterThanOrEqual(1);
+    expect(expandBtns).toHaveLength(1);
     await user.click(expandBtns[0]);
 
     expect(screen.getByRole("complementary", { name: "桌面导航与历史会话" })).toBeInTheDocument();
@@ -218,12 +307,12 @@ describe("DesktopLayout", () => {
     render(<DesktopLayout {...props} />);
 
     expect(screen.getByRole("region", { name: "欢迎体验" })).toBeInTheDocument();
-    expect(screen.getByText("查看工作区代码")).toBeInTheDocument();
-    expect(screen.getByText("日常陪伴与闲聊")).toBeInTheDocument();
-    expect(screen.getByText("联网探索与研究")).toBeInTheDocument();
-    expect(screen.getByText("视觉与图片分析")).toBeInTheDocument();
+    expect(screen.getByText("看看工作区")).toBeInTheDocument();
+    expect(screen.getByText("聊聊今天")).toBeInTheDocument();
+    expect(screen.getByText("探索新知")).toBeInTheDocument();
+    expect(screen.getByText("读懂图片")).toBeInTheDocument();
 
-    const workspaceCard = screen.getByText("查看工作区代码").closest("button");
+    const workspaceCard = screen.getByText("看看工作区").closest("button");
     expect(workspaceCard).not.toBeNull();
     if (workspaceCard) {
       await user.click(workspaceCard);
@@ -233,34 +322,35 @@ describe("DesktopLayout", () => {
     }
   });
 
-  it("opens project settings when clicking context chip above composer", async () => {
+  it("从侧栏项目菜单打开工作区，不进入设置", async () => {
     const user = userEvent.setup();
     await projectManager.switchProject("D:\\projects\\Yachiyo-chat-desktop");
     const props = createMockProps();
     render(<DesktopLayout {...props} />);
 
-    const contextChip = screen.getByTitle(/当前项目：Yachiyo-chat-desktop/i);
+    const sidebar = screen.getByRole("complementary", { name: "桌面导航与历史会话" });
+    const contextChip = within(sidebar).getByTitle(/当前项目：Yachiyo-chat-desktop/i);
     expect(contextChip).toBeInTheDocument();
 
     await user.click(contextChip);
-    const gearBtn = screen.getByRole("button", { name: "项目配置" });
+    const gearBtn = screen.getByRole("button", { name: "打开文件与终端" });
     await user.click(gearBtn);
-    expect(screen.getByRole("dialog", { name: "设置中心" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "设置中心" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "工作区" })).toHaveAttribute("aria-selected", "true");
   });
 
 
 
-  it("renders composer centered inside hero in blank conversation and at bottom dock when messages exist", () => {
+  it("首次发送后保留输入节点与焦点，并切换到底部布局", () => {
     const blankProps = createMockProps();
-    const { container: blankContainer } = render(<DesktopLayout {...blankProps} />);
+    const { container, rerender } = render(<DesktopLayout {...blankProps} />);
 
-    // 空白新对话：居中在 hero 区域内，底部无 dock
-    const heroComposer = blankContainer.querySelector(".desktop-hero__composer .dsh-composer-card");
-    expect(heroComposer).toBeInTheDocument();
-    expect(blankContainer.querySelector(".desktop-composer-dock")).not.toBeInTheDocument();
+    const input = screen.getByRole("textbox", { name: copy.inputHint });
+    input.focus();
+    expect(container.querySelector(".desktop-chat-body--welcome")).toBeInTheDocument();
+    expect(container.querySelectorAll(".desktop-composer-dock")).toHaveLength(1);
 
-    // 存在消息状态：hero 不存在，输入框位于底部 dock
-    const activeProps = createMockProps();
+    const activeProps = { ...blankProps, controller: { ...blankProps.controller } };
     activeProps.controller.messages = [
       {
         id: "msg-1",
@@ -271,11 +361,12 @@ describe("DesktopLayout", () => {
         createdAt: Date.now(),
       },
     ];
-    const { container: activeContainer } = render(<DesktopLayout {...activeProps} />);
+    rerender(<DesktopLayout {...activeProps} />);
 
-    expect(activeContainer.querySelector(".desktop-hero")).not.toBeInTheDocument();
-    const bottomComposer = activeContainer.querySelector(".desktop-composer-dock .dsh-composer-card");
-    expect(bottomComposer).toBeInTheDocument();
+    expect(container.querySelector(".desktop-chat-body--welcome")).not.toBeInTheDocument();
+    expect(container.querySelectorAll(".desktop-composer-dock")).toHaveLength(1);
+    expect(screen.getByRole("textbox", { name: copy.inputHint })).toBe(input);
+    expect(input).toHaveFocus();
   });
 
   it("opens SettingsModal on custom tab when clicking manage all skills in skill popover", async () => {
@@ -283,9 +374,8 @@ describe("DesktopLayout", () => {
     const props = createMockProps();
     render(<DesktopLayout {...props} />);
 
-    // 点击技能胶囊打开 popover
-    const skillTrigger = screen.getByRole("button", { name: "技能快捷配置" });
-    await user.click(skillTrigger);
+    await user.click(screen.getByRole("button", { name: "添加文件、项目或技能" }));
+    await user.click(screen.getByRole("button", { name: "加载技能" }));
 
     // 点击管理全部技能
     const manageSkillsBtn = screen.getByRole("button", { name: /管理全部技能/i });
@@ -320,7 +410,7 @@ describe("DesktopLayout", () => {
     expect(screen.queryByRole("complementary", { name: "成果与多功能审阅面板" })).not.toBeInTheDocument();
 
     // 1. 点击顶栏成果审阅按钮展开
-    const toggleBtn = screen.getByRole("button", { name: "成果与审阅台快捷切换" });
+    const toggleBtn = screen.getByRole("button", { name: "展开成果面板" });
     await user.click(toggleBtn);
 
     expect(screen.getByRole("complementary", { name: "成果与多功能审阅面板" })).toBeInTheDocument();

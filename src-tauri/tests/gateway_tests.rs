@@ -223,6 +223,91 @@ fn test_plain_prompt_no_longer_contains_text_tool_protocol() {
     assert!(zh.contains("输出最多200个Unicode字符"));
 }
 
+/// 本地网关的 token 门禁与跨域源白名单的真实 HTTP 行为
+#[tokio::test]
+async fn test_local_gateway_token_gate_and_cors_allowlist() {
+    use std::sync::Arc;
+    use yachiyo_desktop_lib::crypto::keys::KeyStore;
+    use yachiyo_desktop_lib::mcp::McpManager;
+    use yachiyo_desktop_lib::server::http::{
+        generate_gateway_token, start_local_server, GATEWAY_TOKEN_HEADER,
+    };
+    use yachiyo_desktop_lib::tools::WorkspaceManager;
+
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let mcp_manager = Arc::new(McpManager::new(
+        Some(temp_dir.path().join("mcp_servers.json")),
+        reqwest::Client::new(),
+    ));
+    let token = generate_gateway_token();
+    // 避开桌面端默认的 28888-28897 区间，防止与本机正在运行的实例互抢
+    let (port, _server) = start_local_server(
+        Arc::new(KeyStore::new()),
+        Arc::new(WorkspaceManager::new(None)),
+        Arc::clone(&mcp_manager),
+        token.clone(),
+        38888,
+    )
+    .await
+    .expect("local gateway should start");
+
+    let client = reqwest::Client::new();
+    let session_url = format!("http://127.0.0.1:{port}/api/session");
+
+    let unsigned = client.get(&session_url).send().await.expect("unsigned request");
+    assert_eq!(unsigned.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let wrong_token = client
+        .get(&session_url)
+        .header(GATEWAY_TOKEN_HEADER, "0".repeat(token.len()))
+        .send()
+        .await
+        .expect("wrong token request");
+    assert_eq!(wrong_token.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let signed = client
+        .get(&session_url)
+        .header(GATEWAY_TOKEN_HEADER, token.as_str())
+        .send()
+        .await
+        .expect("signed request");
+    assert_eq!(signed.status(), reqwest::StatusCode::OK);
+    let body: serde_json::Value = signed.json().await.expect("session json");
+    assert_eq!(body["authenticated"], serde_json::json!(true));
+
+    // 静态资源不在 token 门禁内：否则页面本身无法加载（允许 404，但不能是 401）
+    let asset = client
+        .get(format!("http://127.0.0.1:{port}/index.html"))
+        .send()
+        .await
+        .expect("asset request");
+    assert_ne!(asset.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let acao = "access-control-allow-origin";
+    let evil = client
+        .get(&session_url)
+        .header("origin", "http://evil.example")
+        .send()
+        .await
+        .expect("evil origin request");
+    assert!(
+        evil.headers().get(acao).is_none(),
+        "非白名单源不得拿到 ACAO: {:?}",
+        evil.headers().get(acao)
+    );
+
+    let dev = client
+        .get(&session_url)
+        .header("origin", "http://127.0.0.1:5173")
+        .send()
+        .await
+        .expect("dev origin request");
+    assert_eq!(
+        dev.headers().get(acao).and_then(|v| v.to_str().ok()),
+        Some("http://127.0.0.1:5173")
+    );
+}
+
 #[test]
 fn test_agent_system_prompt_evidence_verification_rule() {
     use yachiyo_desktop_lib::gateway::prompt::build_agent_system_prompt;

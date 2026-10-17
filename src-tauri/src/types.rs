@@ -38,6 +38,17 @@ pub struct ToolInvocation {
 }
 
 /// 请求携带的 Agent 模式配置
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AgentExecutionMode {
+    #[serde(rename = "readonly")]
+    Readonly,
+    #[default]
+    #[serde(rename = "confirm")]
+    Confirm,
+    #[serde(rename = "full_auto")]
+    FullAuto,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRequestConfig {
     pub enabled: bool,
@@ -47,6 +58,9 @@ pub struct AgentRequestConfig {
     pub workspace: Option<String>,
     #[serde(rename = "auto", skip_serializing_if = "Option::is_none")]
     pub auto: Option<bool>,
+    /// 旧 auto 仅控制工具选择，不构成跳过审批的授权。
+    #[serde(rename = "executionMode", default)]
+    pub execution_mode: AgentExecutionMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

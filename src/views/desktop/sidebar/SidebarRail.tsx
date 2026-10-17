@@ -1,4 +1,5 @@
-import { FolderCode, PanelLeftOpen, Plus, User } from "lucide-react";
+import { Plus, User } from "lucide-react";
+import { ProjectSelector } from "../../../components/desktop/ProjectSelector";
 import { useState, type ReactNode } from "react";
 import type { UiCopy } from "../../../i18n/messages";
 import type { SettingsTabKey } from "../../../components/settings/SettingsModal";
@@ -45,6 +46,7 @@ interface SidebarRailProps {
   onLocale?: (locale: Locale) => Promise<void>;
   onNewChat: () => Promise<void>;
   onOpenSettings?: (tab?: SettingsTabKey) => void;
+  onOpenWorkspace?: () => void;
   onSignOut?: () => Promise<void>;
   onToggleCollapse?: () => void;
   onToggleTheme?: () => void;
@@ -59,8 +61,8 @@ export function SidebarRail({
   onLocale,
   onNewChat,
   onOpenSettings,
+  onOpenWorkspace,
   onSignOut,
-  onToggleCollapse,
   onToggleTheme,
   resolvedTheme = "dark",
   showToast,
@@ -72,33 +74,15 @@ export function SidebarRail({
 
   return (
     <aside className="desktop-sidebar desktop-sidebar--rail" aria-label="紧凑导航栏">
-      {/* 顶部：展开侧边栏图标 + 新建对话 */}
+      {/* 展开按钮由窗口标题栏统一提供；项目文件夹图标紧跟新建会话按钮下方 */}
       <div className="desktop-sidebar__rail-top">
-        <button
-          type="button"
-          className="desktop-sidebar__rail-toggle"
-          title="展开侧边栏 (Ctrl+[)"
-          aria-label="展开侧边栏"
-          onClick={onToggleCollapse}
-        >
-          <PanelLeftOpen size={18} />
-        </button>
-
         <RailButton
           icon={<Plus size={18} />}
           label="新建会话 (Ctrl+N)"
           highlight
           onClick={() => void onNewChat()}
         />
-      </div>
-
-      {/* 中部：项目快捷 */}
-      <div className="desktop-sidebar__rail-tools">
-        <RailButton
-          icon={<FolderCode size={17} />}
-          label={copy.workspaceEntry}
-          onClick={() => onOpenSettings?.("project")}
-        />
+        <ProjectSelector variant="rail" label={copy.workspaceEntry} onNewChat={onNewChat} onOpenSettings={onOpenWorkspace} />
       </div>
 
       {/* 底部：用户个人头像与向上弹出的菜单 */}
@@ -123,7 +107,7 @@ export function SidebarRail({
             popoverOpen ? "desktop-sidebar__rail-avatar-btn--active" : ""
           }`}
           onClick={() => setPopoverOpen((prev) => !prev)}
-          title={`当前用户：${username} [${userSettings.badge || "Lite"}]（点击展开菜单）`}
+          title={`当前用户：${username}（点击展开菜单）`}
           aria-label="用户账户与设置"
           aria-haspopup="dialog"
           aria-expanded={popoverOpen}
@@ -135,10 +119,6 @@ export function SidebarRail({
               <User size={16} />
             </div>
           )}
-          <span
-            className={`desktop-sidebar__rail-avatar-dot desktop-sidebar__rail-avatar-dot--${(userSettings.badge || "Lite").toLowerCase()}`}
-            title={`${userSettings.badge || "Lite"} 会员`}
-          />
         </button>
       </div>
     </aside>

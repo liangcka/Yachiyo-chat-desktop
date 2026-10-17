@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatSource, Conversation, Locale, StoredImage, TokenUsage } from "../domain/chat";
+import type { ChatMessage, ChatSource, Conversation, Locale, MessageContentSegment, StoredImage, TokenUsage } from "../domain/chat";
 
 export type ChatPhase = "loading" | "idle" | "streaming" | "offline" | "error" | "compressing";
 
@@ -15,7 +15,7 @@ export interface ChatState {
    * 流式增量暂存槽位：delta/thought-delta 只写入这里（O(1)），不重建 messages 数组；
    * 终态动作（completed/stopped/failed）再把全文折叠回对应消息并清空槽位。
    */
-  streaming?: { messageId: string; text?: string; thought?: string };
+  streaming?: { messageId: string; text?: string; thought?: string; contentSegments?: ReadonlyArray<MessageContentSegment> };
   /** 当前窗口之前是否还有更早历史（UI 窗口化上翻加载入口） */
   hasMoreHistory?: boolean;
   /** Agent 工具权限审批中卡片（同一时刻至多一个，等待用户批准/拒绝） */
@@ -38,12 +38,12 @@ export type ChatAction =
     }
   | { type: "load-failed"; errorCode: string }
   | { type: "send-started"; user?: ChatMessage; assistant: ChatMessage }
-  | { type: "delta"; messageId: string; text: string }
-  | { type: "thought-delta"; messageId: string; text: string }
+  | { type: "delta"; messageId: string; text: string; contentSegments?: ReadonlyArray<MessageContentSegment> }
+  | { type: "thought-delta"; messageId: string; text: string; contentSegments?: ReadonlyArray<MessageContentSegment> }
   | { type: "sources-received"; messageId: string; sources: ReadonlyArray<ChatSource> }
-  | { type: "completed"; messageId: string; usage?: TokenUsage; latencyMs?: number }
-  | { type: "stopped"; messageId: string; latencyMs?: number }
-  | { type: "failed"; messageId: string; errorCode: string; latencyMs?: number }
+  | { type: "completed"; messageId: string; usage?: TokenUsage; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment> }
+  | { type: "stopped"; messageId: string; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment> }
+  | { type: "failed"; messageId: string; errorCode: string; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment> }
   | { type: "connectivity-changed"; online: boolean }
   | {
       type: "conversation-selected";
@@ -69,6 +69,7 @@ export type ChatAction =
       type: "tool-call";
       messageId: string;
       call: { id: string; name: string; argumentsJson: string };
+      contentSegments?: ReadonlyArray<MessageContentSegment>;
     }
   | {
       type: "tool-result";
@@ -117,6 +118,7 @@ function foldStreamedContent(state: ChatState, messageId: string): { message?: C
       ...target,
       ...(streaming.text !== undefined ? { text: target.text + streaming.text } : {}),
       thought: ((target.thought ?? "") + (streaming.thought ?? "")) || undefined,
+      ...(streaming.contentSegments !== undefined ? { contentSegments: streaming.contentSegments } : {}),
     },
     streaming: undefined,
   };
@@ -125,7 +127,8 @@ function foldStreamedContent(state: ChatState, messageId: string): { message?: C
 /** 把折叠结果作为字段覆盖并入终态消息更新 */
 function streamedFields(folded: { message?: ChatMessage }): Partial<ChatMessage> {
   return folded.message !== undefined
-    ? { text: folded.message.text, thought: folded.message.thought }
+    ? { text: folded.message.text, thought: folded.message.thought,
+        ...(folded.message.contentSegments !== undefined ? { contentSegments: folded.message.contentSegments } : {}) }
     : {};
 }
 
@@ -135,6 +138,7 @@ function appendStreamDelta(
   messageId: string,
   field: "text" | "thought",
   text: string,
+  contentSegments?: ReadonlyArray<MessageContentSegment>,
 ): ChatState {
   const streaming = state.streaming;
   if (streaming !== undefined && streaming.messageId !== messageId) return state;
@@ -150,8 +154,8 @@ function appendStreamDelta(
     ...state,
     streaming:
       field === "text"
-        ? { ...base, text: accumulated + text }
-        : { ...base, thought: accumulated + text },
+        ? { ...base, text: accumulated + text, contentSegments }
+        : { ...base, thought: accumulated + text, contentSegments },
   };
 }
 
@@ -180,9 +184,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         streaming: undefined,
       };
     case "delta":
-      return appendStreamDelta(state, action.messageId, "text", action.text);
+      return appendStreamDelta(state, action.messageId, "text", action.text, action.contentSegments);
     case "thought-delta":
-      return appendStreamDelta(state, action.messageId, "thought", action.text);
+      return appendStreamDelta(state, action.messageId, "thought", action.text, action.contentSegments);
     case "sources-received":
       if (!state.messages.some((message) => message.id === action.messageId)) return state;
       return {
@@ -199,6 +203,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         messages: updateMessage(state.messages, action.messageId, (message) => ({
           ...message,
           ...streamedFields(folded),
+          ...(action.contentSegments !== undefined ? { contentSegments: action.contentSegments } : {}),
           status: "complete" as const,
           ...(action.usage !== undefined ? { usage: action.usage } : {}),
           ...(action.latencyMs !== undefined ? { latencyMs: action.latencyMs } : {}),
@@ -216,6 +221,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         messages: updateMessage(state.messages, action.messageId, (message) => ({
           ...message,
           ...streamedFields(folded),
+          ...(action.contentSegments !== undefined ? { contentSegments: action.contentSegments } : {}),
           status: "stopped" as const,
           interrupted: true,
           ...(action.latencyMs !== undefined ? { latencyMs: action.latencyMs } : {}),
@@ -234,6 +240,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         messages: updateMessage(state.messages, action.messageId, (message) => ({
           ...message,
           ...streamedFields(folded),
+          ...(action.contentSegments !== undefined ? { contentSegments: action.contentSegments } : {}),
           status: "failed" as const,
           ...(action.latencyMs !== undefined ? { latencyMs: action.latencyMs } : {}),
         })),
@@ -337,8 +344,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       if (!state.messages.some((message) => message.id === action.messageId)) return state;
       return {
         ...state,
+        streaming: state.streaming?.messageId === action.messageId
+          ? { ...state.streaming, contentSegments: action.contentSegments }
+          : state.streaming,
         messages: updateMessage(state.messages, action.messageId, (message) => ({
           ...message,
+          ...(action.contentSegments !== undefined ? { contentSegments: action.contentSegments } : {}),
           toolSteps: [
             ...(message.toolSteps ?? []),
             { id: action.call.id, name: action.call.name, argumentsJson: action.call.argumentsJson },

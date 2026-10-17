@@ -129,14 +129,76 @@ describe("reference chat components", () => {
     expect(screen.queryByText("read_file")).not.toBeInTheDocument();
   });
 
-  it("assistant 消息展示生效技能标签", () => {
+  it("助手直接展示正文，复制与重试入口位于消息末尾", () => {
     const message = makeAssistantMessage({
       skills: ["深度思维", "Humanizer"],
       text: "你好呀~",
     });
-    render(<MessageBubble locale="zh-CN" message={message} />);
-    expect(screen.getByTitle("已生效技能：深度思维、Humanizer")).toBeInTheDocument();
-    expect(screen.getByText("深度思维 · Humanizer")).toBeInTheDocument();
+    const { container } = render(<MessageBubble locale="zh-CN" message={message} onRegenerate={vi.fn()} />);
+    expect(screen.getByText("你好呀~")).toBeInTheDocument();
+    expect(container.querySelector(".message-bubble__header")).toBeNull();
+    expect(screen.queryByText("深度思维 · Humanizer")).not.toBeInTheDocument();
+    const actions = container.querySelector(".message-bubble__actions") as HTMLElement;
+    expect(within(actions).getByRole("button", { name: /复制/ })).toBeInTheDocument();
+    expect(within(actions).getByRole("button", { name: "重新生成" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["zh-CN", "本次回复未生成。"],
+    ["ja-JP", "返信を生成できませんでした。"],
+  ] as const)("%s 空失败回复仍可切回旧版本", (locale, placeholder) => {
+    const onVersionChange = vi.fn();
+    const message = makeAssistantMessage({ status: "failed", branchRootId: "original", branchVersion: 2 });
+    render(<MessageBubble locale={locale} message={message} versions={[1, 2]} onVersionChange={onVersionChange} />);
+
+    expect(screen.getByText(placeholder)).toBeVisible();
+    expect(screen.getByLabelText("消息版本")).toHaveTextContent("2 / 2");
+    expect(screen.getByRole("button", { name: "下一个版本" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "上一个版本" }));
+    expect(onVersionChange).toHaveBeenCalledWith(1);
+  });
+
+  it("空的停止回复保留版本切换入口", () => {
+    render(<MessageBubble locale="zh-CN" message={makeAssistantMessage({ status: "stopped", branchVersion: 2 })} versions={[1, 2]} onVersionChange={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "上一个版本" })).toBeEnabled();
+    expect(screen.queryByText("本次回复未生成。")).not.toBeInTheDocument();
+  });
+
+  it("按事件顺序穿插正文、思考与工具，仅折叠相邻工具", () => {
+    const message = makeAssistantMessage({
+      text: "执行之前。执行之后。最终结果。",
+      thought: "需要检查配置。",
+      toolSteps: ["one", "two", "three"].map((id) => ({
+        id, name: "run_command", argumentsJson: JSON.stringify({ command: id }),
+        result: { output: id, isError: id === "three", durationMs: 10 },
+      })),
+      contentSegments: [
+        { type: "text", start: 0, end: 5 },
+        { type: "thought", start: 0, end: 7, startedAtMs: 100, endedAtMs: 6100 },
+        { type: "tool", toolId: "one" },
+        { type: "tool", toolId: "two" },
+        { type: "text", start: 5, end: 10 },
+        { type: "tool", toolId: "three" },
+        { type: "text", start: 10, end: 15 },
+      ],
+    });
+    const { container } = render(<MessageBubble locale="zh-CN" message={message} />);
+    const content = screen.getByRole("article", { name: "八千代的回复" });
+    const children = [...content.children].filter((node) => !node.classList.contains("message-bubble__actions"));
+    expect(children.map((node) => node.textContent)).toEqual([
+      "执行之前。", "思考了 6 秒", expect.stringContaining("运行了 2 条命令"),
+      "执行之后。", expect.stringContaining("运行了 1 条命令"), "最终结果。",
+    ]);
+    const groups = container.querySelectorAll(".message-tool-group");
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).not.toHaveAttribute("open");
+    fireEvent.click(groups[0]!.querySelector("summary")!);
+    expect(groups[0]).toHaveAttribute("open");
+    expect(screen.queryByText("完成", { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByText("1 项失败")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "思考了 6 秒" }));
+    expect(screen.getByText("需要检查配置。")).toBeVisible();
   });
 
   it("ConversationView 展示已加载技能卡片", () => {
@@ -491,8 +553,7 @@ describe("reference chat components", () => {
 
     render(<ConversationView locale="zh-CN" messages={messages} />);
 
-    // 等待期只有三点动画，不渲染参考来源区块（避免出现超高气泡）
-    expect(document.querySelector(".message-bubble__typing")).not.toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("思考中…");
     expect(screen.queryByLabelText("参考来源")).not.toBeInTheDocument();
 
     // 正文开始流式输出后，来源区块随正文出现
@@ -717,7 +778,7 @@ describe("reference chat components", () => {
     });
 
     const { rerender } = render(<MessageBubble locale="zh-CN" message={message} />);
-    expect(document.querySelector(".thinking-indicator")).not.toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("思考中…");
     expect(screen.getByText("思考中…")).toBeInTheDocument();
 
     rerender(<MessageBubble locale="ja-JP" message={message} />);
@@ -751,7 +812,7 @@ describe("reference chat components", () => {
         }}
       />,
     );
-    expect(screen.getByText("已深度思考")).toBeInTheDocument();
+    expect(screen.getByText("查看思考")).toBeInTheDocument();
     expect(screen.getByText("你好呀！")).toBeInTheDocument();
   });
 });

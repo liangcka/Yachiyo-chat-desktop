@@ -17,6 +17,19 @@ describe("ConversationRepository", () => {
     await db.delete();
   });
 
+  it("分支路径与旧消息版本一起持久化，失败时保留原路径", async () => {
+    const conversation = await repository.createConversation("zh-CN", 10);
+    const old: ChatMessage = { id: "old", conversationId: conversation.id, role: "user", text: "旧问题", status: "complete", createdAt: 11 };
+    await repository.putMessage(old);
+    const edited: ChatMessage = { ...old, id: "new", text: "新问题", branchRootId: "old", branchVersion: 2 };
+    await repository.saveBranchState({ ...conversation, branches: [{ rootId: "old", version: 1, messages: [old] }] }, [edited]);
+    const reopened = new ConversationRepository(db);
+    expect((await reopened.listMessages(conversation.id))[0]?.text).toBe("新问题");
+    expect((await reopened.getConversation(conversation.id))?.branches?.[0]?.messages).toEqual([old]);
+    await expect(repository.saveBranchState(conversation, [{ ...edited, conversationId: "other" }])).rejects.toThrow();
+    expect(await reopened.listMessages(conversation.id)).toEqual([edited]);
+  });
+
   it("persists and orders conversations by latest activity", async () => {
     const older = await repository.createConversation("zh-CN", 10);
     const newer = await repository.createConversation("ja-JP", 20);

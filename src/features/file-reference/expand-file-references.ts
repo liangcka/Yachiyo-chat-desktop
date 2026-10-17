@@ -7,14 +7,15 @@ export const FILE_REFERENCE_LIMIT_BYTES = 32 * 1024;
  * @引用语法：行首或空白/括号后的 `@路径`，路径须含扩展名（避免 email 误匹配）。
  * 捕获组 1 为工作区相对路径。
  */
-const FILE_REFERENCE_PATTERN = /(?:^|[\s([{<"'、，。；：！？（）「」『』【】《》])@([\w./\\-]+\.[A-Za-z0-9]+)/g;
+const FILE_REFERENCE_PATTERN = /(?:^|[\s([{<"'、，。；：！？（）「」『』【】《》])@(?:"([^"\r\n]+)"|([^\s@"'()（）「」『』【】《》，。；：！？]+))/gu;
 
 /** 提取文本中的全部 @ 引用路径（去重保序） */
 export function extractFileReferences(text: string): string[] {
   const seen = new Set<string>();
   for (const match of text.matchAll(FILE_REFERENCE_PATTERN)) {
-    const raw = match[1];
+    const raw = match[1] ?? match[2];
     if (raw === undefined) continue;
+    if (match[1] === undefined && !raw.includes(".") && !raw.includes("/") && !/^[A-Z][A-Z0-9_-]+$/u.test(raw)) continue;
     const normalized = raw.replace(/\\/g, "/");
     if (!seen.has(normalized)) seen.add(normalized);
   }

@@ -39,6 +39,8 @@ const greeting: ChatMessage = {
 function repositoryWith(
   overrides: Partial<ChatRepository> = {},
 ): ChatRepository {
+  let storedMessages: ChatMessage[] = [greeting];
+  let storedConversation = { ...conversation };
   return {
     createConversation: vi.fn(async (locale: Locale, now?: number) => ({
       ...conversation,
@@ -46,13 +48,13 @@ function repositoryWith(
       locale,
       updatedAt: now ?? conversation.updatedAt,
     })),
-    getConversation: vi.fn(async (id: string) => (id === conversation.id ? conversation : undefined)),
+    getConversation: vi.fn(async (id: string) => (id === conversation.id ? storedConversation : undefined)),
     getImage: vi.fn(async () => undefined),
     getLocale: vi.fn(async () => "zh-CN" as const),
     listConversations: vi.fn(async () => [conversation]),
-    listMessages: vi.fn(async () => [greeting]),
+    listMessages: vi.fn(async () => [...storedMessages]),
     putImage: vi.fn(async () => undefined),
-    putMessage: vi.fn(async () => undefined),
+    putMessage: vi.fn(async (message: ChatMessage) => { storedMessages = [...storedMessages.filter((item) => item.id !== message.id), message].sort((a, b) => a.createdAt - b.createdAt); }),
     updateConversationSummary: vi.fn(async () => undefined),
     getUserMemory: vi.fn(async () => ""),
     updateUserMemory: vi.fn(async () => undefined),
@@ -60,6 +62,7 @@ function repositoryWith(
     setLocale: vi.fn(async () => undefined),
     replaceMessages: vi.fn(async () => undefined),
     deleteMessagesFrom: vi.fn(async () => undefined),
+    saveBranchState: vi.fn(async (next: Conversation, messages: ChatMessage[]) => { storedConversation = next; storedMessages = [...messages]; }),
     renameConversation: vi.fn(async () => undefined),
     ...overrides,
   };
@@ -81,6 +84,132 @@ function deferred<T = void>() {
 }
 
 describe("useChatController", () => {
+  it("分叉事务保留新版本锚点，后续存储失败仍可恢复旧版本", async () => {
+    const user: ChatMessage = { ...greeting, id: "u", role: "user", text: "问题", createdAt: 12 };
+    const old: ChatMessage = { ...greeting, id: "old", text: "旧回答", createdAt: 13 };
+    const repository = repositoryWith({ listMessages: vi.fn(async () => [user, old]), putMessage: vi.fn(async () => { throw new Error("存储失败"); }) });
+    const { result } = renderHook(() => useChatController({ repository, autoAiTitle: false }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    await act(async () => result.current.regenerate("old"));
+    const committed = vi.mocked(repository.saveBranchState).mock.calls[0];
+    expect(committed?.[0].branches?.[0]?.messages).toEqual([user, old]);
+    expect(committed?.[1].at(-1)).toMatchObject({ role: "assistant", branchRootId: "old", branchVersion: 2, status: "stopped" });
+    expect(result.current.messages.at(-1)).toMatchObject({ status: "failed", branchVersion: 2 });
+  });
+
+  it("自动压缩按最早前缀推进边界，多批处理不跳过中间历史", async () => {
+    const history: ChatMessage[] = Array.from({ length: 20 }, (_, index) => ({ ...greeting, id: `h${index}`, role: index % 2 ? "assistant" : "user", text: `${index}:` + "界".repeat(3990), createdAt: 20 + index }));
+    const stream = vi.fn<StreamChatFunction>(async (request, options) => { options.onDelta(request.mode === "summary" ? "压缩记忆" : "新回答"); return { truncated: false }; });
+    const { result } = renderHook(() => useChatController({ repository: repositoryWith({ listMessages: vi.fn(async () => history) }), streamChat: stream, autoAiTitle: false }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    await act(async () => result.current.send("继续"));
+    const summaries = stream.mock.calls.map(([request]) => request).filter((request) => request.mode === "summary");
+    expect(summaries.length).toBeGreaterThan(1);
+    expect(summaries[0]?.messages[0]?.text.startsWith("0:")).toBe(true);
+    const included = summaries.flatMap((request) => request.messages.map((message) => message.text)).filter((text) => /^\d+:/.test(text));
+    expect(included.map((text) => Number(text.split(":")[0]))).toEqual(Array.from({ length: included.length }, (_, index) => index));
+    expect(stream.mock.calls.at(-1)?.[0].messages.at(-1)?.text).toBe("继续");
+  });
+
+  it("改写用户消息保留旧路径并从新问题生成", async () => {
+    const user: ChatMessage = { ...greeting, id: "u", role: "user", text: "旧问题", createdAt: 12 };
+    const old: ChatMessage = { ...greeting, id: "old", text: "旧回答", createdAt: 13 };
+    const repository = repositoryWith({ listMessages: vi.fn(async () => [user, old]) });
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => { options.onDelta("新回答"); return { truncated: false }; });
+    const { result } = renderHook(() => useChatController({ repository, streamChat: stream }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    await act(async () => result.current.editMessage("u", "新问题"));
+    expect(result.current.messages[0]).toMatchObject({ text: "新问题", branchRootId: "u", branchVersion: 2 });
+    expect(repository.saveBranchState).toHaveBeenCalledWith(expect.objectContaining({ branches: [expect.objectContaining({ messages: [user, old] })] }), expect.any(Array));
+    expect(result.current.messages.at(-1)?.text).toBe("新回答");
+  });
+
+  it("生成中发送补充要求会停止旧回复并开始下一轮", async () => {
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta("部分回复");
+      if (stream.mock.calls.length === 1) await new Promise<void>((resolve) => options.signal?.addEventListener("abort", () => resolve(), { once: true }));
+      return { truncated: false };
+    });
+    const { result } = renderHook(() => useChatController({ repository: repositoryWith(), streamChat: stream, autoAiTitle: false }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    let first: Promise<void>;
+    act(() => { first = result.current.send("开始"); });
+    await waitFor(() => expect(result.current.phase).toBe("streaming"));
+    await act(async () => { await result.current.send("请更简洁"); await first; });
+    expect(stream).toHaveBeenCalledTimes(2);
+    expect(result.current.messages.filter((message) => message.role === "user").map((message) => message.text)).toEqual(["开始", "请更简洁"]);
+    expect(result.current.messages.find((message) => message.interrupted)?.status).toBe("stopped");
+  });
+  it("按事件顺序保存正文、思考和工具，并在终态保留思考耗时", async () => {
+    const repository = repositoryWith();
+    let now = 100;
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta("请批准执行。");
+      now = 200;
+      options.onThought?.("检查工作区");
+      now = 6200;
+      options.onToolCall?.({ id: "call-1", name: "run_command", arguments: { command: "pwd" } });
+      options.onToolResult?.({ id: "call-1", name: "run_command", output: "workspace", isError: false, durationMs: 10 });
+      options.onDelta("检查完成。");
+      return { truncated: false };
+    });
+    const { result } = renderHook(() => useChatController({
+      id: ids("user-1", "assistant-1"), now: () => now, repository, streamChat: stream,
+    }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    await act(async () => result.current.send("查看项目"));
+    const message = result.current.messages.at(-1);
+    expect(message?.contentSegments).toEqual([
+      { type: "text", start: 0, end: 6 },
+      { type: "thought", start: 0, end: 5, startedAtMs: 100, endedAtMs: 6100 },
+      { type: "tool", toolId: "call-1" },
+      { type: "text", start: 6, end: 11 },
+    ]);
+    expect(vi.mocked(repository.putMessage).mock.calls.at(-1)?.[0].contentSegments)
+      .toEqual(message?.contentSegments);
+  });
+
+  it.each(["complete", "stopped", "failed"] as const)("流式快照与 %s 终态保留同一事件顺序", async (status) => {
+    const repository = repositoryWith();
+    const finish = deferred<StreamChatResult>();
+    let now = 100;
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta("之前");
+      now = 200;
+      options.onThought?.("检查");
+      now = 300;
+      options.onDelta("之后");
+      options.onToolCall?.({ id: "call-1", name: "read_file", arguments: { path: "a.ts" } });
+      options.onThought?.("复核");
+      return finish.promise;
+    });
+    const { result } = renderHook(() => useChatController({
+      id: ids("user-1", "assistant-1"), now: () => now, repository, streamChat: stream,
+    }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    let sending: Promise<void>;
+    act(() => { sending = result.current.send("检查文件"); });
+    await waitFor(() => expect(result.current.messages.at(-1)?.thought).toBe("检查复核"));
+    const segments = result.current.messages.at(-1)?.contentSegments;
+    expect(segments?.map((segment) => segment.type)).toEqual(["text", "thought", "text", "tool", "thought"]);
+    await waitFor(() => expect(vi.mocked(repository.putMessage).mock.calls.at(-1)?.[0])
+      .toMatchObject({ status: "streaming", text: "之前之后", contentSegments: segments }));
+    now = 1300;
+    await act(async () => {
+      if (status === "stopped") await result.current.stop();
+      if (status === "failed") finish.reject(new ChatClientError("PROVIDER_ERROR"));
+      else finish.resolve({ truncated: false });
+      await sending;
+    });
+    const message = result.current.messages.at(-1);
+    expect(message?.status).toBe(status);
+    expect(message?.contentSegments?.slice(0, -1)).toEqual(segments?.slice(0, -1));
+    expect(message?.contentSegments?.at(-1)).toEqual({
+      type: "thought", start: 2, end: 4, startedAtMs: 200, endedAtMs: 1200,
+    });
+    expect(vi.mocked(repository.putMessage).mock.calls.at(-1)?.[0].contentSegments).toEqual(message?.contentSegments);
+  });
+
   it("creates a new conversation when history is empty", async () => {
     const created = { ...conversation, id: "new-conversation" };
     const repository = repositoryWith({
@@ -1059,19 +1188,9 @@ describe("useChatController", () => {
     expect(result.current.messages).toHaveLength(3); // greeting, user-1, assistant-3
     expect(result.current.messages[2]?.id).toBe("assistant-3");
     expect(result.current.messages[2]?.text).toBe("回复 #3");
-    // 重新生成 = 水位线定点删除（从被重生成的 assistant-1 起）
-    const putMessages = vi
-      .mocked(repository.putMessage)
-      .mock.calls.map(([message]) => message);
-    const assistantOneCreatedAt = putMessages.find((message) => message.id === "assistant-1")
-      ?.createdAt;
-    expect(assistantOneCreatedAt).toBeGreaterThan(greeting.createdAt);
-    const regenerated = vi
-      .mocked(repository.deleteMessagesFrom)
-      .mock.calls.filter(
-        (call) => call[0] === conversation.id && call[1] === assistantOneCreatedAt,
-      );
-    expect(regenerated).toHaveLength(1);
+    const saved = vi.mocked(repository.saveBranchState).mock.calls.at(-1);
+    expect(saved?.[0].branches?.[0]?.messages.map((message) => message.id)).toEqual(["greeting-1", "user-1", "assistant-1", "user-2", "assistant-2"]);
+    expect(saved?.[1].map((message) => message.id)).toEqual(["greeting-1", "user-1", "assistant-3"]);
   });
 
   it("aborts active compression when stop is called and returns to idle", async () => {

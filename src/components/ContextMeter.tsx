@@ -1,9 +1,13 @@
+import { contextCharacters, REQUEST_CHARACTER_BUDGET } from "../domain/context-budget";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage } from "../domain/chat";
 
 export interface ContextMeterProps {
   messages: ChatMessage[];
-  contextLimit?: number; // default e.g. 128000
+  compressedUpTo?: number;
+  summary?: string;
+  /** 估计 Token 预算，默认由应用请求字符上限换算。 */
+  contextLimit?: number;
 }
 
 const RADIUS = 5.5;
@@ -15,7 +19,7 @@ function formatTokens(num: number): string {
   return `${num}`;
 }
 
-export function ContextMeter({ messages, contextLimit = 128_000 }: ContextMeterProps) {
+export function ContextMeter({ messages, compressedUpTo, summary, contextLimit = 1800 + Math.ceil(REQUEST_CHARACTER_BUDGET / 2.2) }: ContextMeterProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLSpanElement | null>(null);
 
@@ -23,10 +27,7 @@ export function ContextMeter({ messages, contextLimit = 128_000 }: ContextMeterP
   const breakdown = useMemo(() => {
     const systemTokens = 1200; // 角色提示词与系统设定基线
     const toolsTokens = 600; // 联网检索及工具 schema 基线
-    let messageChars = 0;
-    for (const msg of messages) {
-      messageChars += msg.text.length;
-    }
+    const messageChars = contextCharacters(messages, compressedUpTo, summary);
     const messageTokens = Math.ceil(messageChars / 2.2);
     const usedTokens = systemTokens + toolsTokens + messageTokens;
     const percent = Math.min(100, Math.max(1, Math.round((usedTokens / contextLimit) * 100)));
@@ -38,7 +39,7 @@ export function ContextMeter({ messages, contextLimit = 128_000 }: ContextMeterP
       percent,
       contextWindow: contextLimit,
     };
-  }, [messages, contextLimit]);
+  }, [messages, contextLimit, compressedUpTo, summary]);
 
   // 点击外部或按 Esc 关闭弹出层
   useEffect(() => {
@@ -60,16 +61,19 @@ export function ContextMeter({ messages, contextLimit = 128_000 }: ContextMeterP
 
   const percent = breakdown.percent;
   const strokeDash = (CIRCUMFERENCE * percent) / 100;
+  if (percent <= 50) return null;
 
   return (
-    <span ref={rootRef} className="context-meter-root">
+    <span ref={rootRef} className="context-meter-root" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
       <button
         type="button"
         className="context-meter-trigger"
         aria-label={`上下文已用 ${percent}%`}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title={`上下文已用 ${percent}% (~${formatTokens(breakdown.usedTokens)} / ${formatTokens(breakdown.contextWindow)})`}
+        title={`上下文估算 ${percent}% (~${formatTokens(breakdown.usedTokens)} / ${formatTokens(breakdown.contextWindow)})`}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
         onClick={() => setOpen(!open)}
       >
         <svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true">
@@ -88,7 +92,7 @@ export function ContextMeter({ messages, contextLimit = 128_000 }: ContextMeterP
       {open && (
         <div className="context-meter-panel" role="dialog" aria-label="上下文用量详情">
           <div className="context-meter-panel__header">
-            <span className="context-meter-panel__title">上下文已用</span>
+            <span className="context-meter-panel__title">上下文估算</span>
             <span className="context-meter-panel__percent">{percent}%</span>
             <span className="context-meter-panel__figures">
               {`~${formatTokens(breakdown.usedTokens)} / ${formatTokens(breakdown.contextWindow)}`}

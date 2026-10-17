@@ -31,8 +31,6 @@ const consoleErrors: string[] = [];
 
 async function enterApp(page: Page): Promise<void> {
   await page.goto("/");
-  await page.getByLabel("访问码").fill("yachiyo-local-access");
-  await page.getByRole("button", { name: "进入" }).click();
   await expect(page.getByPlaceholder("什么都可以告诉我")).toBeVisible();
 }
 
@@ -153,9 +151,7 @@ test.beforeEach(async ({ page }) => {
 
 test("long conversation stays virtualized, windowed, and free of long tasks while sending", async ({
   page,
-}, testInfo) => {
-  test.skip(testInfo.project.name !== "mobile-390", "单项目跑一次即可覆盖断言");
-
+}) => {
   await seedDatabase(page);
   await enterApp(page);
 

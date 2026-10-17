@@ -66,6 +66,55 @@ function isNetworkFailure(error: unknown): boolean {
   return error instanceof TypeError;
 }
 
+/** 桌面端本地网关鉴权头名，与 src-tauri/src/server/http.rs 的 GATEWAY_TOKEN_HEADER 严格一致 */
+const gatewayTokenHeader = "x-yachiyo-gateway-token";
+
+/** 已取到的网关 token：null 表示尚未成功获取，空串表示本次获取不可用（不写入缓存，留待下次重试） */
+let cachedGatewayToken: string | null = null;
+
+/** 进行中的获取：并发首请求共用同一次 invoke，避免同时向 IPC 发起多趟调用 */
+let pendingGatewayToken: Promise<string> | null = null;
+
+/**
+ * 桌面端判定就地内联而不复用 app-platform 的 isDesktopApp：
+ * app-platform 依赖本模块的 currentApiOrigin，反向 import 会形成模块环。
+ */
+function isDesktopRuntime(): boolean {
+  return typeof window !== "undefined" && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
+}
+
+async function resolveGatewayToken(): Promise<string> {
+  if (cachedGatewayToken !== null) {
+    return cachedGatewayToken;
+  }
+  // 失败不写缓存：IPC 尚未就绪或动态分包加载失败时若固化空值，此后整个会话的每个请求都会缺失 token
+  pendingGatewayToken ??= import("@tauri-apps/api/core")
+    .then(({ invoke }) => invoke<string>("get_gateway_token"))
+    .then(
+      (token) => {
+        cachedGatewayToken = token;
+        pendingGatewayToken = null;
+        return token;
+      },
+      () => {
+        pendingGatewayToken = null;
+        return "";
+      },
+    );
+  return pendingGatewayToken;
+}
+
+/** 为桌面端请求附加网关 token 头，其余调用点与请求体形态保持不变 */
+async function withGatewayToken(init: RequestInit): Promise<RequestInit> {
+  const token = await resolveGatewayToken();
+  if (!token) {
+    return init;
+  }
+  const headers = new Headers(init.headers);
+  headers.set(gatewayTokenHeader, token);
+  return { ...init, headers };
+}
+
 /** 请求体可安全重发时才允许线路回退（字符串体未被消费；流式体不可重发） */
 function isRetryableBody(init: RequestInit): boolean {
   return init.body === undefined || typeof init.body === "string";
@@ -82,7 +131,8 @@ export interface ApiFetchOptions {
  * - 走当前线路发起请求；仅当「网络层失败（TypeError）且请求体可重发」时
  *   切换到下一条候选线路重试一次并记住新线路；
  * - HTTP 错误（4xx/5xx）是服务端正常响应，不换线，原样返回；
- * - 中止信号原样上抛，不重试。
+ * - 中止信号原样上抛，不重试；
+ * - 桌面端额外注入本地网关 token 头（Web/PWA 与 APK 轨道完全走原路径）。
  */
 export async function apiFetch(
   path: string,
@@ -93,11 +143,12 @@ export async function apiFetch(
   const storage = options.storage ?? defaultStorage();
   const candidates = candidateOrigins();
   const primary = currentApiOrigin(storage);
+  const requestInit = isDesktopRuntime() ? await withGatewayToken(init) : init;
 
   try {
-    return await fetcher(primary + path, init);
+    return await fetcher(primary + path, requestInit);
   } catch (error) {
-    if (!isNetworkFailure(error) || !isRetryableBody(init)) {
+    if (!isNetworkFailure(error) || !isRetryableBody(requestInit)) {
       throw error;
     }
     const currentIndex = candidates.indexOf(primary);
@@ -106,7 +157,7 @@ export async function apiFetch(
       throw error;
     }
     writeStoredOrigin(storage, next);
-    return await fetcher(next + path, init);
+    return await fetcher(next + path, requestInit);
   }
 }
 

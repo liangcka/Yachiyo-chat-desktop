@@ -1,6 +1,6 @@
-# Contributing to Yachiyo Chat
+# Yachiyo Chat Desktop 贡献指南
 
-感谢对 Yachiyo Chat 项目的关注与贡献！
+当前维护范围为 Tauri 桌面端与 PC 浏览器界面。共享前端统一使用 `DesktopLayout`，不再按屏幕宽度切换移动版入口。
 
 ## 参与规范
 
@@ -8,6 +8,7 @@
 - **Node.js**: >= 22.12.0
 - **npm**: >= 10.0.0
 - **PowerShell / Bash**
+- **Rust 稳定版与 Cargo**：运行 Tauri 桌面端、修改 Rust 网关时需要。
 
 ### 2. 本地开发与调试
 
@@ -19,11 +20,16 @@ npm install
 npm run dev:mock
 ```
 
-- 本地 Mock 模式默认访问码为：`yachiyo-local-access`。
+- 本地 Mock 模式打开地址即可，应用使用 `yachiyo-local-access` 在后台建立开发会话。
+- 原生桌面开发使用 `npm run desktop:dev`，构建安装包使用 `npm run desktop:build`。
+- `npm run dev` 仅提供 Vite 前端；完整接口联调必须使用上述 Mock 模式、`npm run dev:pages` 或 Tauri 本地网关。
+- 桌面对话、快捷键与面板说明见 [桌面使用指南](docs/DESKTOP_GUIDE.md)。
 
 ### 3. 代码与质量检查
 
-在提交 Pull Request 之前，请确保以下全部检查通过：
+根据变更范围运行检查。前端组件修改执行单元测试；Functions 修改执行云函数测试；Rust 修改执行 `npm run test:desktop`。界面动效需要同时验证正常模式与系统“减少动态效果”模式。
+
+常用前端与云函数检查：
 
 ```bash
 # 1. TypeScript 类型检查
@@ -54,5 +60,6 @@ npm run build
 - `chore:` 构建或辅助工具变动
 
 ### 5. 安全注意
+- `android/`、`capacitor.config.ts` 和移动端构建脚本作为历史工程保留，桌面 UI 任务不修改这些原生文件。
 - **切勿**将任何包含真实 API Key、Token 或私钥的文件（如 `.dev.vars`、`keystore.properties`、`*.jks`、`*.keystore`）提交至仓库。
 - 敏感配置请使用 `.dev.vars.example` 或 `android/keystore.properties.example` 作为模板。

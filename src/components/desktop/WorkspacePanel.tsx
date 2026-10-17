@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Folder, FolderGit2, FolderPlus, GitCompareArrows, Play, RefreshCw, Terminal, X } from "lucide-react";
 import type { UiCopy } from "../../i18n/messages";
-import { executeDesktopAgentTool, getDesktopWorkspaceRoot } from "../../services/desktop-bridge";
-import { projectManager } from "../../services/project-manager";
+import { executeDesktopAgentTool } from "../../services/desktop-bridge";
+import { projectManager, useProjectState } from "../../services/project-manager";
 import { FileTree } from "./FileTree";
+import { CheckpointPanel } from "./CheckpointPanel";
 
 export interface WorkspacePanelProps {
   copy?: UiCopy;
@@ -15,10 +16,18 @@ export interface WorkspacePanelProps {
   onReferenceFile?: (path: string) => void;
   /** 打开 diff 审阅（编辑器视图的变更审阅 tab） */
   onOpenReview?: () => void;
+  isAgentRunning?: boolean;
+  onCheckpointRestored?: () => void;
 }
 
-export function WorkspacePanel({ copy, open = true, onClose, onOpenFile, onReferenceFile, onOpenReview }: WorkspacePanelProps) {
-  const [workspaceRoot, setWorkspaceRoot] = useState<string>("");
+export function WorkspacePanel({ copy, open = true, onClose, onOpenFile, onReferenceFile, onOpenReview, isAgentRunning = false, onCheckpointRestored }: WorkspacePanelProps) {
+  const { activeProject } = useProjectState();
+  const [workspaceRoot, setWorkspaceRoot] = useState(activeProject ?? "");
+  const [previousProject, setPreviousProject] = useState(activeProject);
+  if (activeProject !== previousProject) {
+    setPreviousProject(activeProject);
+    setWorkspaceRoot(activeProject ?? "");
+  }
   const [terminalOutput, setTerminalOutput] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [commandInput, setCommandInput] = useState("");
@@ -27,14 +36,7 @@ export function WorkspacePanel({ copy, open = true, onClose, onOpenFile, onRefer
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (open) {
-      queueMicrotask(() => {
-        void getDesktopWorkspaceRoot().then((root) => {
-          if (root) setWorkspaceRoot(root);
-        });
-      });
-      closeRef.current?.focus();
-    }
+    if (open) closeRef.current?.focus();
   }, [open]);
 
   const refreshWorkspace = useCallback(() => {
@@ -59,7 +61,7 @@ export function WorkspacePanel({ copy, open = true, onClose, onOpenFile, onRefer
 
   const handleRunCommand = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!commandInput.trim() || isLoading) return;
+    if (!commandInput.trim() || isLoading || isAgentRunning) return;
 
     const cmd = commandInput.trim();
     setCommandInput("");
@@ -162,12 +164,20 @@ export function WorkspacePanel({ copy, open = true, onClose, onOpenFile, onRefer
       <div className="workspace-panel__section workspace-panel__section--tree">
         {/* key 递增 = 全树重挂载：缓存、展开态与加载进度一并重置 */}
         <FileTree
-          key={treeRefreshKey}
+          key={`${activeProject ?? ""}:${treeRefreshKey}`}
           copy={copy}
           onOpenFile={handleOpenFile}
           onReferenceFile={onReferenceFile ? handleReferenceFile : undefined}
         />
       </div>
+
+      <CheckpointPanel
+        isRunning={isAgentRunning || isLoading}
+        onRestored={() => {
+          refreshWorkspace();
+          onCheckpointRestored?.();
+        }}
+      />
 
       <div className="workspace-panel__section workspace-panel__section--terminal">
         <div className="workspace-panel__terminal-header">
@@ -205,12 +215,12 @@ export function WorkspacePanel({ copy, open = true, onClose, onOpenFile, onRefer
             value={commandInput}
             onChange={(e) => setCommandInput(e.target.value)}
             placeholder="输入终端命令 (如 npm test)..."
-            disabled={isLoading}
+            disabled={isLoading || isAgentRunning}
           />
           <button
             type="submit"
             className="workspace-panel__btn workspace-panel__btn--primary"
-            disabled={isLoading || !commandInput.trim()}
+            disabled={isLoading || isAgentRunning || !commandInput.trim()}
           >
             <Play size={12} />
           </button>

@@ -1,9 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { CommandPalette, type PaletteCommand } from "../../components/desktop/CommandPalette";
+import { ComputerControlOverlay } from "../../components/desktop/ComputerControlOverlay";
+import { formatComputerControlAction, isComputerControlTool } from "../../services/mcp-manager";
+import {
+  showControlOverlay,
+  hideControlOverlay,
+  onEmergencyStopControl,
+} from "../../services/desktop-bridge";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DragHandle from "../../components/DragHandle";
 import { useTheme } from "../../app/use-theme";
 import { useEditorWorkspace } from "../../app/use-editor-workspace";
-import { EditorView } from "../../components/editor/EditorView";
-import { Live2DWaifu } from "../../components/desktop/Live2DWaifu";
 import type { SharedViewProps } from "../layout-types";
 import { DesktopChatArea } from "./DesktopChatArea";
 import { DesktopSidebar } from "./sidebar";
@@ -11,6 +17,10 @@ import { DesktopTopBar } from "./DesktopTopBar";
 import { DesktopRightPane } from "./DesktopRightPane";
 import type { DesktopRightTab } from "./sidebar/types";
 import { SettingsModal, type SettingsTabKey } from "../../components/settings/SettingsModal";
+
+const EditorView = lazy(() =>
+  import("../../components/editor/EditorView").then((m) => ({ default: m.EditorView })),
+);
 
 /* ── 列宽约束与持久化 Key ─────────────────────────────── */
 
@@ -103,6 +113,7 @@ function writeStoredWidth(key: string, value: number): void {
 export function DesktopLayout(props: SharedViewProps) {
   /** 用户手动折叠偏好：窄视口的强制折叠只作用于显示层，不写入该状态 */
   const [userSidebarCollapsed, setUserSidebarCollapsed] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTabKey>("general");
   const { resolved, setTheme } = useTheme();
@@ -179,6 +190,11 @@ export function DesktopLayout(props: SharedViewProps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isModifier = e.ctrlKey || e.metaKey;
+      if (isModifier && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        if (!e.repeat) setPaletteOpen((open) => !open);
+        return;
+      }
 
       if (isModifier && (e.key === "n" || e.key === "N")) {
         e.preventDefault();
@@ -286,11 +302,73 @@ export function DesktopLayout(props: SharedViewProps) {
     }
   }, [props]);
 
+  const paletteCommands: PaletteCommand[] = [
+    ...props.conversations.map((conversation) => ({ id: `chat-${conversation.id}`, label: conversation.title, group: "对话", run: () => { void props.controller.selectConversation(conversation.id); switchCenterView("chat"); } })),
+    ...props.llmEntries.map((entry) => ({ id: `model-${entry.provider}`, label: entry.model || entry.provider, group: "模型", run: () => { void props.onLlmActivate(entry.provider); } })),
+    ...([ ["general", "常规"], ["models", "模型"], ["browser", "联网搜索"], ["custom", "技能"], ["shortcuts", "快捷键"] ] as const).map(([tab, label]) => ({ id: `settings-${tab}`, label, group: "设置", run: () => handleOpenSettings(tab) })),
+  ];
+
+  // 监测 AI 是否正在控制电脑（执行 Windows MCP / 系统控制工具）
+  const activeControlStep = useMemo(() => {
+    const isStreaming = props.controller.streaming !== undefined || props.controller.phase === "streaming";
+    if (!isStreaming) return null;
+    const msgs = props.controller.messages;
+    const lastMsg = msgs[msgs.length - 1];
+    if (!lastMsg || lastMsg.role !== "assistant" || !lastMsg.toolSteps || lastMsg.toolSteps.length === 0) {
+      return null;
+    }
+    const currentStep = lastMsg.toolSteps.find((s) => s.result === undefined);
+    if (!currentStep) return null;
+    if (isComputerControlTool(currentStep.name)) {
+      let argsObj: Record<string, unknown> | undefined;
+      try {
+        argsObj = JSON.parse(currentStep.argumentsJson);
+      } catch {
+        /* ignore parse error */
+      }
+      return {
+        name: currentStep.name,
+        args: argsObj,
+      };
+    }
+    return null;
+  }, [props.controller.streaming, props.controller.phase, props.controller.messages]);
+
+  // 监听来自系统级全屏 Overlay 或全局广播的紧急接管停止事件
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void onEmergencyStopControl(() => {
+      void props.controller.stop();
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [props.controller]);
+
+  // 当检测到当前步骤正在控制电脑时，触发系统级全屏置顶发光覆盖窗口 (类似 Codex 全屏接管)
+  useEffect(() => {
+    if (activeControlStep) {
+      const detail = formatComputerControlAction(
+        activeControlStep.name,
+        activeControlStep.args,
+      );
+      void showControlOverlay(activeControlStep.name, detail);
+    } else {
+      void hideControlOverlay();
+    }
+    return () => {
+      void hideControlOverlay();
+    };
+  }, [activeControlStep]);
+
   /* ── 渲染 ─────────────────────────────────────────── */
 
   const effectiveSidebarWidth = sidebarCollapsed ? SIDEBAR_COLLAPSED : sidebarWidth;
+  const effectiveRightPaneWidth = Math.min(rightPaneWidth, Math.max(280, viewportWidth - effectiveSidebarWidth - 320));
   const gridColumns = rightPaneOpen
-    ? `${effectiveSidebarWidth}px minmax(0, 1fr) ${rightPaneWidth}px`
+    ? `${effectiveSidebarWidth}px minmax(0, 1fr) ${effectiveRightPaneWidth}px`
     : `${effectiveSidebarWidth}px minmax(0, 1fr)`;
 
   return (
@@ -331,6 +409,7 @@ export function DesktopLayout(props: SharedViewProps) {
             onOpenSettings={handleOpenSettings}
             onRenameConversation={props.onRename}
             onSelectConversation={props.controller.selectConversation}
+            onSelectRightTab={(tab) => { handleSelectRightTab(tab); setRightPaneOpen(tab !== "none"); }}
             onSignOut={props.onSignOut}
             onToggleCollapse={() => setUserSidebarCollapsed((current) => !current)}
             onToggleTheme={handleToggleTheme}
@@ -354,23 +433,23 @@ export function DesktopLayout(props: SharedViewProps) {
               {...props}
               onOpenSettings={handleOpenSettings}
               onRenameConversation={props.onRename}
-              onToggleSidebar={() => setUserSidebarCollapsed((current) => !current)}
               onToggleRightPane={toggleRightPane}
               rightPaneOpen={rightPaneOpen}
               resolvedTheme={resolved}
-              sidebarCollapsed={sidebarCollapsed}
             />
           </div>
 
           {editorMounted ? (
-            <EditorView
-              workspace={editorWorkspace}
-              copy={props.copy}
-              resolvedTheme={resolved}
-              hidden={centerView !== "editor"}
-              reviewActive={reviewActive}
-              onReviewActiveChange={setReviewActive}
-            />
+            <Suspense fallback={<div className="desktop-shell__center-loading" />}>
+              <EditorView
+                workspace={editorWorkspace}
+                copy={props.copy}
+                resolvedTheme={resolved}
+                hidden={centerView !== "editor"}
+                reviewActive={reviewActive}
+                onReviewActiveChange={setReviewActive}
+              />
+            </Suspense>
           ) : null}
         </div>
 
@@ -395,6 +474,7 @@ export function DesktopLayout(props: SharedViewProps) {
                   /* 隐私模式下 localStorage 不可用 */
                 }
               }}
+              onCheckpointRestored={() => { editorWorkspace.resetTabs(); setReviewActive(false); }}
               onOpenFile={(path) => {
                 void editorWorkspace.openFile(path);
                 switchCenterView("editor");
@@ -409,6 +489,7 @@ export function DesktopLayout(props: SharedViewProps) {
         ) : null}
       </div>
 
+      {paletteOpen ? <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} /> : null}
       {/* 现代化双栏设置中心 Modal */}
       <SettingsModal
         open={settingsOpen}
@@ -420,11 +501,18 @@ export function DesktopLayout(props: SharedViewProps) {
         shared={props}
       />
 
+      {/* AI 控制电脑时的全局发光边框与控制状态悬浮弹窗 (类似 Codex) */}
+      <ComputerControlOverlay
+        active={activeControlStep !== null}
+        toolName={activeControlStep?.name}
+        toolArgs={activeControlStep?.args}
+        softwareName="月见八千代"
+        onStop={() => void props.controller.stop()}
+      />
+
       {/* shell 级浮层层：全局弹层 / toast 的挂载槽位，默认不拦截交互 */}
       <div className="desktop-shell__overlay" />
 
-      {/* Live2D 看板娘：视口右下角悬浮挂件（自建 #waifu DOM，经 CSS 层叠覆盖置于 IDE 内容之上） */}
-      <Live2DWaifu />
     </div>
   );
 }

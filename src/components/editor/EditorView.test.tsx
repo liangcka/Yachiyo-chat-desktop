@@ -44,6 +44,7 @@ describe("EditorView", () => {
     saving: false,
     openFile: vi.fn().mockResolvedValue(undefined),
     closeTab: vi.fn(),
+    resetTabs: vi.fn(),
     setActive: vi.fn(),
     updateContent: vi.fn(),
     saveTab: vi.fn().mockResolvedValue(true),

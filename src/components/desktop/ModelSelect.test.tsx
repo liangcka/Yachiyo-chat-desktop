@@ -31,13 +31,10 @@ describe("ModelSelect", () => {
       />,
     );
 
-    // 应该显示短名 StepFun 和模型名 step-3.7-flash，中间以 / 隔开
-    expect(screen.getByText("StepFun")).toBeInTheDocument();
-    expect(screen.getByText("/")).toBeInTheDocument();
-    expect(screen.getByText("step-3.7-flash")).toBeInTheDocument();
-
-    // 完整的全称应在 title 属性中
-    const trigger = screen.getByRole("button", { name: /StepFun/i });
+    expect(screen.queryByText("StepFun")).not.toBeInTheDocument();
+    expect(screen.queryByText("/")).not.toBeInTheDocument();
+    expect(screen.getByText("step-3.7 Flash")).toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: /step-3.7 Flash/i });
     expect(trigger).toHaveAttribute("title", expect.stringContaining("阶跃星辰 StepFun"));
   });
 
@@ -55,7 +52,7 @@ describe("ModelSelect", () => {
       />,
     );
 
-    const trigger = screen.getByRole("button", { name: /StepFun/i });
+    const trigger = screen.getByRole("button", { name: /step-3.7 Flash/i });
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
 
     // 点击展开
@@ -92,7 +89,7 @@ describe("ModelSelect", () => {
       />,
     );
 
-    const trigger = screen.getByRole("button", { name: /StepFun/i });
+    const trigger = screen.getByRole("button", { name: /step-3.7 Flash/i });
     await user.click(trigger);
 
     const manageBtn = screen.getByRole("button", { name: /管理模型与 API Key/i });

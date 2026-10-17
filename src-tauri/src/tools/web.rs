@@ -1,3 +1,4 @@
+use crate::tools::floor_char_boundary;
 use std::time::Duration;
 
 pub async fn web_fetch(url: &str, client: &reqwest::Client) -> Result<String, String> {
@@ -23,7 +24,9 @@ pub async fn web_fetch(url: &str, client: &reqwest::Client) -> Result<String, St
 
     let max_len = 16 * 1024;
     if text.len() > max_len {
-        let mut truncated = text[..max_len].to_string();
+        // 切片点必须先回退到字符边界：直接按字节切会在多字节字符中间 panic（CJK 页面必然命中）
+        let cut = floor_char_boundary(&text, max_len);
+        let mut truncated = text[..cut].to_string();
         truncated.push_str("\n... [Web content truncated]");
         Ok(truncated)
     } else {

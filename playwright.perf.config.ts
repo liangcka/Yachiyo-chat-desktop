@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 /**
  * web-perf lane 专用配置：与主 e2e 配置的差异——
- * 只保留 mobile-390 单项目、独立报告目录、失败不重试（性能数据要可复现）。
+ * 只保留桌面单项目、独立报告目录、失败不重试（性能数据要可复现）。
  */
 const baseURL = "http://127.0.0.1:8788";
 
@@ -22,12 +22,12 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "mobile-390",
+      name: "desktop-1280",
       use: {
         deviceScaleFactor: 1,
-        hasTouch: true,
-        isMobile: true,
-        viewport: { width: 390, height: 844 },
+        hasTouch: false,
+        isMobile: false,
+        viewport: { width: 1280, height: 800 },
       },
     },
   ],

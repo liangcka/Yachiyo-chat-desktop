@@ -56,6 +56,19 @@ function parsePermissionArguments(toolName: string, rawJson: string): ParsedPerm
     };
   }
 
+  if (toolName.startsWith("mcp__")) {
+    const parts = toolName.split("__");
+    const serverId = parts[1] || "mcp";
+    const opName = parts.slice(2).join("__") || toolName;
+    return {
+      toolType: "generic",
+      title: `八千代请求调用外部 MCP 工具 (${serverId})`,
+      badgeLabel: `MCP: ${serverId}`,
+      extraMeta: opName,
+      formattedJson: parsed ? JSON.stringify(parsed, null, 2) : rawJson,
+    };
+  }
+
   return {
     toolType: "generic",
     title: "八千代请求执行写操作",
@@ -81,7 +94,7 @@ export function PermissionCard({ toolName, argumentsJson, onApprove, onDeny }: P
     }
   }, [copyContent]);
 
-  // 支持键盘快捷键：Esc 拒绝，Ctrl+Enter 快速批准并本会话免问
+  // 支持键盘快捷键：Esc 拒绝，Ctrl+Enter 仅允许当前操作
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -89,7 +102,7 @@ export function PermissionCard({ toolName, argumentsJson, onApprove, onDeny }: P
         onDeny();
       } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        onApprove(true);
+        onApprove(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -193,16 +206,16 @@ export function PermissionCard({ toolName, argumentsJson, onApprove, onDeny }: P
           type="button"
           title="仅批准本次执行"
         >
-          <span>批准一次</span>
+          <span>本次允许</span>
         </button>
         <button
           className="permission-card__btn permission-card__btn--primary"
           onClick={() => onApprove(true)}
           type="button"
-          title="批准并本会话不再询问 (Ctrl+Enter)"
+          title="在当前工作区记住此命令，文件操作仅限此路径，外部工具仅限相同参数"
         >
           <Check size={13} />
-          <span>批准并本会话记住</span>
+          <span>总是允许此类命令</span>
         </button>
       </div>
     </div>

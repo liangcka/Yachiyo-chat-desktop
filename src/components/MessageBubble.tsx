@@ -1,10 +1,9 @@
-import { Copy, RotateCcw, RotateCw, Sparkles } from "lucide-react";
+import { ChevronLeft, ChevronRight, Copy, Pencil, RotateCcw, RotateCw } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import type { ChatMessage, Locale } from "../domain/chat";
 import { copyFor } from "../i18n/messages";
 import { MarkdownContent } from "./chat/MarkdownContent";
-import { ThinkingBlock } from "./chat/ThinkingBlock";
-import { ToolCard } from "./tools/ToolCard";
+import { MessageContent } from "./chat/MessageContent";
 
 export interface MessageBubbleProps {
   locale: Locale;
@@ -14,6 +13,9 @@ export interface MessageBubbleProps {
   showSources?: boolean;
   onRecall?: () => void;
   onRegenerate?: () => void;
+  onEdit?: (text: string) => void;
+  versions?: number[];
+  onVersionChange?: (version: number) => void;
   onToast?: (message: string) => void;
   onImageLoad?: () => void;
 }
@@ -36,9 +38,14 @@ export const MessageBubble = memo(function MessageBubble({
   onImageLoad,
   onRecall,
   onRegenerate,
+  onEdit,
+  versions,
+  onVersionChange,
   onToast,
   showSources,
 }: MessageBubbleProps) {
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState(message.text);
   const [menuOpen, setMenuOpen] = useState(false);
   const [placement, setPlacement] = useState<"top" | "bottom">("top");
   const bubbleRef = useRef<HTMLElement>(null);
@@ -57,7 +64,7 @@ export const MessageBubble = memo(function MessageBubble({
   // Agent 消息可能仅有工具步骤而无正文（模型先调工具后作答），此时气泡仍需渲染卡片
   const hasToolSteps = message.toolSteps !== undefined && message.toolSteps.length > 0;
   // 仅 assistant 消息渲染联网搜索的参考来源，且受"显示引用来源"开关控制；
-  // 正文到达前（搜索与模型等待期）不渲染来源区块，保持三点等待动画
+  // 正文到达前不渲染来源区块，避免来源列表遮蔽等待反馈。
   const visibleSources =
     message.role === "assistant" && showSources !== false && hasText
       ? message.sources?.filter(({ title, url }) => title.length > 0 && url.length > 0)
@@ -184,7 +191,9 @@ export const MessageBubble = memo(function MessageBubble({
     onRegenerate?.();
   };
 
-  if (!hasText && !hasImage && !isTyping && !hasToolSteps) {
+  const hasVersions = versions !== undefined && versions.length > 1;
+  const isEmpty = !hasText && !hasImage && !hasToolSteps && !message.thought?.trim();
+  if (isEmpty && !isTyping && !hasVersions) {
     return null;
   }
 
@@ -210,61 +219,6 @@ export const MessageBubble = memo(function MessageBubble({
         }
       }}
     >
-      {message.role === "assistant" ? (
-        <div className="assistant-identity-header">
-          <div className="assistant-identity-header__lead">
-            <span className="assistant-identity-header__avatar" aria-hidden="true">
-              <Sparkles size={13} />
-            </span>
-            <span className="assistant-identity-header__name">
-              {locale === "ja-JP" ? "月見八千代" : "月见八千代"}
-            </span>
-            {message.skills !== undefined && message.skills.length > 0 ? (
-              <span
-                className="assistant-identity-header__skills-tag"
-                title={
-                  locale === "ja-JP"
-                    ? `適用スキル: ${message.skills.join("、")}`
-                    : `已生效技能：${message.skills.join("、")}`
-                }
-              >
-                <Sparkles size={10} className="assistant-identity-header__skills-icon" />
-                <span>{message.skills.join(" · ")}</span>
-              </span>
-            ) : null}
-            {message.status === "streaming" && hasText ? (
-              <span className="assistant-identity-header__status assistant-identity-header__status--streaming">
-                <span className="assistant-identity-header__pulse" />
-                {copyFor(locale).thinking}
-              </span>
-            ) : null}
-          </div>
-          <div className="assistant-identity-header__actions">
-            {hasText ? (
-              <button
-                type="button"
-                className="assistant-identity-header__action-btn"
-                onClick={handleCopy}
-                title={copyFor(locale).copyText}
-                aria-label={copyFor(locale).copyText}
-              >
-                <Copy size={12} />
-              </button>
-            ) : null}
-            {onRegenerate !== undefined && message.status !== "streaming" ? (
-              <button
-                type="button"
-                className="assistant-identity-header__action-btn"
-                onClick={handleRegenerateAction}
-                title={copyFor(locale).regenerate}
-                aria-label={copyFor(locale).regenerate}
-              >
-                <RotateCw size={12} />
-              </button>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
       {hasImage ? (
         imageUrl !== undefined ? (
           <img alt="" className="message-bubble__image" onLoad={onImageLoad} src={imageUrl} />
@@ -272,41 +226,18 @@ export const MessageBubble = memo(function MessageBubble({
           <div aria-hidden="true" className="message-bubble__image message-bubble__image--loading" />
         )
       ) : null}
-      {hasToolSteps ? (
-        <div className="message-bubble__tools">
-          {message.toolSteps?.map((step) => (
-            <ToolCard
-              isError={step.result?.isError}
-              isRunning={step.result === undefined && message.status === "streaming"}
-              key={step.id}
-              args={safeParseArgs(step.argumentsJson)}
-              output={step.result?.output}
-              toolName={step.name}
-            />
-          ))}
-        </div>
-      ) : null}
-      {message.role === "assistant" ? (
-        <ThinkingBlock
-          hasText={hasText}
-          isStreaming={message.status === "streaming"}
-          locale={locale}
-          thought={message.thought}
-        />
-      ) : null}
-      {hasText ? (
-        <>
-          <MarkdownContent text={displayText} isAssistant={message.role === "assistant"} />
-          {message.truncated === true ? (
-            <span className="message-bubble__truncated">{copyFor(locale).truncated}</span>
-          ) : null}
-        </>
-      ) : message.role !== "assistant" && message.status === "streaming" ? (
-        <span aria-hidden="true" className="message-bubble__typing">
-          <i />
-          <i />
-          <i />
-        </span>
+      {editing ? (
+        <form className="message-bubble__edit" onSubmit={(event) => { event.preventDefault(); if (editText.trim()) { onEdit?.(editText); setEditing(false); } }}>
+          <textarea aria-label="编辑消息" value={editText} onChange={(event) => setEditText(event.target.value)} />
+          <div><button type="button" onClick={() => setEditing(false)}>取消</button><button type="submit" disabled={!editText.trim()}>保存并重新生成</button></div>
+        </form>
+      ) : isEmpty && message.status === "failed" && message.role === "assistant" ? (
+        <p>{locale === "ja-JP" ? "返信を生成できませんでした。" : "本次回复未生成。"}</p>
+      ) : message.role === "assistant" ? (
+        <MessageContent message={message} locale={locale} hideCitations={hideCitations} />
+      ) : hasText ? <MarkdownContent text={displayText} /> : null}
+      {message.truncated === true ? (
+        <span className="message-bubble__truncated">{copyFor(locale).truncated}</span>
       ) : null}
       {hasVisibleSources && visibleSources !== undefined ? (
         <div aria-label={copyFor(locale).sourcesLabel} className="message-bubble__sources">
@@ -320,6 +251,28 @@ export const MessageBubble = memo(function MessageBubble({
               {source.title}
             </a>
           ))}
+        </div>
+      ) : null}
+      {!editing && (hasText || onEdit || onRegenerate || (versions && versions.length > 1)) ? (
+        <div className="message-bubble__actions">
+          {versions && versions.length > 1 ? (
+            <div className="message-bubble__versions" aria-label="消息版本">
+              <button type="button" aria-label="上一个版本" disabled={!onVersionChange || versions.indexOf(message.branchVersion ?? 1) <= 0} onClick={() => onVersionChange?.(versions[versions.indexOf(message.branchVersion ?? 1) - 1]!)}><ChevronLeft size={13} /></button>
+              <span>{versions.indexOf(message.branchVersion ?? 1) + 1} / {versions.length}</span>
+              <button type="button" aria-label="下一个版本" disabled={!onVersionChange || versions.indexOf(message.branchVersion ?? 1) >= versions.length - 1} onClick={() => onVersionChange?.(versions[versions.indexOf(message.branchVersion ?? 1) + 1]!)}><ChevronRight size={13} /></button>
+            </div>
+          ) : null}
+          {hasText ? (
+            <button type="button" onClick={handleCopy} title={copyFor(locale).copyText} aria-label={copyFor(locale).copyText}>
+              <Copy size={13} />
+            </button>
+          ) : null}
+          {onEdit ? <button type="button" title="编辑消息" aria-label="编辑消息" onClick={() => { setEditText(message.text); setEditing(true); }}><Pencil size={13} /></button> : null}
+          {onRegenerate && message.status !== "streaming" ? (
+            <button type="button" onClick={handleRegenerateAction} title={copyFor(locale).regenerate} aria-label={copyFor(locale).regenerate}>
+              <RotateCw size={13} />
+            </button>
+          ) : null}
         </div>
       ) : null}
       {menuOpen && (
@@ -372,15 +325,3 @@ export const MessageBubble = memo(function MessageBubble({
     </article>
   );
 });
-
-/** 工具步骤参数 JSON 的防御性解析：非法 JSON 或非对象形态回退为 undefined（模型输出不可信） */
-function safeParseArgs(json: string): Record<string, unknown> | undefined {
-  try {
-    const parsed: unknown = JSON.parse(json);
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}

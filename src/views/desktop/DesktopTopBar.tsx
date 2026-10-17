@@ -131,9 +131,6 @@ export function DesktopTopBar({
             <Sparkles size={13} className="desktop-topbar__brand-icon" />
           </span>
           <span className="desktop-topbar__brand-title">月见八千代</span>
-          <span className="desktop-topbar__brand-pill" aria-hidden="true">
-            IDE
-          </span>
         </button>
 
         {onToggleSidebar ? (
@@ -158,9 +155,9 @@ export function DesktopTopBar({
             aria-selected={activeView === "chat"}
             className={`center-view-switcher__btn ${activeView === "chat" ? "center-view-switcher__btn--active" : ""}`}
             onClick={() => onSwitchView("chat")}
+            title={`${copy.editorViewTab} (Ctrl+1)`}
           >
             {copy.editorViewTab}
-            <kbd>Ctrl+1</kbd>
           </button>
           <button
             type="button"
@@ -168,9 +165,9 @@ export function DesktopTopBar({
             aria-selected={activeView === "editor"}
             className={`center-view-switcher__btn ${activeView === "editor" ? "center-view-switcher__btn--active" : ""}`}
             onClick={() => onSwitchView("editor")}
+            title={`${copy.editorTab} (Ctrl+2)`}
           >
             {copy.editorTab}
-            <kbd>Ctrl+2</kbd>
           </button>
         </div>
       </div>

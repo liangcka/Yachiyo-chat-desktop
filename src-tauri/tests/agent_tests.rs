@@ -10,7 +10,21 @@ use yachiyo_desktop_lib::gateway::agent::stream_agg::ToolCallAggregator;
 use yachiyo_desktop_lib::gateway::providers::openai_compat::build_openai_agent_body;
 use yachiyo_desktop_lib::gateway::stream::extract_openai_delta;
 use yachiyo_desktop_lib::tools::get_agent_tools_schema;
-use yachiyo_desktop_lib::types::{ClientHistoryMessage, ClientStreamEvent, TokenUsage, ToolInvocation};
+use yachiyo_desktop_lib::types::{
+    AgentExecutionMode, ClientHistoryMessage, ClientStreamEvent, TokenUsage, ToolInvocation,
+};
+
+struct TestWorkspace { _directory: tempfile::TempDir, root: std::path::PathBuf }
+impl TestWorkspace { fn path(&self) -> &std::path::Path { &self.root } }
+fn temp_workspace() -> TestWorkspace {
+    let directory = tempfile::Builder::new().tempdir().unwrap();
+    let root = directory.path().join("workspace");
+    std::fs::create_dir(&root).unwrap();
+    TestWorkspace { _directory: directory, root }
+}
+fn checkpoint_store(root: &std::path::Path, run: &str) -> CheckpointStore {
+    CheckpointStore::with_storage(root, run, &root.parent().unwrap().join("checkpoint-storage"))
+}
 
 #[test]
 fn test_history_to_agent_messages() {
@@ -284,7 +298,6 @@ async fn test_approval_registry_cancel() {
 
 #[test]
 fn test_checkpoint_backup_and_rollback() {
-    use yachiyo_desktop_lib::gateway::agent::checkpoint::CheckpointStore;
 
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path();
@@ -292,7 +305,7 @@ fn test_checkpoint_backup_and_rollback() {
     let original = "原内容 v1";
     std::fs::write(root.join("a.txt"), original).unwrap();
 
-    let mut store = CheckpointStore::new(root, "run-test-1");
+    let mut store = checkpoint_store(root, "run-test-1");
     assert!(store.backup_before_write("a.txt").unwrap());
     assert_eq!(store.entries().len(), 1);
 
@@ -304,31 +317,25 @@ fn test_checkpoint_backup_and_rollback() {
 }
 
 #[test]
-fn test_checkpoint_skips_new_files_and_yachiyo_dir() {
-    use yachiyo_desktop_lib::gateway::agent::checkpoint::CheckpointStore;
+fn test_checkpoint_captures_new_files_and_protects_storage() {
 
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path();
 
-    let mut store = CheckpointStore::new(root, "run-test-2");
-    assert!(!store.backup_before_write("new-file.txt").unwrap());
-    assert!(!store.backup_before_write(".yachiyo/x.txt").unwrap());
-    assert_eq!(store.entries().len(), 0);
+    let mut store = checkpoint_store(root, "run-test-2");
+    assert!(store.backup_before_write("new-file.txt").unwrap());
+    assert!(store.backup_before_write(".yachiyo/checkpoints/x.txt").is_err());
+    assert_eq!(store.entries().len(), 1);
 }
 
 #[test]
-fn test_checkpoint_ensure_gitignore() {
-    use yachiyo_desktop_lib::gateway::agent::checkpoint::CheckpointStore;
+fn test_checkpoint_does_not_modify_gitignore() {
 
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path();
-    let store = CheckpointStore::new(root, "run-test-3");
-    store.ensure_gitignore().unwrap();
-    let content = std::fs::read_to_string(root.join(".gitignore")).unwrap();
-    assert!(content.contains(".yachiyo/"));
-    store.ensure_gitignore().unwrap();
-    let again = std::fs::read_to_string(root.join(".gitignore")).unwrap();
-    assert_eq!(content.matches(".yachiyo/").count(), again.matches(".yachiyo/").count());
+    let mut store = checkpoint_store(root, "run-test-3");
+    store.capture_turn(1).unwrap();
+    assert!(!root.join(".gitignore").exists());
 }
 
 /// 脚本化执行器：按序返回预编排轮次，并记录收到的消息序列
@@ -381,7 +388,7 @@ fn read_call(id: &str, path: &str) -> TurnOutcome {
 
 #[tokio::test]
 async fn test_loop_plain_text_completion() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = temp_workspace();
     let executor = ScriptedExecutor::new(vec![TurnOutcome {
         text: "任务完成".to_string(),
         tool_calls: vec![],
@@ -389,7 +396,7 @@ async fn test_loop_plain_text_completion() {
     }]);
     let (sink, events) = collector();
     let gate = ApprovalRegistry::new();
-    let mut checkpoint = Some(CheckpointStore::new(dir.path(), "run-1"));
+    let mut checkpoint = Some(checkpoint_store(dir.path(), "run-1"));
     let cancelled = AtomicBool::new(false);
     let http = reqwest::Client::new();
 
@@ -415,7 +422,7 @@ async fn test_loop_plain_text_completion() {
 
 #[tokio::test]
 async fn test_loop_multi_turn_chain() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = temp_workspace();
     std::fs::write(dir.path().join("a.txt"), "内容").unwrap();
     let executor = ScriptedExecutor::new(vec![
         read_call("call-1", "a.txt"),
@@ -423,7 +430,7 @@ async fn test_loop_multi_turn_chain() {
     ]);
     let (sink, events) = collector();
     let gate = ApprovalRegistry::new();
-    let mut checkpoint = Some(CheckpointStore::new(dir.path(), "run-2"));
+    let mut checkpoint = Some(checkpoint_store(dir.path(), "run-2"));
     let cancelled = AtomicBool::new(false);
     let http = reqwest::Client::new();
 
@@ -453,7 +460,7 @@ async fn test_loop_multi_turn_chain() {
 
 #[tokio::test]
 async fn test_loop_write_permission_denied() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = temp_workspace();
     let executor = ScriptedExecutor::new(vec![
         TurnOutcome {
             text: "我要写文件".to_string(),
@@ -468,7 +475,7 @@ async fn test_loop_write_permission_denied() {
     ]);
     let (sink, events) = collector();
     let gate = Arc::new(ApprovalRegistry::new());
-    let mut checkpoint = Some(CheckpointStore::new(dir.path(), "run-3"));
+    let mut checkpoint = Some(checkpoint_store(dir.path(), "run-3"));
     let cancelled = AtomicBool::new(false);
     let http = reqwest::Client::new();
 
@@ -502,8 +509,8 @@ async fn test_loop_write_permission_denied() {
 }
 
 #[tokio::test]
-async fn test_loop_session_scope_skips_second_prompt() {
-    let dir = tempfile::tempdir().unwrap();
+async fn test_loop_remembered_file_permission_does_not_approve_other_paths() {
+    let dir = temp_workspace();
     let write_call = |id: &str| TurnOutcome {
         text: "写".to_string(),
         tool_calls: vec![ToolInvocation {
@@ -520,7 +527,7 @@ async fn test_loop_session_scope_skips_second_prompt() {
     ]);
     let (sink, events) = collector();
     let gate = Arc::new(ApprovalRegistry::new());
-    let mut checkpoint = Some(CheckpointStore::new(dir.path(), "run-4"));
+    let mut checkpoint = Some(checkpoint_store(dir.path(), "run-4"));
     let cancelled = AtomicBool::new(false);
     let http = reqwest::Client::new();
 
@@ -555,14 +562,14 @@ async fn test_loop_session_scope_skips_second_prompt() {
         .iter()
         .filter(|ev| matches!(ev, ClientStreamEvent::PermissionRequest { .. }))
         .count();
-    assert_eq!(permission_count, 1, "session_scope 批准后同类工具不再询问");
+    assert_eq!(permission_count, 2, "批准某文件不应放行其他文件路径");
     assert!(dir.path().join("w1.txt").exists());
     assert!(dir.path().join("w2.txt").exists());
 }
 
 #[tokio::test]
 async fn test_loop_permission_timeout_treated_as_denied() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = temp_workspace();
     let executor = ScriptedExecutor::new(vec![
         TurnOutcome {
             text: "写".to_string(),
@@ -577,14 +584,14 @@ async fn test_loop_permission_timeout_treated_as_denied() {
     ]);
     let (sink, events) = collector();
     let gate = ApprovalRegistry::new();
-    let mut checkpoint = Some(CheckpointStore::new(dir.path(), "run-5"));
+    let mut checkpoint = Some(checkpoint_store(dir.path(), "run-5"));
     let cancelled = AtomicBool::new(false);
     let http = reqwest::Client::new();
 
     let outcome = run_agent_loop(
         vec![AgentMessage::User { text: "写".to_string(), image_data_url: None }],
         get_agent_tools_schema(),
-        AgentLoopConfig { max_turns: 12, permission_timeout_secs: 1 },
+        AgentLoopConfig { max_turns: 12, permission_timeout_secs: 1, ..AgentLoopConfig::default() },
         &executor,
         &gate,
         &mut checkpoint,
@@ -603,11 +610,11 @@ async fn test_loop_permission_timeout_treated_as_denied() {
 
 #[tokio::test]
 async fn test_loop_cancel_between_turns() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = temp_workspace();
     let executor = ScriptedExecutor::new(vec![read_call("c1", ".")]);
     let (sink, _events) = collector();
     let gate = ApprovalRegistry::new();
-    let mut checkpoint = Some(CheckpointStore::new(dir.path(), "run-6"));
+    let mut checkpoint = Some(checkpoint_store(dir.path(), "run-6"));
     let cancelled = AtomicBool::new(true);
     let http = reqwest::Client::new();
 
@@ -630,7 +637,7 @@ async fn test_loop_cancel_between_turns() {
 
 #[tokio::test]
 async fn test_loop_usage_accumulates() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = temp_workspace();
     let executor = ScriptedExecutor::new(vec![TurnOutcome {
         text: "a".to_string(),
         tool_calls: vec![],
@@ -642,7 +649,7 @@ async fn test_loop_usage_accumulates() {
     }]);
     let (sink, _events) = collector();
     let gate = ApprovalRegistry::new();
-    let mut checkpoint = Some(CheckpointStore::new(dir.path(), "run-7"));
+    let mut checkpoint = Some(checkpoint_store(dir.path(), "run-7"));
     let cancelled = AtomicBool::new(false);
     let http = reqwest::Client::new();
 
@@ -749,7 +756,7 @@ async fn test_loop_without_workspace_tool_interception() {
 }
 
 #[tokio::test]
-async fn test_loop_without_workspace_run_command_allowed() {
+async fn test_loop_without_workspace_run_command_allowed_in_full_auto() {
     let executor = ScriptedExecutor::new(vec![
         TurnOutcome {
             text: "我来查看系统状态～".to_string(),
@@ -772,20 +779,13 @@ async fn test_loop_without_workspace_run_command_allowed() {
     let cancelled = AtomicBool::new(false);
     let http = reqwest::Client::new();
 
-    let gate_ref = Arc::clone(&gate);
-    let approver = tokio::spawn(async move {
-        for _ in 0..10 {
-            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-            if gate_ref.resolve("no-workspace-cmd1", ApprovalDecision { approved: true, session_scope: false }) {
-                break;
-            }
-        }
-    });
+    let mut config = AgentLoopConfig::default();
+    config.execution_mode = AgentExecutionMode::FullAuto;
 
     let outcome = run_agent_loop(
         vec![AgentMessage::User { text: "帮我看看系统".to_string(), image_data_url: None }],
         get_agent_tools_schema(),
-        AgentLoopConfig::default(),
+        config,
         &executor,
         &gate,
         &mut checkpoint,
@@ -796,7 +796,6 @@ async fn test_loop_without_workspace_run_command_allowed() {
     )
     .await
     .unwrap();
-    approver.abort();
 
     assert!(matches!(outcome, LoopOutcome::Completed { .. }));
     let evs = events.lock().unwrap();
@@ -806,6 +805,6 @@ async fn test_loop_without_workspace_run_command_allowed() {
         }
         _ => false,
     });
-    assert!(has_tool_success, "无工作区时运行终端命令应成功执行并返回输出");
+    assert!(has_tool_success, "无工作区全自动模式下应允许直接执行系统命令并获得输出");
 }
 

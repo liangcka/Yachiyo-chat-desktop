@@ -3,36 +3,22 @@
 [![CI](https://github.com/liangcka/Yachiyo-chat-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/liangcka/Yachiyo-chat-desktop/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-Yachiyo Chat Desktop 是面向动画电影《超时空辉夜姬》（超かぐや姫！ / Chou Kaguya-hime!）女主角「月见八千代（八七）」的高拟真 AI 角色伴侣与现代化桌面工作区系统。
+Yachiyo Chat Desktop 是围绕动画电影《超时空辉夜姬》（超かぐや姫！）角色「月见八千代」构建的桌面对话与开发工作区，面向 Windows 原生桌面和 PC 浏览器使用。
 
-项目采用双轨架构交付：以 Tauri v2 与 Rust 为核心构建原生桌面端体验，同时保留 Cloudflare Pages Functions 与 PWA 架构。系统融合了深海星空磨砂玻璃 UI、六大主流 LLM 厂商统一适配、DeepSeek Harness (DSH) 工业级智能体工作流（工具修剪、文件系统观察守卫、任务进度清单与主动项目探索）、深度思考链折叠展示、双阶智能会话命名、多 Provider 级联联网搜索、可组合技能系统以及纯本地隐私隔离存储。
+前端统一采用桌面布局：左侧管理会话，中间切换对话与编辑器，右侧查看代码审阅、预览、成果工件和工作区。原有深海蓝主题支持明暗模式，界面通过间距与轻边框组织内容。首次发送消息时，输入区从欢迎页平滑移至底部；系统启用“减少动态效果”时直接就位。
+
+Tauri v2 与 Rust 提供原生桌面窗口、本地网关和工作区工具；PC 浏览器版本通过 Cloudflare Pages Functions 提供对话接口。移动版界面和右下角 Live2D 挂件已移除，`android/` 与 `capacitor.config.ts` 作为历史原生工程保留，不属于当前 UI 交付范围。
 
 > [!NOTE]
-> **English Overview**: Yachiyo Chat Desktop is a dual-track AI companion and developer workspace dedicated to Tsukimi Yachiyo from "Chou Kaguya-hime!". Powered by Tauri v2 (Rust) for desktop and React 19 + TypeScript + Cloudflare Pages Functions for Web/PWA. Features include an immersive frameless starfield UI, DSH-aligned agent loop (tool pruning, FS observation guard, task tracking, proactive workspace exploration), deep thinking visualization, two-tier conversation titling, multi-provider LLM routing (StepFun / DeepSeek / GLM / OpenAI / Claude / Gemini), cascading web search, local avatar cropping, and offline storage via IndexedDB.
+> **文档入口**：[桌面使用指南](docs/DESKTOP_GUIDE.md)、[运行时与隔离边界](docs/ARCHITECTURE_ISOLATION.md)、[贡献指南](CONTRIBUTING.md)。本地开发可使用 `npm run desktop:dev` 启动 Tauri，或使用 `npm run dev:mock` 启动带后端的 PC 浏览器预览。
 
 ---
 
-## 灵感来源与项目概念
+## 桌面界面
 
-本项目高度还原了动画电影《**超时空辉夜姬**》（《超かぐや姫！》/ *Chou Kaguya-hime!*）官方 **ray MV 0分52秒** 中出现的经典彩页场景——**拿出手机与桌面端设备，与月见八千代进行跨越次元的日常聊天陪伴与协作**。
+![桌面对话与工作区](docs/images/chat-desktop-main.png)
 
-<div align="center">
-  <table>
-    <tr>
-      <td align="center" width="55%">
-        <b>《超かぐや姬！》ray MV 0:52 彩页场景</b><br><br>
-        <img src="docs/images/ray_mv_0m52s.png" alt="超时空辉夜姬 ray MV 0分52秒彩页" width="100%" />
-      </td>
-      <td align="center" width="45%">
-        <b>Yachiyo Chat 实际界面还原（识图与角色对话）</b><br><br>
-        <img src="docs/images/chat-mobile-main.png" alt="Yachiyo Chat 聊天界面" width="75%" />
-      </td>
-    </tr>
-  </table>
-</div>
-
-> [!NOTE]
-> **关于动态形象支持**：目前项目交互主要采用星空磨砂玻璃、头像与动作气泡交互，已包含 Live2D 扩展插槽与编剧室架构，期待后续社区创作者或官方 Live2D 模型的接入与支持。
+项目的角色陪伴概念源于《超かぐや姫！》ray MV 中的日常交流场景。当前产品围绕桌面端的对话、代码编辑和工作区协作展开；早期手机界面截图仍保留在 `docs/images/`，不代表当前界面。
 
 ---
 
@@ -40,7 +26,7 @@ Yachiyo Chat Desktop 是面向动画电影《超时空辉夜姬》（超かぐ�
 
 ### 1. 沉浸式一体化桌面端 (Tauri v2 + Rust)
 
-- **无边框沉浸顶栏 (Frameless Title Bar)**：移除操作系统默认原生标题栏，采用高度 38px 的一体化现代顶栏，集成品牌徽标、工作区视图切换胶囊（对话与编剧室）、原生窗口控制组（最小化、最大化/还原、关闭）及自定义拖拽区域。
+- **桌面顶栏**：集成品牌、侧栏折叠、对话 / 编辑器切换与成果面板入口；Tauri 窗口额外提供原生最小化、最大化和关闭操作。
 - **本地 Rust 网关 (Axum Gateway)**：桌面端内置高性能 Rust 本地服务，提供统一流式代理与客户端事件广播，支持离线或本地直连各大厂商 API。
 - **项目工作区管理**：原生支持选择本地工程目录，双端状态强一致同步。
 
@@ -104,7 +90,7 @@ Yachiyo Chat Desktop 是面向动画电影《超时空辉夜姬》（超かぐ�
 | 本地存储 | Dexie.js (IndexedDB)、localStorage | 聊天历史、长期记忆、本地用户设置 |
 | PWA / 离线 | Workbox (vite-plugin-pwa) | 离线只读缓存、应用级安装 |
 | 云端边缘 | Cloudflare Pages Functions、Workers KV | 边缘 API 中间件、会话鉴权、速率控制 |
-| 移动端外壳 | Capacitor 8 (Android) | 实验性移动端封装 |
+| 历史原生工程 | Capacitor 8 (Android) | 保留原生文件与依赖，不提供独立移动版界面 |
 | 自动化测试 | Vitest、Testing Library、Playwright | 单元测试、云函数测试、桌面端集成测试 |
 
 ---
@@ -143,7 +129,7 @@ npm run desktop:dev
 npm run dev:mock
 ```
 
-访问控制台输出的本地 URL，使用默认开发访问码：`yachiyo-local-access`。
+访问控制台输出的本地 URL 即可。开发环境使用 `yachiyo-local-access` 自动建立会话，无需手动输入访问码。
 
 #### 3. 生产完整联调
 

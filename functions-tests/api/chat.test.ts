@@ -9,6 +9,24 @@ const providerOrigin = "https://api.stepfun.com";
 const providerPath = "/step_plan/v1/chat/completions";
 const providerUrl = `${providerOrigin}${providerPath}`;
 const providerFetch = vi.fn<typeof fetch>();
+const upstreamPaths = [
+  {
+    name: "服务器密钥",
+    credentials: {},
+    authError: "PROVIDER_ERROR",
+    quotaError: "PROVIDER_ERROR",
+  },
+  {
+    name: "用户密钥",
+    credentials: {
+      provider: "openai",
+      apiKey: "sk-" + "a".repeat(40),
+      model: "gpt-5.6-luna",
+    },
+    authError: "PROVIDER_AUTH_FAILED",
+    quotaError: "PROVIDER_QUOTA_EXCEEDED",
+  },
+] as const;
 
 function providerSse(text: string): string {
   return `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\ndata: [DONE]\n\n`;
@@ -92,6 +110,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -333,7 +352,7 @@ describe("POST /api/chat", () => {
     expect(providerFetch).toHaveBeenCalledOnce();
   });
 
-  it("keeps the provider deadline active after streaming headers arrive", async () => {
+  it.each(upstreamPaths)("$name：收到流响应头后仍执行上游期限", async ({ credentials }) => {
     vi.useFakeTimers();
     let upstreamController!: ReadableStreamDefaultController<Uint8Array>;
     const cancel = vi.fn();
@@ -354,7 +373,7 @@ describe("POST /api/chat", () => {
 
     const response = await invoke(
       await chatRequest(
-        { locale: "zh-CN", messages: [{ role: "user", text: "hello" }] },
+        { locale: "zh-CN", messages: [{ role: "user", text: "hello" }], ...credentials },
         "stream-timeout-session",
       ),
     );
@@ -371,6 +390,104 @@ describe("POST /api/chat", () => {
     expect(timedOut).toBe(true);
     expect(cancel).toHaveBeenCalledOnce();
     expect(events).toEqual([{ type: "error", code: "PROVIDER_STREAM_ERROR" }]);
+  });
+
+  describe.each(upstreamPaths)("$name：上游响应契约", ({ credentials, authError, quotaError }) => {
+    it.each([
+      { status: 401, expected: authError },
+      { status: 403, expected: authError },
+      { status: 402, expected: quotaError },
+      { status: 429, expected: quotaError },
+      { status: 500, expected: "PROVIDER_ERROR" },
+      { status: 200, expected: "PROVIDER_ERROR" },
+    ])("状态 $status 的无效响应取消正文并返回 $expected", async ({ status, expected }) => {
+      vi.useFakeTimers();
+      const cancel = vi.fn();
+      providerFetch.mockResolvedValueOnce(new Response(new ReadableStream({ cancel }), {
+        status,
+        headers: { "content-type": "application/json" },
+      }));
+
+      const response = await invoke(await chatRequest({
+        locale: "zh-CN",
+        messages: [{ role: "user", text: "你好" }],
+        ...credentials,
+      }, "upstream-error-session"));
+
+      expect(response.status).toBe(502);
+      expect(await response.json()).toEqual({ error: { code: expected } });
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("连接失败返回统一错误并清理期限", async () => {
+      vi.useFakeTimers();
+      providerFetch.mockRejectedValueOnce(new TypeError("provider unavailable"));
+
+      const response = await invoke(await chatRequest({
+        locale: "zh-CN",
+        messages: [{ role: "user", text: "你好" }],
+        ...credentials,
+      }, "upstream-unavailable-session"));
+
+      expect(response.status).toBe(502);
+      expect(await response.json()).toEqual({ error: { code: "PROVIDER_UNAVAILABLE" } });
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("等待响应头超过期限时中止请求并返回超时错误", async () => {
+      vi.useFakeTimers();
+      let notifyStarted!: () => void;
+      const started = new Promise<void>((resolve) => { notifyStarted = resolve; });
+      providerFetch.mockImplementationOnce((input, init) => {
+        const signal = new Request(input, init).signal;
+        return new Promise<Response>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          notifyStarted();
+        });
+      });
+
+      const responsePromise = invoke(await chatRequest({
+        locale: "zh-CN",
+        messages: [{ role: "user", text: "你好" }],
+        ...credentials,
+      }, "upstream-connect-timeout-session"));
+      await started;
+      await vi.advanceTimersByTimeAsync(30_000);
+      const response = await responsePromise;
+
+      expect(response.status).toBe(504);
+      expect(await response.json()).toEqual({ error: { code: "PROVIDER_TIMEOUT" } });
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it.each([
+      { mode: "title", webSearch: true, maximum: 50 },
+      { mode: "chat", webSearch: false, maximum: 200 },
+      { mode: "summary", webSearch: false, maximum: 1000 },
+      { mode: "chat", webSearch: true, maximum: 1000 },
+    ])("$mode 模式、联网 $webSearch 时输出上限为 $maximum 字符", async ({ mode, webSearch, maximum }) => {
+      vi.useFakeTimers();
+      providerFetch.mockImplementation(async (_input, init) => isJudgeInit(init)
+        ? judgeResponse("NO")
+        : new Response(providerSse("🌙".repeat(1_200)), {
+          headers: { "content-type": "text/event-stream" },
+        }));
+
+      const response = await invoke(await chatRequest({
+        locale: "zh-CN",
+        messages: [{ role: "user", text: "你好" }],
+        ...credentials,
+        mode,
+        webSearch,
+      }, "upstream-character-limit-session"));
+      const events = await collectClientEvents(response.body!);
+      const text = events.map((event) => event.type === "delta" ? event.text : "").join("");
+
+      expect([...text]).toHaveLength(maximum);
+      expect(events.at(-1)).toEqual({ type: "done", truncated: true });
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 
   it("searches Bing first and streams sources before deltas when webSearch is on", async () => {

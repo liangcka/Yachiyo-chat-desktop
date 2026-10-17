@@ -1,28 +1,25 @@
 import {
   ArrowUp,
   Bot,
-  Camera,
   Check,
   Globe,
   PanelLeft,
   PanelLeftOpen,
-  PanelRight,
   Pencil,
   Plus,
   Sparkles,
   Square,
-  Terminal,
-  WifiOff,
   X,
 } from "lucide-react";
 import type { FormEvent, KeyboardEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ContextMeter } from "../../components/ContextMeter";
 import { ConversationView } from "../../components/ConversationView";
 import { ModelSelect } from "../../components/desktop/ModelSelect";
 import { PlanStrip } from "../../components/desktop/PlanStrip";
 import { ProjectSelector } from "../../components/desktop/ProjectSelector";
 import { PermissionCard } from "../../components/tools/PermissionCard";
+import { appendAttachments, COMPOSER_CHARACTER_LIMIT, readTextAttachment, type TextAttachment } from "../../features/file-reference/attachments";
 import { extractLatestTodos } from "../../domain/chat";
 import { isRetryableChatErrorCode } from "../../services/chat-client";
 import { SKILLS } from "../../skills";
@@ -32,10 +29,14 @@ import type { SettingsTabKey } from "../../components/settings/SettingsModal";
 import { FileReferencePicker } from "../../components/chat/FileReferencePicker";
 import {
   SlashCommandPicker,
+  type SlashCommandPickerHandle,
   type SlashActionItem,
   type SlashItem,
 } from "../../components/chat/SlashCommandPicker";
 import { searchWorkspaceFiles } from "../../services/desktop-bridge";
+import "../../styles/desktop-chat-area.css";
+import { DesktopWelcome } from "./DesktopWelcome";
+import { useComposerDockTransition } from "./use-composer-dock-transition";
 
 export interface DesktopChatAreaProps extends SharedViewProps {
   onOpenSettings?: (tab?: SettingsTabKey) => void;
@@ -67,11 +68,9 @@ export function DesktopChatArea({
   onSend,
   onSkillToggle,
   onToggleSidebar,
-  onToggleRightPane,
   onWebSearchSettingsChange,
   pendingImageDataUrl,
   processImage,
-  rightPaneOpen = false,
   setComposerValue,
   setPendingImageDataUrl,
   showToast,
@@ -80,9 +79,13 @@ export function DesktopChatArea({
 }: DesktopChatAreaProps) {
   const currentTitle = controller.activeConversation?.title || copy.newChat;
   const pendingPermission = controller.pendingPermission;
+  const isLoading = controller.phase === "loading";
   const isStreaming = controller.phase === "streaming";
   const isCompressing = controller.phase === "compressing";
   const isOffline = !isOnline || controller.phase === "offline";
+  const composerUnavailable = isLoading || isOffline || isCompressing;
+  const isJapanese = controller.locale === "ja-JP";
+  const loadingLabel = isJapanese ? "会話を読み込み中…" : "正在加载对话…";
   const isBlank = controller.messages.length === 0 && !controller.activeConversation?.summary;
 
   const latestTodos = useMemo(
@@ -95,12 +98,24 @@ export function DesktopChatArea({
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editingTitleDraft, setEditingTitleDraft] = useState("");
+  const [isSavingTitle, setIsSavingTitle] = useState(false);
+  const savingTitleRef = useRef(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const composerHintId = useId();
 
   // 技能快捷面板状态
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const conversationId = controller.activeConversation?.id;
+  const activeConversationIdRef = useRef(conversationId);
+  useLayoutEffect(() => { activeConversationIdRef.current = conversationId; }, [conversationId]);
+  const [attachmentDraft, setAttachmentDraft] = useState<{ conversationId?: string; files: TextAttachment[] }>({ files: [] });
+  const attachments = attachmentDraft.conversationId === conversationId ? attachmentDraft.files : [];
+  const setAttachments = (update: TextAttachment[] | ((files: TextAttachment[]) => TextAttachment[])): void => {
+    setAttachmentDraft((previous) => ({ conversationId, files: typeof update === "function" ? update(previous.conversationId === conversationId ? previous.files : []) : update }));
+  };
   const [skillPopoverOpen, setSkillPopoverOpen] = useState(false);
   const skillPopoverRef = useRef<HTMLDivElement>(null);
 
@@ -110,14 +125,15 @@ export function DesktopChatArea({
   );
 
   useEffect(() => {
-    if (!skillPopoverOpen) return;
+    if (!skillPopoverOpen && !addMenuOpen) return;
     const handleMouseDownDoc = (e: MouseEvent) => {
       if (skillPopoverRef.current && !skillPopoverRef.current.contains(e.target as Node)) {
         setSkillPopoverOpen(false);
+        setAddMenuOpen(false);
       }
     };
     const handleKeyDownDoc = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") setSkillPopoverOpen(false);
+      if (e.key === "Escape") { setSkillPopoverOpen(false); setAddMenuOpen(false); }
     };
     document.addEventListener("mousedown", handleMouseDownDoc);
     document.addEventListener("keydown", handleKeyDownDoc);
@@ -125,7 +141,7 @@ export function DesktopChatArea({
       document.removeEventListener("mousedown", handleMouseDownDoc);
       document.removeEventListener("keydown", handleKeyDownDoc);
     };
-  }, [skillPopoverOpen]);
+  }, [skillPopoverOpen, addMenuOpen]);
 
   useEffect(() => {
     if (isEditingTitle) {
@@ -135,7 +151,7 @@ export function DesktopChatArea({
   }, [isEditingTitle]);
 
   // 自动调整输入框高度
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
@@ -143,8 +159,24 @@ export function DesktopChatArea({
     el.style.height = `${nextHeight}px`;
   }, [composerValue]);
 
+  const { composerRef, prepareTransition } = useComposerDockTransition(
+    isBlank,
+    controller.activeConversation?.id,
+  );
+
+  const sendMessage = (text: string): void => {
+    const content = appendAttachments(text, attachments);
+    if (attachments.length > 0 && [...content].length > COMPOSER_CHARACTER_LIMIT) {
+      showToast("正文与附件合计超过 20000 字，请移除部分内容后发送", "error");
+      return;
+    }
+    prepareTransition();
+    onSend(content);
+    setAttachments([]);
+  };
+
   const handleHeroPrompt = (text: string) => {
-    onSend(text);
+    if (!composerUnavailable && !isStreaming) sendMessage(text);
   };
 
   // @ 引用文件模糊搜索浮层状态
@@ -157,7 +189,7 @@ export function DesktopChatArea({
   // / 快捷指令与技能浮层状态
   const [slashPickerOpen, setSlashPickerOpen] = useState(false);
   const [slashPickerQuery, setSlashPickerQuery] = useState("");
-  const [slashPickerIndex, setSlashPickerIndex] = useState(0);
+  const slashPickerRef = useRef<SlashCommandPickerHandle>(null);
 
   // 检索工作区文件列表
   useEffect(() => {
@@ -195,7 +227,6 @@ export function DesktopChatArea({
     if (slashMatch && slashMatch[1] !== undefined) {
       setSlashPickerOpen(true);
       setSlashPickerQuery(slashMatch[1]);
-      setSlashPickerIndex(0);
       return;
     }
     setSlashPickerOpen(false);
@@ -207,7 +238,7 @@ export function DesktopChatArea({
     const atIdx = filePickerAtIndex >= 0 ? filePickerAtIndex : cursorPos;
     const before = composerValue.slice(0, atIdx);
     const after = composerValue.slice(cursorPos);
-    const inserted = `@${path} `;
+    const inserted = /\s/u.test(path) ? `@"${path}" ` : `@${path} `;
     const nextValue = `${before}${inserted}${after}`;
     setComposerValue(nextValue);
     setFilePickerOpen(false);
@@ -228,11 +259,11 @@ export function DesktopChatArea({
       type: "action",
       name: "切换 Agent 模式",
       command: "/agent",
-      description: `当前模式：${controller.agentMode === "auto" ? "自动（AI自主决定）" : controller.agentMode === "on" ? "总是开启" : "已关闭"} (点击切换)`,
+      description: `当前模式：${controller.agentMode === "readonly" ? "只读" : controller.agentMode === "confirm" ? "需确认" : "全自动"} (点击切换)`,
       icon: "bot",
       onExecute: () => {
         controller.toggleAgent();
-        const nextMode = controller.agentMode === "auto" ? "常开" : controller.agentMode === "on" ? "关闭" : "自动";
+        const nextMode = controller.agentMode === "readonly" ? "需确认" : controller.agentMode === "confirm" ? "全自动" : "只读";
         showToast(`已切换 Agent 模式为：${nextMode}`);
       },
     },
@@ -288,17 +319,8 @@ export function DesktopChatArea({
     setSlashPickerOpen(false);
   };
 
-  const handleSlashButtonClick = () => {
-    if (slashPickerOpen) {
-      setSlashPickerOpen(false);
-      return;
-    }
-    setSlashPickerOpen(true);
-    setSlashPickerQuery("");
-    textareaRef.current?.focus();
-  };
-
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (filePickerOpen && filePickerItems.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -329,28 +351,12 @@ export function DesktopChatArea({
       return;
     }
 
-    if (slashPickerOpen) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setSlashPickerIndex((prev) => prev + 1);
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setSlashPickerIndex((prev) => Math.max(0, prev - 1));
-        return;
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setSlashPickerOpen(false);
-        return;
-      }
-    }
+    if (slashPickerOpen && slashPickerRef.current?.handleKeyDown(e)) return;
 
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      if (!isStreaming && !isCompressing && !isOffline && (composerValue.trim() || pendingImageDataUrl)) {
-        onSend(composerValue);
+      if (!composerUnavailable && (composerValue.trim() || pendingImageDataUrl || attachments.length > 0)) {
+        sendMessage(composerValue);
       }
     }
   };
@@ -363,33 +369,52 @@ export function DesktopChatArea({
 
   const handleSaveTitle = async (e?: FormEvent) => {
     if (e) e.preventDefault();
-    if (!controller.activeConversation || !editingTitleDraft.trim()) {
+    if (savingTitleRef.current) return;
+    const title = editingTitleDraft.trim();
+    if (!controller.activeConversation || !title || title === currentTitle) {
       setIsEditingTitle(false);
       return;
     }
-    if (onRenameConversation) {
-      await onRenameConversation(controller.activeConversation.id, editingTitleDraft.trim());
+    savingTitleRef.current = true;
+    setIsSavingTitle(true);
+    try {
+      await onRenameConversation?.(controller.activeConversation.id, title);
+      setIsEditingTitle(false);
+    } catch {
+      showToast(copy.genericFailure, "error");
+    } finally {
+      savingTitleRef.current = false;
+      setIsSavingTitle(false);
     }
-    setIsEditingTitle(false);
   };
 
-  const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const processed = await processImage(file);
-      onImage(processed);
-    } catch {
-      showToast(copy.imageInvalid, "error");
-    } finally {
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+  const attachFiles = async (files: File[]): Promise<void> => {
+    let addedCharacters = [...appendAttachments("", attachments)].length;
+    for (const file of files.slice(0, 8)) {
+      if (activeConversationIdRef.current !== conversationId) return;
+      try {
+        if (file.type.startsWith("image/")) {
+          if (!activeProviderSupportsImage) { showToast("当前模型不支持图片，请先切换模型", "error"); continue; }
+          const image = await processImage(file);
+          if (activeConversationIdRef.current === conversationId) onImage(image);
+        } else {
+          const attachment = await readTextAttachment(file);
+          if (activeConversationIdRef.current !== conversationId) return;
+          addedCharacters += [...appendAttachments("", [attachment])].length;
+          if (addedCharacters > COMPOSER_CHARACTER_LIMIT) { showToast("附件合计超过 20000 字，请分批发送", "error"); break; }
+          setAttachments((previous) => [...previous, attachment].slice(-8));
+        }
+      } catch (error) { showToast(error instanceof Error ? error.message : copy.imageInvalid, "error"); }
     }
+  };
+  const handleFileInputChange = async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    await attachFiles(files);
   };
 
   const handlePaste = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    if (event.defaultPrevented || isOffline || isStreaming || isCompressing || !onImage) return;
+    if (event.defaultPrevented || composerUnavailable || !onImage) return;
     const items = event.clipboardData?.items;
     if (items) {
       for (let i = 0; i < items.length; i++) {
@@ -398,12 +423,7 @@ export function DesktopChatArea({
           const file = item.getAsFile();
           if (file) {
             event.preventDefault();
-            try {
-              const processed = await processImage(file);
-              onImage(processed);
-            } catch {
-              showToast(copy.imageInvalid, "error");
-            }
+            await attachFiles([file]);
             return;
           }
         }
@@ -412,33 +432,8 @@ export function DesktopChatArea({
   };
 
   const composerNode = (
-    <div className="desktop-composer-dock__inner">
-      {/* 项目选择与新建项目下拉菜单放置在输入框左上角外部 */}
-      <div className="desktop-composer-context-row">
-        <ProjectSelector
-          variant="composer"
-          onOpenSettings={() => onOpenSettings?.("project")}
-          onNewChat={onNewChat}
-        />
-        {controller.agentMode !== "off" ? (
-          <button
-            type="button"
-            className={`desktop-composer-agent-badge ${controller.agentMode === "auto" ? "desktop-composer-agent-badge--auto" : ""}`}
-            title={
-              controller.agentMode === "auto"
-                ? "自动 Agent 模式：AI 将根据任务意图自主决定是否调用工具与执行长任务（点击切换）"
-                : "Agent 模式已常开：强制搭载多步长任务与工具能力（点击切换）"
-            }
-            onClick={controller.toggleAgent}
-            aria-label={controller.agentMode === "auto" ? "自动 Agent 模式已启用" : "Agent 模式已开启"}
-          >
-            <span className={`desktop-composer-agent-badge__dot ${controller.agentMode === "auto" ? "desktop-composer-agent-badge__dot--auto" : ""}`} />
-            {controller.agentMode === "auto" ? "自动 Agent" : "Agent 模式"}
-          </button>
-        ) : null}
-      </div>
-
-      {/* Agent 写类工具的授权卡片：从输入框上方平滑拉起的精致操作子容器 */}
+    <div className="desktop-composer-dock__inner" ref={composerRef}>
+      {/* 写入操作在继续执行前需要授权。 */}
       {pendingPermission !== undefined ? (
         <PermissionCard
           argumentsJson={pendingPermission.argumentsJson}
@@ -466,8 +461,14 @@ export function DesktopChatArea({
         </div>
       ) : null}
 
+      {activeSkills.length > 0 || attachments.length > 0 ? <div className="dsh-composer-chips" aria-label="已加载内容">
+        {activeSkills.map((skill) => <button type="button" key={skill.id} onClick={() => void onSkillToggle?.(skill.id, false)} title={`移除技能 ${skill.name}`}>{skill.name}<X size={12} /></button>)}
+        {attachments.map((file, index) => <button type="button" key={`${file.name}-${index}`} title={`移除附件 ${file.name}`} onClick={() => setAttachments((previous) => previous.filter((_, i) => i !== index))}>{file.name}<X size={12} /></button>)}
+      </div> : null}
       {/* 输入框主卡片 */}
-      <div className="dsh-composer-card">
+      <div className="dsh-composer-card"
+        onDragOver={(event) => { if (!composerUnavailable && event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
+        onDrop={(event) => { if (composerUnavailable) return; event.preventDefault(); void attachFiles(Array.from(event.dataTransfer.files)); }}>
         {/* @ 引用文件模糊搜索浮层 */}
         {filePickerOpen ? (
           <FileReferencePicker
@@ -483,12 +484,12 @@ export function DesktopChatArea({
         {/* / 快捷指令与技能快速选择浮层 */}
         {slashPickerOpen ? (
           <SlashCommandPicker
+            ref={slashPickerRef}
+            locale={controller.locale}
             query={slashPickerQuery}
             skills={SKILLS}
             activeSkillIds={activeSkillIds}
             actions={slashActions}
-            selectedIndex={slashPickerIndex}
-            onSelectedIndexChange={setSlashPickerIndex}
             onSelect={handleSelectSlashItem}
             onToggleSkill={(id, next) => {
               void onSkillToggle?.(id, next);
@@ -501,7 +502,7 @@ export function DesktopChatArea({
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          multiple
           style={{ display: "none" }}
           onChange={handleFileInputChange}
         />
@@ -533,6 +534,8 @@ export function DesktopChatArea({
         <div className="dsh-composer-card__input-box">
           <textarea
             ref={textareaRef}
+            aria-label={copy.inputHint}
+            aria-describedby={slashPickerOpen || filePickerOpen ? composerHintId : undefined}
             className="dsh-composer-card__textarea"
             value={composerValue}
             onChange={(e) => {
@@ -549,45 +552,61 @@ export function DesktopChatArea({
             }}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={isOffline ? copy.offline : copy.inputHint}
-            disabled={isOffline || isCompressing}
+            placeholder={isLoading ? loadingLabel : isOffline ? copy.offline : isCompressing ? copy.compressingContext : copy.inputHint}
+            disabled={composerUnavailable}
             rows={1}
           />
         </div>
 
-        {/* 底部工具行：极简专注布局（附件 + 快捷指令 + 上下文计量 + 发送） */}
-        <div className="dsh-composer-card__toolbar">
-          <div className="dsh-composer-card__tools-left">
-            {/* 附件/图片上传 */}
-            <button
-              type="button"
-              className="dsh-composer-card__add-btn"
-              title={copy.capture}
-              aria-label={copy.capture}
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isOffline || isStreaming || isCompressing || !activeProviderSupportsImage}
-            >
-              <Plus size={15} />
-            </button>
-
-            {/* / 快捷指令唤醒按钮 */}
-            <button
-              type="button"
-              className={`dsh-composer-card__slash-btn ${slashPickerOpen ? "dsh-composer-card__slash-btn--active" : ""}`}
-              title="快捷指令与技能 (/)"
-              aria-label="快捷指令"
-              onClick={handleSlashButtonClick}
-            >
-              <span>/</span>
-            </button>
+        {/* 控制入口集中在输入区，弹层向上展开。 */}
+        <div className="dsh-composer-card__toolbar" role="group" aria-label={isJapanese ? "会話ツールバー" : "对话工具栏"}>
+          <div className="dsh-composer-card__tools-left" ref={skillPopoverRef}>
+            <div className="dsh-skill-trigger-wrapper">
+              <button type="button" className="dsh-composer-card__add-btn" title="添加文件、项目或技能" aria-label="添加文件、项目或技能" aria-expanded={addMenuOpen || skillPopoverOpen} disabled={composerUnavailable} onClick={() => { setAddMenuOpen(!addMenuOpen); setSkillPopoverOpen(false); }}><Plus size={15} /></button>
+              {addMenuOpen && !skillPopoverOpen ? <div className="dsh-skill-popover dsh-add-menu" role="dialog" aria-label="添加内容">
+                <button type="button" onClick={() => { fileInputRef.current?.click(); setAddMenuOpen(false); }}>添加文件或图片</button>
+                <ProjectSelector variant="composer" onNewChat={onNewChat} />
+                <button type="button" onClick={() => { setSkillPopoverOpen(true); setAddMenuOpen(false); }}><Sparkles size={14} />加载技能</button>
+              </div> : null}
+              {skillPopoverOpen ? <div className="dsh-skill-popover" role="dialog" aria-label="快捷加载技能">
+                <ul className="dsh-skill-popover__list">{SKILLS.map((skill) => {
+                  const isActive = activeSkillIds.includes(skill.id);
+                  return <li key={skill.id} className="dsh-skill-popover__item"><button type="button" role="checkbox" aria-checked={isActive} className="dsh-skill-popover__btn" onClick={() => void onSkillToggle?.(skill.id, !isActive)}>
+                    <span className={`dsh-skill-popover__checkbox-custom ${isActive ? "dsh-skill-popover__checkbox-custom--checked" : ""}`}>{isActive ? <Check size={11} /> : null}</span>
+                    <span className="dsh-skill-popover__item-meta"><span className="dsh-skill-popover__item-name">{skill.name}</span><span className="dsh-skill-popover__item-desc">{skill.description}</span></span>
+                  </button></li>;
+                })}</ul>
+                <div className="dsh-skill-popover__footer"><button type="button" className="dsh-skill-popover__more-btn" onClick={() => { setSkillPopoverOpen(false); onOpenSettings?.("custom"); }}>管理全部技能 →</button></div>
+              </div> : null}
+            </div>
+            <label className={`desktop-mode-select desktop-header-pill desktop-mode-select--${controller.agentMode}`} title={`执行模式：${controller.agentMode === "readonly" ? "只读" : controller.agentMode === "confirm" ? "需确认" : "全自动"}`}>
+              <Bot size={13} /><span>模式</span>
+              <select aria-label="执行模式" disabled={isStreaming} value={controller.agentMode} onChange={(event) => controller.setExecutionMode(event.target.value as "readonly" | "confirm" | "full_auto")}>
+                <option value="readonly">只读</option><option value="confirm">需确认</option><option value="full_auto">全自动</option>
+              </select>
+            </label>
+            <button type="button" className={`desktop-toggle desktop-header-pill ${webSearchSettings.enabled ? "desktop-toggle--active desktop-header-pill--active" : ""}`} onClick={() => onWebSearchSettingsChange?.({ enabled: !webSearchSettings.enabled })} title={webSearchSettings.enabled ? "关闭联网搜索" : "开启联网搜索"} aria-label="联网搜索快捷切换" aria-pressed={webSearchSettings.enabled}><Globe size={13} /><span>联网</span></button>
           </div>
 
           <div className="dsh-composer-card__tools-right">
-            {/* 上下文用量指示器 */}
-            <ContextMeter messages={controller.messages} />
+            {/* 模型选择器 */}
+            <ModelSelect
+              activeProvider={llmActiveProvider}
+              entries={llmEntries}
+              onSelect={(provider) => {
+                void onLlmActivate(provider);
+              }}
+              onOpenSettings={() => {
+                onOpenSettings?.("models");
+              }}
+              disabled={composerUnavailable || isStreaming}
+            />
 
-            {/* 发送 / 停止 按钮（34px 纯蓝圆形） */}
-            {isStreaming ? (
+            {/* 上下文用量指示器 */}
+            <ContextMeter messages={controller.messages} compressedUpTo={controller.activeConversation?.compressedUpTo} summary={controller.activeConversation?.summary} />
+
+            {/* 生成期间保留停止入口。 */}
+            {isStreaming && !composerValue.trim() && attachments.length === 0 && !pendingImageDataUrl ? (
               <button
                 type="button"
                 className="dsh-composer-card__send-btn dsh-composer-card__send-btn--stop"
@@ -602,12 +621,12 @@ export function DesktopChatArea({
                 type="button"
                 className="dsh-composer-card__send-btn"
                 onClick={() => {
-                  if (composerValue.trim() || pendingImageDataUrl) {
-                    onSend(composerValue);
+                  if (!composerUnavailable && (composerValue.trim() || pendingImageDataUrl || attachments.length > 0)) {
+                    sendMessage(composerValue);
                   }
                 }}
-                disabled={isOffline || isCompressing || (!composerValue.trim() && !pendingImageDataUrl)}
-                title={`${copy.send} (Enter)`}
+                disabled={composerUnavailable || (!composerValue.trim() && !pendingImageDataUrl && attachments.length === 0)}
+                title={`${isStreaming ? "停止当前回复并发送补充要求" : copy.send} (Enter)`}
                 aria-label={copy.send}
               >
                 <ArrowUp size={16} strokeWidth={2.5} />
@@ -616,12 +635,17 @@ export function DesktopChatArea({
           </div>
         </div>
       </div>
+      {slashPickerOpen || filePickerOpen ? (
+        <p className="desktop-composer-hint" id={composerHintId}>
+          {isJapanese ? "↑↓ で移動 · Enter / Tab で選択 · Esc で閉じる" : "↑↓ 移动 · Enter / Tab 选取 · Esc 关闭"}
+        </p>
+      ) : null}
     </div>
   );
 
   return (
     <main className="desktop-main-chat" aria-label="核心对话工作台">
-      {/* 顶栏：侧栏开关 | 会话标题（支持即地编辑） | 状态徽章 | 截图 / 工作区 / 设置 */}
+      {/* 标题支持就地重命名。 */}
       <header className="desktop-chat-header">
         <div className="desktop-chat-header__lead">
           {onToggleSidebar ? (
@@ -644,11 +668,21 @@ export function DesktopChatArea({
                 type="text"
                 value={editingTitleDraft}
                 onChange={(e) => setEditingTitleDraft(e.target.value)}
-                onBlur={() => void handleSaveTitle()}
+                disabled={isSavingTitle}
+                onKeyDown={(event) => {
+                  if (event.nativeEvent.isComposing || event.keyCode === 229) {
+                    if (event.key === "Enter") event.preventDefault();
+                    return;
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setIsEditingTitle(false);
+                  }
+                }}
                 className="desktop-chat-header__rename-input"
                 aria-label="重命名当前会话"
               />
-              <button type="submit" className="desktop-chat-header__rename-btn" title={copy.confirm}>
+              <button type="submit" className="desktop-chat-header__rename-btn" title={copy.confirm} disabled={isSavingTitle}>
                 <Check size={14} />
               </button>
               <button
@@ -656,6 +690,7 @@ export function DesktopChatArea({
                 onClick={() => setIsEditingTitle(false)}
                 className="desktop-chat-header__rename-btn"
                 title={copy.cancel}
+                disabled={isSavingTitle}
               >
                 <X size={14} />
               </button>
@@ -684,290 +719,48 @@ export function DesktopChatArea({
             </div>
           )}
 
-          <div className="desktop-chat-header__badges">
-            {isOffline ? (
-              <span className="desktop-status-pill desktop-status-pill--offline">
-                <WifiOff size={12} /> {copy.offline}
-              </span>
-            ) : isCompressing ? (
-              <span className="desktop-status-pill desktop-status-pill--compressing">
-                <Sparkles size={12} /> {copy.compressingContext}
-              </span>
-            ) : isStreaming ? (
-              <span className="desktop-status-pill desktop-status-pill--streaming">
-                <span className="desktop-status-pill__dot" /> 思考与生成中...
-              </span>
-            ) : (
-              <span className="desktop-status-pill desktop-status-pill--ready">就绪</span>
-            )}
-            {webSearchSettings.enabled ? (
-              <span className="desktop-status-pill desktop-status-pill--search" title="已开启联网搜索">
-                <Globe size={11} /> 联网搜索
-              </span>
-            ) : null}
-          </div>
-        </div>
-
-        {/* 顶栏右侧：高级控制区（从输入框收拢的高级设置，保持核心输入干净） */}
-        <div className="desktop-chat-header__actions">
-          {/* 联网搜索快捷切换 */}
-          <button
-            type="button"
-            className={`desktop-toggle desktop-header-pill ${webSearchSettings.enabled ? "desktop-toggle--active desktop-header-pill--active" : ""}`}
-            onClick={() => {
-              if (onWebSearchSettingsChange) {
-                onWebSearchSettingsChange({ enabled: !webSearchSettings.enabled });
-              }
-            }}
-            title={webSearchSettings.enabled ? "联网搜索已开启 (点击关闭)" : "联网搜索已关闭 (点击开启)"}
-            aria-label="联网搜索快捷切换"
-          >
-            <Globe size={13} />
-            <span>联网</span>
-          </button>
-
-          {/* Agent 模式切换 */}
-          <button
-            aria-label="Agent 模式切换（自动 / 常开 / 关闭）"
-            aria-pressed={controller.agentEnabled}
-            className={`desktop-toggle desktop-header-pill ${controller.agentEnabled ? "desktop-toggle--active desktop-header-pill--active" : ""}`}
-            onClick={controller.toggleAgent}
-            title={`Agent 模式：${controller.agentMode === "auto" ? "自动（AI自主决定）" : controller.agentMode === "on" ? "总是开启" : "已关闭"}，点击切换`}
-            type="button"
-          >
-            <Bot size={13} />
-            <span>{controller.agentMode === "auto" ? "自动 Agent" : controller.agentMode === "on" ? "常开 Agent" : "Agent 关"}</span>
-          </button>
-
-          {/* 技能快捷配置与 Popover */}
-          <div className="dsh-skill-trigger-wrapper" ref={skillPopoverRef}>
-            <button
-              type="button"
-              className={`desktop-toggle desktop-header-pill ${activeSkillIds.length > 0 ? "desktop-toggle--active desktop-header-pill--active" : ""}`}
-              onClick={() => setSkillPopoverOpen((prev) => !prev)}
-              title={
-                activeSkillIds.length > 0
-                  ? `已加载 ${activeSkillIds.length} 项技能 (点击展开配置)`
-                  : "加载技能 (点击配置)"
-              }
-              aria-label="技能快捷配置"
-              aria-expanded={skillPopoverOpen}
-            >
-              <Sparkles size={13} />
-              <span>技能</span>
-              {activeSkillIds.length > 0 ? (
-                <span className="dsh-skill-count-badge">{activeSkillIds.length}</span>
-              ) : null}
-            </button>
-
-            {skillPopoverOpen ? (
-              <div className="dsh-skill-popover" role="dialog" aria-label="快捷加载技能">
-                <div className="dsh-skill-popover__header">
-                  <div className="dsh-skill-popover__title">
-                    <Sparkles size={13} />
-                    <span>加载技能</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="dsh-skill-popover__close"
-                    onClick={() => setSkillPopoverOpen(false)}
-                    title="关闭"
-                    aria-label="关闭技能面板"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-                <ul className="dsh-skill-popover__list">
-                  {SKILLS.map((skill) => {
-                    const isActive = activeSkillIds.includes(skill.id);
-                    return (
-                      <li key={skill.id} className="dsh-skill-popover__item">
-                        <button
-                          type="button"
-                          role="checkbox"
-                          aria-checked={isActive}
-                          onClick={() => {
-                            if (onSkillToggle) {
-                              void onSkillToggle(skill.id, !isActive);
-                            }
-                          }}
-                          className="dsh-skill-popover__btn"
-                        >
-                          <span className={`dsh-skill-popover__checkbox-custom ${isActive ? "dsh-skill-popover__checkbox-custom--checked" : ""}`}>
-                            {isActive ? <Check size={11} strokeWidth={3} /> : null}
-                          </span>
-                          <div className="dsh-skill-popover__item-meta">
-                            <span className="dsh-skill-popover__item-name">{skill.name}</span>
-                            <span className="dsh-skill-popover__item-desc">{skill.description}</span>
-                          </div>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-                {onOpenSettings ? (
-                  <div className="dsh-skill-popover__footer">
-                    <button
-                      type="button"
-                      className="dsh-skill-popover__more-btn"
-                      onClick={() => {
-                        setSkillPopoverOpen(false);
-                        onOpenSettings("custom");
-                      }}
-                    >
-                      管理全部技能 &rarr;
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-
-          {/* 模型选择器 */}
-          <ModelSelect
-            activeProvider={llmActiveProvider}
-            entries={llmEntries}
-            onSelect={(provider) => {
-              void onLlmActivate(provider);
-            }}
-            onOpenSettings={() => {
-              onOpenSettings?.("models");
-            }}
-            disabled={isOffline || isStreaming}
-          />
-
-          {/* 成果与审阅台快捷切换 (Ctrl+B) */}
-          {onToggleRightPane ? (
-            <button
-              type="button"
-              className={`desktop-toggle desktop-header-pill ${rightPaneOpen ? "desktop-toggle--active desktop-header-pill--active" : ""}`}
-              onClick={onToggleRightPane}
-              title={rightPaneOpen ? "收起成果审阅台 (Ctrl+B)" : "展开成果审阅台 (Ctrl+B)"}
-              aria-label="成果与审阅台快捷切换"
-              aria-pressed={rightPaneOpen}
-            >
-              <PanelRight size={13} />
-              <span>成果审阅</span>
-            </button>
-          ) : null}
         </div>
       </header>
 
       {/* 消息流与 Hero 区域 */}
-      <div className="desktop-chat-body">
+      <div className={`desktop-chat-body ${isBlank ? "desktop-chat-body--welcome" : ""}`}>
         {isBlank ? (
-          <div className="desktop-hero" role="region" aria-label="欢迎体验">
-            {/* 极简大标题 */}
-            <div className="desktop-hero__headline">
-              <span className="desktop-hero__icon-halo" aria-hidden="true">
-                <Sparkles size={20} />
-              </span>
-              <span className="desktop-hero__title">
-                {controller.locale === "ja-JP" ? "月見八千代" : "月见八千代"}
-              </span>
-              <span className="desktop-hero__badge">PREVIEW</span>
-            </div>
-
-            <p className="desktop-hero__subtitle">
-              {controller.locale === "ja-JP"
-                ? "いつでもあなたのそばに。コード開発、日常対話、画像認識、何でも手伝うよ！"
-                : "全能智能体工作台：代码开发、角色日常、视觉识图与联网检索助理。"}
-            </p>
-
-            {/* 新对话居中对话框输入区域 */}
-            <div className="desktop-hero__composer">
-              {composerNode}
-            </div>
-
-            {/* 4 个等宽轻量化快捷引导卡片 */}
-            <div className="desktop-hero__cards">
-              <button
-                type="button"
-                className="desktop-hero-card"
-                onClick={() => handleHeroPrompt("八千代，请帮我查看当前工作区根目录下有哪些文件和文件夹，向我简要介绍一下。")}
-              >
-                <div className="desktop-hero-card__icon">
-                  <Terminal size={17} />
-                </div>
-                <div className="desktop-hero-card__content">
-                  <strong className="desktop-hero-card__title">查看工作区代码</strong>
-                  <span className="desktop-hero-card__desc">检索当前工作区项目结构与核心实现</span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                className="desktop-hero-card"
-                onClick={() => handleHeroPrompt("八千代，今天有什么有趣的事情发生吗？陪我聊聊天吧~")}
-              >
-                <div className="desktop-hero-card__icon">
-                  <Sparkles size={17} />
-                </div>
-                <div className="desktop-hero-card__content">
-                  <strong className="desktop-hero-card__title">日常陪伴与闲聊</strong>
-                  <span className="desktop-hero-card__desc">月见八千代温暖的角色对话与互动</span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                className="desktop-hero-card"
-                onClick={() => handleHeroPrompt("八千代，请帮我搜索关于 DeepSeek 最新开源进展和技术动态。")}
-              >
-                <div className="desktop-hero-card__icon">
-                  <Globe size={17} />
-                </div>
-                <div className="desktop-hero-card__content">
-                  <strong className="desktop-hero-card__title">联网探索与研究</strong>
-                  <span className="desktop-hero-card__desc">多渠道级联容灾检索最新外部资讯</span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                className="desktop-hero-card"
-                onClick={() => handleHeroPrompt("八千代，请向我介绍一下你支持哪些视觉与图片分析功能？")}
-              >
-                <div className="desktop-hero-card__icon">
-                  <Camera size={17} />
-                </div>
-                <div className="desktop-hero-card__content">
-                  <strong className="desktop-hero-card__title">视觉与图片分析</strong>
-                  <span className="desktop-hero-card__desc">多模态图像识别、代码抓取与解析</span>
-                </div>
-              </button>
-            </div>
-          </div>
-        ) : (
-          <ConversationView
-            activeSkills={activeSkills}
-            hasMoreHistory={controller.hasMoreHistory}
-            imageUrls={imageUrls}
-            key={controller.activeConversation?.id}
+          <DesktopWelcome
+            disabled={composerUnavailable || isStreaming}
             locale={controller.locale}
-            messages={controller.messages}
-            onLoadEarlier={() => void controller.loadEarlier()}
-            onRecall={onRecall}
-            onRegenerate={isOffline || isStreaming || isCompressing ? undefined : onRegenerate}
-            onToast={showToast}
-            showSources={webSearchSettings.showSources}
-            summary={controller.activeConversation?.summary}
+            onPrompt={handleHeroPrompt}
           />
+        ) : (
+          <div className="desktop-conversation-region">
+            <ConversationView
+              activeSkills={activeSkills}
+              hasMoreHistory={controller.hasMoreHistory}
+              imageUrls={imageUrls}
+              key={controller.activeConversation?.id}
+              locale={controller.locale}
+              messages={controller.messages}
+              conversation={controller.activeConversation}
+              onEdit={isOffline || isStreaming || isCompressing ? undefined : controller.editMessage}
+              onVersionChange={isStreaming || isCompressing ? undefined : controller.switchBranch}
+              onLoadEarlier={() => void controller.loadEarlier()}
+              onRecall={onRecall}
+              onRegenerate={isOffline || isStreaming || isCompressing ? undefined : onRegenerate}
+              onToast={showToast}
+              showSources={webSearchSettings.showSources}
+              summary={controller.activeConversation?.summary}
+            />
+          </div>
         )}
-      </div>
 
-      {/* Agent 任务待办清单 PlanStrip：对齐 DSH todo-write 任务呈现 */}
-      {latestTodos && latestTodos.length > 0 ? (
-        <PlanStrip todos={latestTodos} />
-      ) : null}
+        {latestTodos && latestTodos.length > 0 ? (
+          <PlanStrip todos={latestTodos} />
+        ) : null}
 
-
-      {/* 底部锚定输入交互区（仅在有消息时渲染） */}
-      {!isBlank ? (
+        {/* 输入节点持续挂载，首次发送只改变布局位置，保留焦点与输入法状态。 */}
         <div className="desktop-composer-dock">
           {composerNode}
         </div>
-      ) : null}
+      </div>
     </main>
   );
 }

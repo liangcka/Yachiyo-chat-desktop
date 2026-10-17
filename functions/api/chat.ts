@@ -15,8 +15,8 @@ import {
 import {
   mockChatResponse,
   proxyProviderStream,
-  proxyStepFunStream,
   type ClientStreamEvent,
+  type ExtractedDelta,
 } from "../_shared/stream";
 import {
   ChatValidationError,
@@ -111,6 +111,49 @@ function prepareUpstreamFetch(context: ChatContext): UpstreamFetchHandle {
 function validateUpstreamResponse(upstream: Response): boolean {
   const contentType = upstream.headers.get("content-type")?.toLowerCase() ?? "";
   return upstream.ok && upstream.body !== null && contentType.includes("text/event-stream");
+}
+
+interface UpstreamRequestOptions {
+  fetch: (signal: AbortSignal) => Promise<Response>;
+  extractDeltaText?: (data: string) => ExtractedDelta;
+  errorResponse?: (status: number) => Response;
+}
+
+async function requestProviderStream(
+  context: ChatContext,
+  request: ClientChatRequest,
+  searchResults: readonly WebSearchResult[] | undefined,
+  options: UpstreamRequestOptions,
+): Promise<Response> {
+  const handle = prepareUpstreamFetch(context);
+  let upstream: Response;
+  try {
+    upstream = await options.fetch(handle.signal);
+  } catch {
+    handle.cleanup();
+    return handle.isTimedOut()
+      ? problemResponse("PROVIDER_TIMEOUT", 504)
+      : problemResponse("PROVIDER_UNAVAILABLE", 502);
+  }
+  if (!validateUpstreamResponse(upstream)) {
+    handle.cleanup();
+    await upstream.body?.cancel();
+    return options.errorResponse?.(upstream.status) ?? problemResponse("PROVIDER_ERROR", 502);
+  }
+  const maxCharacters =
+    request.mode === "title" ? 50 : request.mode === "summary" || request.webSearch === true ? 1000 : 200;
+  return proxyProviderStream(
+    upstream,
+    {
+      abort: handle.abort,
+      clientSignal: context.request.signal,
+      initialEvents: initialSourcesEvents(searchResults),
+      maxCharacters,
+      onFinalize: handle.cleanup,
+      signal: handle.deadlineSignal,
+    },
+    options.extractDeltaText,
+  );
 }
 
 export async function onRequestPost(context: ChatContext): Promise<Response> {
@@ -218,46 +261,24 @@ async function handleUserKeyRequest(
     model: request.model!,
     ...(request.baseUrl !== undefined ? { baseUrl: request.baseUrl } : {}),
   });
-  const handle = prepareUpstreamFetch(context);
-  let upstream: Response;
-  try {
-    upstream = await fetch(built.url, {
+  return requestProviderStream(context, request, searchResults, {
+    fetch: (signal) => fetch(built.url, {
       method: "POST",
       headers: built.headers,
       body: built.body,
-      signal: handle.signal,
-    });
-  } catch {
-    handle.cleanup();
-    return handle.isTimedOut()
-      ? problemResponse("PROVIDER_TIMEOUT", 504)
-      : problemResponse("PROVIDER_UNAVAILABLE", 502);
-  }
-  if (!validateUpstreamResponse(upstream)) {
-    handle.cleanup();
-    await upstream.body?.cancel();
-    if (upstream.status === 401 || upstream.status === 403) {
-      return problemResponse("PROVIDER_AUTH_FAILED", 502);
-    }
-    if (upstream.status === 402 || upstream.status === 429) {
-      return problemResponse("PROVIDER_QUOTA_EXCEEDED", 502);
-    }
-    return problemResponse("PROVIDER_ERROR", 502);
-  }
-  const maxCharacters =
-    request.mode === "title" ? 50 : request.mode === "summary" || request.webSearch === true ? 1000 : 200;
-  return proxyProviderStream(
-    upstream,
-    {
-      abort: handle.abort,
-      clientSignal: context.request.signal,
-      initialEvents: initialSourcesEvents(searchResults),
-      maxCharacters,
-      onFinalize: handle.cleanup,
-      signal: handle.deadlineSignal,
+      signal,
+    }),
+    extractDeltaText: provider.extractDeltaText,
+    errorResponse: (status) => {
+      if (status === 401 || status === 403) {
+        return problemResponse("PROVIDER_AUTH_FAILED", 502);
+      }
+      if (status === 402 || status === 429) {
+        return problemResponse("PROVIDER_QUOTA_EXCEEDED", 502);
+      }
+      return problemResponse("PROVIDER_ERROR", 502);
     },
-    provider.extractDeltaText,
-  );
+  });
 }
 
 async function handleServerFallback(
@@ -283,29 +304,7 @@ async function handleServerFallback(
           signal: context.request.signal,
           env: context.env as unknown as Record<string, unknown>,
         });
-  const handle = prepareUpstreamFetch(context);
-  let upstream: Response;
-  try {
-    upstream = await requestStepFun(enrichRequest(request, searchResults), providerConfiguration, handle.signal);
-  } catch {
-    handle.cleanup();
-    return handle.isTimedOut()
-      ? problemResponse("PROVIDER_TIMEOUT", 504)
-      : problemResponse("PROVIDER_UNAVAILABLE", 502);
-  }
-  if (!validateUpstreamResponse(upstream)) {
-    handle.cleanup();
-    await upstream.body?.cancel();
-    return problemResponse("PROVIDER_ERROR", 502);
-  }
-  const maxCharacters =
-    request.mode === "title" ? 50 : request.mode === "summary" || request.webSearch === true ? 1000 : 200;
-  return proxyStepFunStream(upstream, {
-    abort: handle.abort,
-    clientSignal: context.request.signal,
-    initialEvents: initialSourcesEvents(searchResults),
-    maxCharacters,
-    onFinalize: handle.cleanup,
-    signal: handle.deadlineSignal,
+  return requestProviderStream(context, request, searchResults, {
+    fetch: (signal) => requestStepFun(enrichRequest(request, searchResults), providerConfiguration, signal),
   });
 }

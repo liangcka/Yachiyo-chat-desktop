@@ -131,7 +131,7 @@ impl From<HashMap<String, String>> for KeyStoreData {
     }
 }
 
-fn dirs_storage_path() -> PathBuf {
+pub(crate) fn dirs_storage_path() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         if let Ok(app_data) = std::env::var("APPDATA") {

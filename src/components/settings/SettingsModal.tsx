@@ -3,34 +3,25 @@ import {
   Check,
   Cpu,
   Database,
-  Folder,
-  FolderPlus,
-  FolderX,
   Globe,
   HelpCircle,
   Keyboard,
   Palette,
-  Play,
   Sliders,
   Sparkles,
-  Terminal,
   Trash2,
   Upload,
   User,
   X,
+  Server,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { LlmSettingsPanel } from "../LlmSettingsPanel";
 import { SkillsPanel } from "../SkillsPanel";
 import { UserMemoryPanel } from "../UserMemoryPanel";
-import { WorkspacePanel } from "../desktop/WorkspacePanel";
+import { McpPanel } from "./McpPanel";
 import { SKILLS } from "../../skills";
 import { PROVIDER_METADATA } from "../../domain/llm";
-import {
-  getProjectDisplayName,
-  projectManager,
-  useProjectState,
-} from "../../services/project-manager";
 import {
   PRESET_USER_BADGES,
   useLocalUserSettings,
@@ -46,7 +37,7 @@ export type SettingsTabKey =
   | "models"
   | "custom"
   | "browser"
-  | "project"
+  | "mcp"
   | "shortcuts"
   | "user";
 
@@ -73,10 +64,6 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTabKey>(initialTab);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [copiedPath, setCopiedPath] = useState(false);
-  const [copiedRule, setCopiedRule] = useState(false);
-  const [showDetachConfirm, setShowDetachConfirm] = useState(false);
-  const [showWorkspaceTerminal, setShowWorkspaceTerminal] = useState(false);
 
   // 本地用户设置（纯本地 LocalStorage）
   const [userSettings, saveUserSettings] = useLocalUserSettings();
@@ -154,9 +141,6 @@ export function SettingsModal({
     shared.showToast("已恢复默认头像", "info");
   };
 
-  // 接入全局真实项目状态
-  const { activeProject, recentProjects } = useProjectState();
-
   // 隐私模式持久化
   const [privacyMode, setPrivacyMode] = useState<boolean>(() => {
     try {
@@ -177,57 +161,6 @@ export function SettingsModal({
       }
       return next;
     });
-  };
-
-  const handleCopyPath = async (path: string) => {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(path);
-      }
-      setCopiedPath(true);
-      setTimeout(() => setCopiedPath(false), 2000);
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const handleCopyRuleContract = async () => {
-    const contract = `# Yachiyo Chat 权威 Agent 运行守则\n1. 遵守工作区边界与文件读写隔离\n2. 先读后改，防御性写入\n3. 终端命令沙盒化执行与质量门禁自动闭环`;
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(contract);
-      }
-      setCopiedRule(true);
-      setTimeout(() => setCopiedRule(false), 2000);
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const handlePickWorkspace = async () => {
-    const picked = await projectManager.pickAndOpenProject("选择工作区目录");
-    if (picked) {
-      setActiveTab("project");
-      shared.showToast(`已切换工作区至 ${getProjectDisplayName(picked)}`, "info");
-    }
-  };
-
-  const handleQuickStartWorkspace = async () => {
-    const picked = await projectManager.quickStart();
-    if (picked) {
-      setActiveTab("project");
-      shared.showToast("已通过快速开始进入工作区", "info");
-    }
-  };
-
-  const handleDetachProject = async () => {
-    setShowDetachConfirm(false);
-    const target = activeProject;
-    await projectManager.switchProject(null);
-    if (target) {
-      projectManager.removeRecentProject(target);
-    }
-    shared.showToast("已分离当前工作区，返回独立会话模式", "info");
   };
 
   const [prevInitialTab, setPrevInitialTab] = useState(initialTab);
@@ -259,9 +192,6 @@ export function SettingsModal({
     ? PROVIDER_METADATA[shared.llmActiveProvider]?.label ?? shared.llmActiveProvider
     : "系统默认 Provider (未单独配置)";
 
-  const otherRecentProjects = recentProjects.filter(
-    (p) => !activeProject || p.toLowerCase() !== activeProject.toLowerCase(),
-  );
 
   return (
     <div className="settings-modal-overlay" role="dialog" aria-modal="true" aria-label="设置中心">
@@ -357,110 +287,28 @@ export function SettingsModal({
               <button
                 type="button"
                 role="tab"
-                aria-label="联网检索"
+                aria-label="联网搜索"
                 aria-selected={activeTab === "browser"}
                 className={`settings-modal__nav-item ${activeTab === "browser" ? "settings-modal__nav-item--active" : ""}`}
                 onClick={() => setActiveTab("browser")}
               >
                 <Globe size={16} className="settings-modal__nav-icon" />
-                <span className="settings-modal__nav-item-text">浏览器</span>
+                <span className="settings-modal__nav-item-text">联网搜索</span>
               </button>
-            </div>
-
-            {/* 2. 工作区项目分组 (真实与 projectManager 对齐) */}
-            <div className="settings-modal__nav-group">
-              <div className="settings-modal__nav-section-title">工作区项目</div>
-              {activeProject ? (
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activeTab === "project"}
-                  className={`settings-modal__nav-item ${activeTab === "project" ? "settings-modal__nav-item--active" : ""}`}
-                  onClick={() => setActiveTab("project")}
-                  title={activeProject}
-                >
-                  <Folder size={15} className="settings-modal__nav-icon" />
-                  <span className="settings-modal__nav-item-text">
-                    {getProjectDisplayName(activeProject)}
-                  </span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activeTab === "project"}
-                  className={`settings-modal__nav-item ${activeTab === "project" ? "settings-modal__nav-item--active" : ""}`}
-                  onClick={() => setActiveTab("project")}
-                >
-                  <FolderX size={15} className="settings-modal__nav-icon" />
-                  <span className="settings-modal__nav-item-text">未绑定工作区</span>
-                </button>
-              )}
-
-              {otherRecentProjects.length > 0 ? (
-                <div className="settings-modal__nav-sub-header">最近项目</div>
-              ) : null}
-
-              {otherRecentProjects.slice(0, 3).map((p) => (
-                <div
-                  key={p}
-                  className="settings-modal__nav-item settings-modal__nav-item--sub settings-modal__nav-item--recent"
-                  onClick={async () => {
-                    await projectManager.switchProject(p);
-                    setActiveTab("project");
-                    shared.showToast(`已切换工作区至 ${getProjectDisplayName(p)}`, "info");
-                  }}
-                  title={`切换至项目：${p}`}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={async (e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      await projectManager.switchProject(p);
-                      setActiveTab("project");
-                      shared.showToast(`已切换工作区至 ${getProjectDisplayName(p)}`, "info");
-                    }
-                  }}
-                >
-                  <span className="settings-modal__project-dot" />
-                  <span className="settings-modal__nav-item-text">{getProjectDisplayName(p)}</span>
-                  <button
-                    type="button"
-                    className="settings-modal__nav-item-remove"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      projectManager.removeRecentProject(p);
-                      shared.showToast(`已从历史记录移除 ${getProjectDisplayName(p)}`, "info");
-                    }}
-                    title="从历史记录移除"
-                    aria-label={`从历史记录移除 ${getProjectDisplayName(p)}`}
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-              ))}
 
               <button
                 type="button"
-                className="settings-modal__nav-item settings-modal__nav-item--link"
-                onClick={handlePickWorkspace}
+                role="tab"
+                aria-label="MCP 服务"
+                aria-selected={activeTab === "mcp"}
+                className={`settings-modal__nav-item ${activeTab === "mcp" ? "settings-modal__nav-item--active" : ""}`}
+                onClick={() => setActiveTab("mcp")}
               >
-                <FolderPlus size={13} style={{ marginRight: 6 }} />
-                <span className="settings-modal__nav-item-text">打开其他工作区...</span>
+                <Server size={16} className="settings-modal__nav-icon" />
+                <span className="settings-modal__nav-item-text">MCP 服务</span>
               </button>
             </div>
 
-            {/* 3. 快速导航 */}
-            <div className="settings-modal__nav-group">
-              <div className="settings-modal__nav-section-title">快捷入口</div>
-              <button
-                type="button"
-                className="settings-modal__nav-item"
-                onClick={onClose}
-              >
-                <span className="settings-modal__nav-item-text">返回当前会话</span>
-              </button>
-            </div>
           </div>
 
           {/* 4. 底部快捷操作与真实客户端信息 */}
@@ -557,40 +405,6 @@ export function SettingsModal({
                 </div>
               </div>
 
-              {/* 2. 当前工作区状态 */}
-              <div className="settings-card-group">
-                <h4 className="settings-card-group__title">工作区与项目环境</h4>
-                <div className="settings-item-card">
-                  <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">活跃工作区目录</strong>
-                    <span className="settings-item-card__desc">
-                      {activeProject
-                        ? `当前已关联本地项目：${activeProject}`
-                        : "尚未关联本地工程目录，当前处于无工作区的独立对话模式。"}
-                    </span>
-                  </div>
-                  <div className="settings-item-card__action">
-                    {activeProject ? (
-                      <button
-                        type="button"
-                        className="settings-btn"
-                        onClick={() => setActiveTab("project")}
-                      >
-                        工作区配置
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="settings-btn settings-btn--primary"
-                        onClick={handlePickWorkspace}
-                      >
-                        选择工作区
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
               {/* 3. 系统运行状态速览 */}
               <div className="settings-card-group">
                 <h4 className="settings-card-group__title">核心系统状态</h4>
@@ -614,12 +428,12 @@ export function SettingsModal({
 
                 <div className="settings-item-card">
                   <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">联网检索能力 (Web Search)</strong>
+                    <strong className="settings-item-card__name">联网搜索</strong>
                     <span className="settings-item-card__desc">
                       当前状态：
                       <strong>
                         {shared.webSearchSettings.enabled
-                          ? "已启用（支持多搜索引擎级联容灾）"
+                          ? "已开启，搜索失败时会自动尝试其他来源"
                           : "已停用（纯离线模型知识）"}
                       </strong>
                     </span>
@@ -630,7 +444,7 @@ export function SettingsModal({
                       className="settings-btn"
                       onClick={() => setActiveTab("browser")}
                     >
-                      配置检索
+                      配置搜索
                     </button>
                   </div>
                 </div>
@@ -707,28 +521,6 @@ export function SettingsModal({
                   </div>
                 </div>
 
-                <div className="settings-item-card">
-                  <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">Live2D 看板娘</strong>
-                    <span className="settings-item-card__desc">
-                      在桌面右下角显示可交互的 Live2D 挂件（支持点击互动、语音与快速收起）
-                    </span>
-                  </div>
-                  <div className="settings-item-card__action">
-                    <button
-                      type="button"
-                      className={`settings-btn ${userSettings.showLive2d ? "settings-btn--primary" : "settings-btn--ghost"}`}
-                      onClick={() => {
-                        const next = !userSettings.showLive2d;
-                        saveUserSettings({ showLive2d: next });
-                        shared.showToast(next ? "已开启 Live2D 看板娘" : "已隐藏 Live2D 看板娘", "info");
-                      }}
-                      aria-pressed={userSettings.showLive2d}
-                    >
-                      {userSettings.showLive2d ? "已开启" : "已关闭"}
-                    </button>
-                  </div>
-                </div>
               </div>
             </div>
           ) : null}
@@ -804,12 +596,12 @@ export function SettingsModal({
             </div>
           ) : null}
 
-          {/* TAB: 联网检索 (Browser) */}
+          {/* TAB: 联网搜索 */}
           {activeTab === "browser" ? (
             <div className="settings-panel-view">
               <div className="settings-panel-view__header">
-                <h3 className="settings-panel-view__title">联网检索与网络管道</h3>
-                <p className="settings-panel-view__desc">配置智能体联网检索管道、搜索引擎级联容灾与来源展示。</p>
+                <h3 className="settings-panel-view__title">联网搜索</h3>
+                <p className="settings-panel-view__desc">允许八千代搜索网页，并选择是否显示参考来源。</p>
               </div>
 
               <SkillsPanel
@@ -827,282 +619,9 @@ export function SettingsModal({
             </div>
           ) : null}
 
-          {/* TAB: 工作区与项目 (Project - 真实对接真实环境) */}
-          {activeTab === "project" ? (
-            <div className="settings-panel-view settings-panel-view--project">
-              <div className="settings-project-header">
-                <div className="settings-project-header__title-row">
-                  <div className="settings-project-title-container">
-                    <h3 className="settings-panel-view__title settings-project-title">
-                      {activeProject ? getProjectDisplayName(activeProject) : "工作区与项目管理"}
-                    </h3>
-                  </div>
-
-                  {activeProject ? (
-                    <button
-                      type="button"
-                      className={`settings-terminal-toggle-btn ${showWorkspaceTerminal ? "settings-terminal-toggle-btn--active" : ""}`}
-                      onClick={() => setShowWorkspaceTerminal((prev) => !prev)}
-                      title="切换高级工作区与终端面板"
-                    >
-                      <Terminal size={14} />
-                      <span>{showWorkspaceTerminal ? "返回项目概览" : "打开终端与文件树"}</span>
-                    </button>
-                  ) : null}
-                </div>
-                <p className="settings-panel-view__desc settings-project-desc">
-                  {activeProject
-                    ? "当前工作区已启用文件系统观察守卫、Monaco 编辑器差异审阅与终端执行环境。"
-                    : "打开本地代码目录即可启用 Agent 工具调用、工程文件读取修改与代码审阅。"}
-                </p>
-              </div>
-
-              {showWorkspaceTerminal ? (
-                <div className="settings-workspace-embedded">
-                  <WorkspacePanel copy={shared.copy} open={true} onClose={onClose} />
-                </div>
-              ) : (
-                <>
-                  {/* 1. 当前工作区信息卡片 */}
-                  <div className="settings-card-group">
-                    <h4 className="settings-card-group__title">工作区路径</h4>
-                    {activeProject ? (
-                      <div className="settings-item-card">
-                        <div className="settings-item-card__lead">
-                          <strong className="settings-item-card__name">
-                            {getProjectDisplayName(activeProject)}
-                          </strong>
-                          <span className="settings-item-card__desc" style={{ fontFamily: "monospace", wordBreak: "break-all" }}>
-                            {activeProject}
-                          </span>
-                        </div>
-                        <div className="settings-item-card__action">
-                          <button
-                            type="button"
-                            className="settings-btn settings-btn--ghost"
-                            onClick={() => void handleCopyPath(activeProject)}
-                          >
-                            {copiedPath ? (
-                              <>
-                                <Check size={13} style={{ color: "#10b981", marginRight: 4 }} />
-                                已复制
-                              </>
-                            ) : (
-                              "复制路径"
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            className="settings-btn"
-                            onClick={handlePickWorkspace}
-                          >
-                            切换工作区
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="settings-item-card">
-                        <div className="settings-item-card__lead">
-                          <strong className="settings-item-card__name">暂未打开任何项目目录</strong>
-                          <span className="settings-item-card__desc">
-                            您可以打开本地已有的代码仓库，或使用快速开始创建临时工作空间。
-                          </span>
-                        </div>
-                        <div className="settings-item-card__action">
-                          <button
-                            type="button"
-                            className="settings-btn settings-btn--primary"
-                            onClick={handlePickWorkspace}
-                          >
-                            <FolderPlus size={14} style={{ marginRight: 4 }} />
-                            选择本地文件夹
-                          </button>
-                          <button
-                            type="button"
-                            className="settings-btn"
-                            onClick={handleQuickStartWorkspace}
-                          >
-                            <Play size={14} style={{ marginRight: 4 }} />
-                            快速开始
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* 2. 历史工作区记录 (提供直接切换与一键从历史移除) */}
-                  {recentProjects.length > 0 ? (
-                    <div className="settings-card-group">
-                      <div className="settings-card-group__header-row">
-                        <h4 className="settings-card-group__title">
-                          历史打开记录 ({recentProjects.length})
-                        </h4>
-                        <button
-                          type="button"
-                          className="settings-link-btn"
-                          onClick={() => {
-                            projectManager.clearRecentProjects();
-                            shared.showToast("已清空全部工作区历史记录", "info");
-                          }}
-                        >
-                          清空历史
-                        </button>
-                      </div>
-                      <div className="settings-recent-list">
-                        {recentProjects.map((p) => {
-                          const isCurrent = activeProject?.toLowerCase() === p.toLowerCase();
-                          return (
-                            <div key={p} className="settings-item-card settings-recent-card">
-                              <div className="settings-item-card__lead">
-                                <div className="settings-recent-title-row">
-                                  <Folder size={14} className="settings-recent-icon" />
-                                  <strong className="settings-item-card__name">
-                                    {getProjectDisplayName(p)}
-                                  </strong>
-                                  {isCurrent ? (
-                                    <span className="settings-tag settings-tag--active">当前工作区</span>
-                                  ) : null}
-                                </div>
-                                <span
-                                  className="settings-item-card__desc"
-                                  style={{ fontFamily: "monospace", wordBreak: "break-all" }}
-                                  title={p}
-                                >
-                                  {p}
-                                </span>
-                              </div>
-                              <div className="settings-item-card__action">
-                                {!isCurrent ? (
-                                  <button
-                                    type="button"
-                                    className="settings-btn"
-                                    onClick={async () => {
-                                      await projectManager.switchProject(p);
-                                      shared.showToast(`已切换工作区至 ${getProjectDisplayName(p)}`, "info");
-                                    }}
-                                  >
-                                    打开
-                                  </button>
-                                ) : null}
-                                <button
-                                  type="button"
-                                  className="settings-btn settings-btn--ghost"
-                                  onClick={() => {
-                                    projectManager.removeRecentProject(p);
-                                    shared.showToast(`已从历史记录移除 ${getProjectDisplayName(p)}`, "info");
-                                  }}
-                                  title="从历史记录移除"
-                                >
-                                  移除
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {/* 3. 智能体工程规则 (真实规则与契约展示) */}
-                  <div className="settings-card-group">
-                    <h4 className="settings-card-group__title">工程契约与安全规则</h4>
-                    <div className="settings-item-card">
-                      <div className="settings-item-card__lead">
-                        <strong className="settings-item-card__name">Agent 开发规范 (AGENTS.md)</strong>
-                        <span className="settings-item-card__desc">
-                          工作区内的工具执行严格遵循“先读后改”观察守卫、CAS 版本校验、移动端原生代码隔离以及破坏性操作事前审批。
-                        </span>
-                      </div>
-                      <div className="settings-item-card__action">
-                        <button
-                          type="button"
-                          className="settings-btn settings-btn--ghost"
-                          onClick={() => void handleCopyRuleContract()}
-                        >
-                          {copiedRule ? (
-                            <>
-                              <Check size={13} style={{ color: "#10b981", marginRight: 4 }} />
-                              已复制契约
-                            </>
-                          ) : (
-                            "复制契约"
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 3. 已加载技能清单 (真实动态渲染 SKILLS) */}
-                  <div className="settings-card-group">
-                    <h4 className="settings-card-group__title">
-                      已注册技能扩展 ({SKILLS.length})
-                    </h4>
-                    <div className="settings-skills-tag-grid">
-                      {SKILLS.map((skill) => {
-                        const isActive = shared.activeSkillIds.includes(skill.id);
-                        return (
-                          <button
-                            type="button"
-                            key={skill.id}
-                            className={`settings-skill-tag ${isActive ? "settings-skill-tag--active" : ""}`}
-                            title={skill.description}
-                            onClick={() => setActiveTab("custom")}
-                          >
-                            <span className={`settings-skill-tag__dot ${isActive ? "settings-skill-tag__dot--active" : ""}`} />
-                            <span className="settings-skill-tag__text">{skill.name}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* 4. 危险区域 (仅当有活跃项目时展示真实分离操作) */}
-                  {activeProject ? (
-                    <div className="settings-card-group settings-card-group--danger-zone">
-                      <h4 className="settings-card-group__title settings-card-group__title--danger">
-                        危险区域
-                      </h4>
-                      <div className="settings-item-card settings-item-card--danger">
-                        <div className="settings-item-card__lead">
-                          <strong className="settings-item-card__name">从工作区脱离</strong>
-                          <span className="settings-item-card__desc">
-                            将当前客户端与工程目录 <strong>{getProjectDisplayName(activeProject)}</strong> 分离，切换回独立会话模式。您的本地磁盘文件不受任何影响。
-                          </span>
-                        </div>
-                        <div className="settings-item-card__action">
-                          {showDetachConfirm ? (
-                            <div className="settings-confirm-row">
-                              <button
-                                type="button"
-                                className="settings-btn settings-btn--danger"
-                                onClick={() => void handleDetachProject()}
-                              >
-                                确认脱离
-                              </button>
-                              <button
-                                type="button"
-                                className="settings-btn"
-                                onClick={() => setShowDetachConfirm(false)}
-                              >
-                                取消
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              className="settings-btn settings-btn--danger"
-                              onClick={() => setShowDetachConfirm(true)}
-                            >
-                              脱离工作区
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
-                </>
-              )}
-            </div>
+          {/* TAB: MCP 扩展服务 */}
+          {activeTab === "mcp" ? (
+            <McpPanel showToast={shared.showToast} />
           ) : null}
 
           {/* TAB: 存储与维护 (App) */}

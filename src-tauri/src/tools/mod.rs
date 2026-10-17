@@ -7,7 +7,9 @@ pub use fs::FsObservationTracker;
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex, RwLock};
+use crate::types::AgentExecutionMode;
 
 /// 工具风险分级：读类自动放行，写类需用户批准
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,7 +18,37 @@ pub enum ToolRisk {
     Write,
 }
 
+/// 工具执行的授权来源：把「谁授权了这次执行」写成类型上显式的契约，
+/// 使执行边界自身成为权威判定点，而不依赖调用方自觉先问再调。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolAuthorization {
+    /// 由界面中的人类操作直接发起（编辑器保存、diff 应用、终端面板手敲命令等）
+    HumanInitiated,
+    /// 由模型发起的工具调用；`approved` 为是否已取得用户审批放行
+    ModelInitiated { approved: bool },
+    Agent { mode: AgentExecutionMode, approved: bool },
+}
+
+pub fn authorize_tool(name: &str, auth: ToolAuthorization) -> Result<(), String> {
+    if tool_risk(name) != Some(ToolRisk::Write) {
+        return Ok(());
+    }
+    match auth {
+        ToolAuthorization::Agent { mode: AgentExecutionMode::Readonly, .. } => {
+            Err("只读模式不允许写入文件、执行命令或调用 MCP 工具。".to_string())
+        }
+        ToolAuthorization::ModelInitiated { approved: false }
+        | ToolAuthorization::Agent { mode: AgentExecutionMode::Confirm, approved: false } => {
+            Err("本次写类工具调用未获得用户授权，已拒绝执行。".to_string())
+        }
+        _ => Ok(()),
+    }
+}
+
 pub fn tool_risk(name: &str) -> Option<ToolRisk> {
+    if name.starts_with("mcp__") {
+        return Some(ToolRisk::Write);
+    }
     match name {
         "read_file" | "list_directory" | "git_status" | "git_diff" | "web_fetch" | "todo_write" => {
             Some(ToolRisk::Read)
@@ -37,7 +69,7 @@ fn tool_output_limit(name: &str) -> usize {
 }
 
 /// 截断到字符边界的安全切片（不产生 panic）
-fn floor_char_boundary(s: &str, mut index: usize) -> usize {
+pub(crate) fn floor_char_boundary(s: &str, mut index: usize) -> usize {
     if index >= s.len() {
         return s.len();
     }
@@ -74,15 +106,17 @@ pub fn process_tool_output(name: &str, output: &str, workspace_root: Option<&Pat
         return truncate_tool_output(name, output);
     };
 
-    let spill_dir = workspace_root.join(".yachiyo").join("spill");
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let filename = format!("spill-{}-{}.txt", timestamp, name);
-    let spill_path = spill_dir.join(&filename);
+    let Ok(spill_path) = fs::resolve_tool_path(&format!(".yachiyo/spill/{filename}"), workspace_root) else {
+        return truncate_tool_output(name, output);
+    };
+    let Some(spill_dir) = spill_path.parent() else { return truncate_tool_output(name, output); };
 
-    let written = std::fs::create_dir_all(&spill_dir)
+    let written = std::fs::create_dir_all(spill_dir)
         .and_then(|_| std::fs::write(&spill_path, output));
 
     if written.is_ok() {
@@ -141,6 +175,20 @@ pub struct ToolResult {
 #[derive(Debug)]
 pub struct WorkspaceManager {
     root_path: RwLock<Option<PathBuf>>,
+    active: Arc<Mutex<HashSet<PathBuf>>>,
+}
+
+pub struct WorkspaceLease {
+    root: PathBuf,
+    active: Arc<Mutex<HashSet<PathBuf>>>,
+}
+
+impl Drop for WorkspaceLease {
+    fn drop(&mut self) {
+        if let Ok(mut active) = self.active.lock() {
+            active.remove(&self.root);
+        }
+    }
 }
 
 impl WorkspaceManager {
@@ -154,7 +202,19 @@ impl WorkspaceManager {
         });
         Self {
             root_path: RwLock::new(root),
+            active: Arc::new(Mutex::new(HashSet::new())),
         }
+    }
+
+    /// Agent 运行、恢复与界面写入共用工作区互斥，避免快照和文件变化交错。
+    pub fn acquire_workspace(&self, workspace: &Path) -> Result<WorkspaceLease, String> {
+        let root = workspace.canonicalize().map_err(|e| e.to_string())?;
+        let mut active = self.active.lock().map_err(|e| e.to_string())?;
+        if active.iter().any(|running| root.starts_with(running) || running.starts_with(&root)) {
+            return Err("工作区正在执行任务，请停止任务后再恢复或修改文件。".to_string());
+        }
+        active.insert(root.clone());
+        Ok(WorkspaceLease { root, active: Arc::clone(&self.active) })
     }
 
     pub fn get_workspace_root(&self) -> Option<PathBuf> {
@@ -324,7 +384,12 @@ pub async fn execute_tool_with_context(
     workspace_root: Option<&Path>,
     http_client: &reqwest::Client,
     fs_tracker: Option<&FsObservationTracker>,
+    auth: ToolAuthorization,
 ) -> Result<String, String> {
+    // 执行边界自带授权判定：写类工具须有人类发起凭据或模型侧的获批标记，
+    // 调用方漏判也不会落地破坏性动作
+    authorize_tool(name, auth)?;
+
     match name {
         "read_file" => {
             let root = workspace_root.ok_or("当前未打开项目工作区，无法读取文件。若彩叶需要查看本地代码，请提醒彩叶在界面上方选择或打开工作区文件夹。")?;
@@ -414,7 +479,8 @@ pub async fn execute_tool(
     args: &serde_json::Value,
     workspace_root: &Path,
     http_client: &reqwest::Client,
+    auth: ToolAuthorization,
 ) -> Result<String, String> {
-    execute_tool_with_context(name, args, Some(workspace_root), http_client, None).await
+    execute_tool_with_context(name, args, Some(workspace_root), http_client, None, auth).await
 }
 

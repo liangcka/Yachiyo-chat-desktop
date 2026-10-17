@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { executeDesktopAgentTool } from "../services/desktop-bridge";
 
 /** 超过该体积的文件以只读打开，避免 Monaco 大文档卡顿（1MB） */
@@ -25,6 +25,8 @@ export interface EditorWorkspaceController {
   /** 打开文件：已存在则激活，否则 read_file 拉取内容新开 tab */
   openFile: (path: string) => Promise<void>;
   closeTab: (path: string) => void;
+  /** 检查点恢复后丢弃全部缓冲，避免旧内容覆盖恢复后的文件。 */
+  resetTabs: () => void;
   setActive: (path: string) => void;
   /** Monaco model → state 单向同步入口（readOnly 文件忽略） */
   updateContent: (path: string, content: string) => void;
@@ -42,6 +44,7 @@ export function useEditorWorkspace(): EditorWorkspaceController {
   const [tabs, setTabs] = useState<EditorFileTab[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const revisionRef = useRef(0);
 
   const activeTab = useMemo(
     () => tabs.find((t) => t.path === activePath) ?? null,
@@ -63,12 +66,13 @@ export function useEditorWorkspace(): EditorWorkspaceController {
 
   const openFile = useCallback(
     async (path: string) => {
+      const revision = revisionRef.current;
       const normalized = normalizePath(path);
       setActivePath(normalized);
       if (tabs.some((t) => t.path === normalized)) return;
 
       const res = await executeDesktopAgentTool("read_file", { path: normalized });
-      if (res.isError) return;
+      if (res.isError || revision !== revisionRef.current) return;
 
       const content = res.output;
       const readOnly = content.length > READ_ONLY_LIMIT_BYTES;
@@ -132,6 +136,12 @@ export function useEditorWorkspace(): EditorWorkspaceController {
     setActivePath(path);
   }, []);
 
+  const resetTabs = useCallback(() => {
+    revisionRef.current += 1;
+    setTabs([]);
+    setActivePath(null);
+  }, []);
+
   return {
     tabs,
     activePath,
@@ -140,6 +150,7 @@ export function useEditorWorkspace(): EditorWorkspaceController {
     saving,
     openFile,
     closeTab,
+    resetTabs,
     setActive,
     updateContent,
     saveTab,

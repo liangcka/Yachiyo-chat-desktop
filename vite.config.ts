@@ -16,6 +16,16 @@ export default defineConfig({
   },
   build: {
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        chunkFileNames: (chunkInfo) => {
+          if (chunkInfo.moduleIds.some((id) => id.includes("monaco-editor"))) {
+            return "assets/monaco/[name]-[hash].js";
+          }
+          return "assets/[name]-[hash].js";
+        },
+      },
+    },
   },
   plugins: [
     react(),
@@ -31,13 +41,13 @@ export default defineConfig({
       manifest: {
         name: "Yachiyo Chat",
         short_name: "Yachiyo",
-        description: "月见八千代的中日双语星空聊天、图片理解与本地历史。",
+        description: "月见八千代的桌面对话、代码编辑与项目工作区。",
         lang: "zh-CN",
         id: "/",
         start_url: "/",
         scope: "/",
         display: "standalone",
-        orientation: "portrait",
+        orientation: "any",
         background_color: "#07102d",
         theme_color: "#142d67",
         icons: [
@@ -65,10 +75,24 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/api\//],
-        runtimeCaching: [],
-        // Monaco 懒加载资源超 workbox precache 2MiB 上限，且仅在打开编辑器视图时才请求：
-        // 从 SW 预缓存排除（桌面端走 Tauri 本地资源，Web 端编辑器按需在线加载）
-        globIgnores: ["**/*worker*.js", "**/editor.api*.js"],
+        // Monaco 编辑器核心与 80+ 语言包按需动态加载，从 SW 预缓存排除以避免首屏膨胀：
+        globIgnores: ["**/*worker*.js", "**/editor.api*.js", "**/monaco/**"],
+        runtimeCaching: [
+          {
+            urlPattern: /\/assets\/monaco\/.*\.js$/,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "monaco-assets-cache",
+              expiration: {
+                maxEntries: 120,
+                maxAgeSeconds: 30 * 24 * 60 * 60,
+              },
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
+            },
+          },
+        ],
       },
     }),
   ],

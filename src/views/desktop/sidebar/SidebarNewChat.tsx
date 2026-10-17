@@ -1,3 +1,4 @@
+import { SquarePen } from "lucide-react";
 import type { UiCopy } from "../../../i18n/messages";
 
 interface SidebarNewChatProps {
@@ -15,8 +16,8 @@ export function SidebarNewChat({ copy, onNewChat }: SidebarNewChatProps) {
       onClick={() => void onNewChat()}
       title={`${copy.newChat} (Ctrl+N)`}
     >
+      <SquarePen size={16} aria-hidden="true" />
       <span className="desktop-sidebar__new-btn-label">{copy.newChat}</span>
-      <kbd className="desktop-sidebar__kbd">^N</kbd>
     </button>
   );
 }

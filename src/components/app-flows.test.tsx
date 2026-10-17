@@ -84,6 +84,11 @@ class MemoryRepository implements AppRepository {
       .sort((left, right) => left.createdAt - right.createdAt);
   }
 
+  async saveBranchState(conversation: Conversation, messages: ChatMessage[]): Promise<void> {
+    this.conversations = this.conversations.map((item) => item.id === conversation.id ? conversation : item);
+    this.messages = [...this.messages.filter((message) => message.conversationId !== conversation.id), ...messages];
+  }
+
   async putMessage(message: ChatMessage): Promise<void> {
     this.messages = [...this.messages.filter(({ id }) => id !== message.id), { ...message }];
     const conversation = await this.getConversation(message.conversationId);
@@ -247,10 +252,10 @@ describe("App flows", () => {
       expect(stream.mock.calls[0]?.[0].webSearch).toBeUndefined();
       expect(screen.queryByLabelText("参考来源")).not.toBeInTheDocument();
 
-      // 设置 → 联网检索 → 开启联网搜索
+      // 设置 → 联网搜索 → 开启联网搜索
       await user.click(screen.getByLabelText("用户资料与菜单"));
       await user.click(screen.getByLabelText("设置"));
-      await user.click(screen.getByRole("tab", { name: "联网检索" }));
+      await user.click(screen.getByRole("tab", { name: "联网搜索" }));
       await user.click(screen.getByRole("button", { name: "切换技能启用状态: 联网搜索" }));
       await user.click(screen.getByRole("button", { name: "关闭设置" }));
 
@@ -278,7 +283,7 @@ describe("App flows", () => {
       // 关闭"显示引用来源"后不再渲染来源列表
       await user.click(screen.getByLabelText("用户资料与菜单"));
       await user.click(screen.getByLabelText("设置"));
-      await user.click(screen.getByRole("tab", { name: "联网检索" }));
+      await user.click(screen.getByRole("tab", { name: "联网搜索" }));
       await user.click(screen.getByRole("button", { name: "切换技能启用状态: 显示引用来源" }));
       await user.click(screen.getByRole("button", { name: "关闭设置" }));
       await waitFor(() => expect(screen.queryByLabelText("参考来源")).not.toBeInTheDocument());
@@ -431,8 +436,8 @@ describe("App flows", () => {
     });
     const services = fakeServices({ stream });
     const { container } = render(<App services={services} />);
-    const captureButtons = await screen.findAllByRole("button", { name: "拍摄" });
-    expect(captureButtons.length).toBeGreaterThan(0);
+    await user.click(await screen.findByRole("button", { name: "添加文件、项目或技能" }));
+    await user.click(screen.getByRole("button", { name: "添加文件或图片" }));
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
     const file = new File(["jpeg"], "photo.jpg", { type: "image/jpeg" });
 
@@ -640,7 +645,7 @@ describe("App flows", () => {
     try {
       const composer = await screen.findByPlaceholderText("当前离线，可查看本地记录");
       expect(composer).toBeDisabled();
-      expect(screen.getAllByRole("button", { name: "拍摄" })[0]).toBeDisabled();
+      expect(screen.getByRole("button", { name: "添加文件、项目或技能" })).toBeDisabled();
       expect(screen.getAllByText("当前离线，可查看本地记录")[0]).toBeVisible();
 
       act(() => {

@@ -6,6 +6,9 @@ import {
 } from "./expand-file-references";
 
 describe("extractFileReferences", () => {
+  it("支持中文路径、空格引号与无扩展名文件", () => {
+    expect(extractFileReferences('看 @src/组件.tsx 和 @"docs/my guide.md" @README')).toEqual(["src/组件.tsx", "docs/my guide.md", "README"]);
+  });
   it("提取空白与行首的 @ 引用并去重保序", () => {
     const text = "帮我看看 @src/app/foo.ts 和\n@src/app/foo.ts 还有 @src/bar/baz.tsx";
     expect(extractFileReferences(text)).toEqual(["src/app/foo.ts", "src/bar/baz.tsx"]);

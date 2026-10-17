@@ -1,3 +1,5 @@
+import { branchVersions } from "../domain/message-branches";
+import type { Conversation } from "../domain/chat";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
@@ -20,14 +22,25 @@ function isNearBottom(
   return element.scrollHeight - element.scrollTop - element.clientHeight <= FOLLOW_THRESHOLD_PX;
 }
 
+let lastProgressStr = "";
+let lastScrolled: boolean | undefined = undefined;
+
 function syncTopScrimOpacity(
   element: HTMLElement,
   onScrolledFromTopChange?: (scrolled: boolean) => void,
 ) {
   const scrollTop = element.scrollTop;
   const progress = Math.min(1, Math.max(0, scrollTop / 40));
-  document.documentElement.style.setProperty("--top-scrim-opacity", progress.toFixed(3));
-  onScrolledFromTopChange?.(progress > 0);
+  const progressStr = progress.toFixed(3);
+  if (progressStr !== lastProgressStr) {
+    lastProgressStr = progressStr;
+    document.documentElement.style.setProperty("--top-scrim-opacity", progressStr);
+  }
+  const isScrolled = progress > 0;
+  if (isScrolled !== lastScrolled) {
+    lastScrolled = isScrolled;
+    onScrolledFromTopChange?.(isScrolled);
+  }
 }
 
 export interface ConversationViewProps {
@@ -39,6 +52,9 @@ export interface ConversationViewProps {
   showSources?: boolean;
   onRecall?: () => void;
   onRegenerate?: (messageId?: string) => void;
+  onEdit?: (messageId: string, text: string) => void;
+  conversation?: Conversation;
+  onVersionChange?: (messageId: string, version: number) => void;
   /** 点击后向上翻页加载更早历史（UI 窗口化） */
   onLoadEarlier?: () => void;
   /** 是否还有更早历史可加载；false 时隐藏入口 */
@@ -56,6 +72,9 @@ export function ConversationView({
   messages,
   onRecall,
   onRegenerate,
+  onEdit,
+  conversation,
+  onVersionChange,
   onLoadEarlier,
   hasMoreHistory,
   onToast,
@@ -118,15 +137,11 @@ export function ConversationView({
   }, [messages, onScrolledFromTopChange, scrollToBottom]);
 
   let lastUserMessageIndex = -1;
-  let lastAssistantMessageIndex = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (lastAssistantMessageIndex === -1 && messages[index]?.role === "assistant") {
-      lastAssistantMessageIndex = index;
-    }
     if (lastUserMessageIndex === -1 && messages[index]?.role === "user") {
       lastUserMessageIndex = index;
     }
-    if (lastUserMessageIndex !== -1 && lastAssistantMessageIndex !== -1) {
+    if (lastUserMessageIndex !== -1) {
       break;
     }
   }
@@ -149,16 +164,18 @@ export function ConversationView({
           onRecall={message.role === "user" && index === lastUserMessageIndex ? onRecall : undefined}
           onRegenerate={
             message.role === "assistant" &&
-            index === lastAssistantMessageIndex &&
             onRegenerate !== undefined
               ? () => onRegenerate(message.id)
               : undefined
           }
+          onEdit={message.role === "user" && onEdit ? (text) => onEdit(message.id, text) : undefined}
+          versions={conversation ? branchVersions(conversation, message) : undefined}
+          onVersionChange={onVersionChange ? (version) => onVersionChange(message.id, version) : undefined}
           onToast={onToast}
         />
       </li>
     ),
-    [handleImageLoad, imageUrls, lastAssistantMessageIndex, lastUserMessageIndex, locale, onRecall, onRegenerate, onToast, showSources],
+    [handleImageLoad, imageUrls, lastUserMessageIndex, locale, onRecall, onRegenerate, onToast, showSources, onEdit, onVersionChange, conversation],
   );
 
   const skillsCard =

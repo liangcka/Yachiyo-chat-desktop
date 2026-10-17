@@ -90,12 +90,13 @@ pub fn handle_chat_stream(
     key_store: Arc<KeyStore>,
     workspace_manager: Arc<WorkspaceManager>,
     approvals: Arc<crate::gateway::agent::permission::ApprovalRegistry>,
+    mcp_manager: Arc<crate::mcp::McpManager>,
 ) -> impl Stream<Item = Result<String, axum::Error>> {
     stream! {
         // Agent 模式分流：多步循环由专用运行时承载，本函数只保留纯聊天路径
         if request.agent.as_ref().map(|a| a.enabled).unwrap_or(false) {
             let mut inner = Box::pin(agent::runtime::run_agent_chat_stream(
-                client, request, key_store, workspace_manager, approvals,
+                client, request, key_store, workspace_manager, approvals, mcp_manager,
             ));
             while let Some(item) = inner.next().await {
                 yield item;

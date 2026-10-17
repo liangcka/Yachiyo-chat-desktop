@@ -1,30 +1,50 @@
 pub mod crypto;
 pub mod gateway;
+pub mod mcp;
 pub mod server;
 pub mod tools;
 pub mod types;
 
 use crypto::keys::KeyStore;
-use server::http::start_local_server;
+use server::http::{generate_gateway_token, start_local_server};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 use tools::WorkspaceManager;
 use tracing::info;
 
 pub struct DesktopState {
     pub key_store: Arc<KeyStore>,
     pub workspace_manager: Arc<WorkspaceManager>,
+    pub mcp_manager: Arc<mcp::McpManager>,
     pub http_client: reqwest::Client,
     pub server_port: AtomicU16,
+    pub gateway_token: String,
 }
+
+/// 桌面端 IPC 工具白名单：与前端 `executeDesktopAgentTool` 的实际调用点对齐
+/// （编辑器读写与 diff 审阅、终端面板手敲命令、Git 状态）。
+/// webview 一旦被注入脚本劫持，也无法凭 IPC 触发未在白名单内的工具。
+const IPC_TOOL_WHITELIST: [&str; 5] = [
+    "read_file",
+    "write_file",
+    "git_status",
+    "git_diff",
+    "run_command",
+];
 
 #[tauri::command]
 fn get_server_port(state: State<DesktopState>) -> u16 {
     state.server_port.load(Ordering::SeqCst)
+}
+
+/// 本地 HTTP 网关的鉴权 token，由前端注入 `x-yachiyo-gateway-token` 请求头
+#[tauri::command]
+fn get_gateway_token(state: State<DesktopState>) -> String {
+    state.gateway_token.clone()
 }
 
 #[tauri::command]
@@ -66,8 +86,41 @@ async fn execute_agent_tool(
     name: String,
     arguments: serde_json::Value,
 ) -> Result<String, String> {
+    if !IPC_TOOL_WHITELIST.contains(&name.as_str()) {
+        return Err(format!(
+            "工具 '{}' 不在桌面端界面工具白名单内，请通过 Agent 对话流程调用。",
+            name
+        ));
+    }
     let root = state.workspace_manager.get_workspace_root();
-    tools::execute_tool_with_context(&name, &arguments, root.as_deref(), &state.http_client, None).await
+    let _lease = if tools::tool_risk(&name) == Some(tools::ToolRisk::Write) {
+        root.as_deref().map(|root| state.workspace_manager.acquire_workspace(root)).transpose()?
+    } else { None };
+    tools::execute_tool_with_context(
+        &name,
+        &arguments,
+        root.as_deref(),
+        &state.http_client,
+        None,
+        tools::ToolAuthorization::HumanInitiated,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn list_checkpoints(workspace: String) -> Result<Vec<gateway::agent::checkpoint::Checkpoint>, String> {
+    tauri::async_runtime::spawn_blocking(move || gateway::agent::checkpoint::CheckpointStore::list(std::path::Path::new(&workspace)))
+        .await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn restore_checkpoint(state: State<'_, DesktopState>, workspace: String, id: String) -> Result<(), String> {
+    let root = PathBuf::from(workspace);
+    let lease = state.workspace_manager.acquire_workspace(&root)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        gateway::agent::checkpoint::CheckpointStore::restore(&root, &id)
+    }).await.map_err(|e| e.to_string())?
 }
 
 /// UI 文件树懒加载：结构化目录条目（仅前端调用，不进 agent 工具 schema）
@@ -192,6 +245,139 @@ fn open_external_url(url: String) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+fn list_mcp_servers(state: State<DesktopState>) -> Vec<mcp::McpServerConfig> {
+    state.mcp_manager.list_servers()
+}
+
+#[tauri::command]
+fn get_mcp_server(state: State<DesktopState>, id: String) -> Option<mcp::McpServerConfig> {
+    state.mcp_manager.get_server(&id)
+}
+
+#[tauri::command]
+fn save_mcp_server(
+    state: State<DesktopState>,
+    config: mcp::McpServerConfig,
+) -> Result<(), String> {
+    state.mcp_manager.save_server(config)
+}
+
+#[tauri::command]
+fn delete_mcp_server(state: State<DesktopState>, id: String) -> Result<(), String> {
+    state.mcp_manager.delete_server(&id)
+}
+
+#[tauri::command]
+fn toggle_mcp_server(
+    state: State<DesktopState>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    state.mcp_manager.toggle_server(&id, enabled)
+}
+
+#[tauri::command]
+async fn test_mcp_server(
+    state: State<'_, DesktopState>,
+    config: mcp::McpServerConfig,
+) -> Result<Vec<mcp::McpTool>, String> {
+    state.mcp_manager.test_server_connection(&config).await
+}
+
+#[tauri::command]
+async fn get_mcp_server_status(
+    state: State<'_, DesktopState>,
+    id: String,
+) -> Result<mcp::McpServerStatus, String> {
+    state.mcp_manager.get_server_status(&id).await
+}
+
+#[tauri::command]
+fn import_claude_mcp_config(state: State<DesktopState>, json: String) -> Result<usize, String> {
+    state.mcp_manager.import_claude_config(&json)
+}
+
+#[tauri::command]
+fn export_claude_mcp_config(state: State<DesktopState>) -> Result<String, String> {
+    state.mcp_manager.export_claude_config()
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlOverlayPayload {
+    pub active: bool,
+    pub tool_name: String,
+    pub detail: String,
+}
+
+/// 显示全屏系统级电脑控制覆盖层，并向其同步控制状态
+#[tauri::command]
+fn show_control_overlay(
+    app: tauri::AppHandle,
+    tool_name: String,
+    detail: String,
+) -> Result<(), String> {
+    if let Some(overlay) = app.get_webview_window("control_overlay") {
+        let _ = overlay.emit(
+            "control_state_change",
+            ControlOverlayPayload {
+                active: true,
+                tool_name,
+                detail,
+            },
+        );
+        let _ = overlay.set_ignore_cursor_events(true);
+        let _ = overlay.show();
+        let _ = overlay.set_always_on_top(true);
+    }
+    Ok(())
+}
+
+/// 隐藏全屏系统级电脑控制覆盖层
+#[tauri::command]
+fn hide_control_overlay(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(overlay) = app.get_webview_window("control_overlay") {
+        let _ = overlay.emit(
+            "control_state_change",
+            ControlOverlayPayload {
+                active: false,
+                tool_name: String::new(),
+                detail: String::new(),
+            },
+        );
+        let _ = overlay.hide();
+    }
+    Ok(())
+}
+
+/// 切换全屏系统级覆盖层的鼠标点击穿透状态（悬停横幅时关闭穿透以允许点击接管，离开时开启穿透）
+#[tauri::command]
+fn set_overlay_ignore_cursor(app: tauri::AppHandle, ignore: bool) -> Result<(), String> {
+    if let Some(overlay) = app.get_webview_window("control_overlay") {
+        let _ = overlay.set_ignore_cursor_events(ignore);
+    }
+    Ok(())
+}
+
+/// 紧急接管电脑控制：向主窗口广播中断指令并关闭全屏覆盖层
+#[tauri::command]
+fn stop_active_control(app: tauri::AppHandle) -> Result<(), String> {
+    let _ = app.emit("emergency_stop_control", ());
+    if let Some(overlay) = app.get_webview_window("control_overlay") {
+        let _ = overlay.emit(
+            "control_state_change",
+            ControlOverlayPayload {
+                active: false,
+                tool_name: String::new(),
+                detail: String::new(),
+            },
+        );
+        let _ = overlay.hide();
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     info!("Starting Yachiyo Desktop App...");
@@ -203,15 +389,23 @@ pub fn run() {
         .build()
         .unwrap_or_default();
 
+    let mcp_manager = Arc::new(mcp::McpManager::new(None, http_client.clone()));
+
+    // token 在构建状态前同步生成，避免前端在网关就绪前来取不到凭据的竞态
+    let gateway_token = generate_gateway_token();
+
     let desktop_state = DesktopState {
         key_store: Arc::clone(&key_store),
         workspace_manager: Arc::clone(&workspace_manager),
+        mcp_manager: Arc::clone(&mcp_manager),
         http_client,
         server_port: AtomicU16::new(28888),
+        gateway_token: gateway_token.clone(),
     };
 
     let ks_for_server = Arc::clone(&key_store);
     let wm_for_server = Arc::clone(&workspace_manager);
+    let mcp_for_server = Arc::clone(&mcp_manager);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
@@ -227,7 +421,15 @@ pub fn run() {
 
             // 启动后台本地 HTTP 服务
             tauri::async_runtime::spawn(async move {
-                match start_local_server(ks_for_server, wm_for_server, 28888).await {
+                match start_local_server(
+                    ks_for_server,
+                    wm_for_server,
+                    mcp_for_server,
+                    gateway_token,
+                    28888,
+                )
+                .await
+                {
                     Ok((port, _handle)) => {
                         let state = app_handle.state::<DesktopState>();
                         state.server_port.store(port, Ordering::SeqCst);
@@ -280,12 +482,15 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_server_port,
+            get_gateway_token,
             list_configured_keys,
             save_api_key,
             delete_api_key,
             get_workspace_root,
             set_workspace_root,
             execute_agent_tool,
+            list_checkpoints,
+            restore_checkpoint,
             list_workspace_entries,
             read_head_file,
             pick_folder,
@@ -295,6 +500,19 @@ pub fn run() {
             toggle_maximize_window,
             is_window_maximized,
             search_workspace_files,
+            list_mcp_servers,
+            get_mcp_server,
+            save_mcp_server,
+            delete_mcp_server,
+            toggle_mcp_server,
+            test_mcp_server,
+            get_mcp_server_status,
+            import_claude_mcp_config,
+            export_claude_mcp_config,
+            show_control_overlay,
+            hide_control_overlay,
+            set_overlay_ignore_cursor,
+            stop_active_control,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,99 +1,68 @@
-# Yachiyo Chat 架构分轨与端侧隔离指南
+# 桌面运行时与隔离边界
 
-本项目采用 **双轨隔离架构（Dual-Track Isolated Architecture）**，使 **📱 手机移动端 / Web 端** 与 **💻 电脑桌面独立端** 在保持角色人设与星空 UI 一致的前提下，各自享有完全独立、互不干扰的运行时、部署流与安全沙箱。
+当前前端统一使用 `DesktopLayout`，服务于 Tauri 原生桌面和 PC 浏览器。两种运行时共享布局、主题、会话和设置界面，后端连接方式由 `src/services/app-platform.ts` 与 API 路由适配层决定，不按屏幕尺寸切换移动版界面。
 
----
+## 1. 运行时结构
 
-## 1. 架构总览图
-
-```
-                          ┌──────────────────────────┐
-                          │   UI 交互层 (src/)       │
-                          │   星空UI / i18n / 会话存储│
-                          └────────────┬─────────────┘
-                                       │ 平台探针 (app-platform.ts)
-                    ┌──────────────────┴──────────────────┐
-                    ▼                                     ▼
-      📱 手机端 / 网页端 (Cloud-Native)       💻 电脑桌面端 (Standalone Local)
-      ──────────────────────────────       ────────────────────────────────
-      • 部署于 Cloudflare Pages            • 本地 Tauri v2 + Rust 核心
-      • 边缘云函数 (functions/)             • 内嵌 Axum 本地网关 (127.0.0.1:28888)
-      • 访问码鉴权与边缘限流               • 6 家 LLM 厂商本机直连 (脱离 CF)
-      • Capacitor Android APK 壳           • 本地 AES-256 加密密钥存储
-      • PWA 离线 Service Worker            • 工作区白名单沙箱 + Agent 终端干活工具
-                    ▲                                     ▲
-                    └──────────────┬──────────────────────┘
-                                   │ WSS 长连接隧道 (持有 Token 鉴权)
-                                   ▼
-                    🌐 远程中继 Worker (relay-worker/)
-                    ───────────────────────────────────
-                    • Cloudflare Durable Objects 转发
-                    • 手机外出时远程访问家里电脑 Agent
+```text
+React 桌面界面（src/views/desktop/）
+  ├─ Tauri 原生窗口
+  │    └─ 本地 Rust / Axum 网关 → 模型 Provider、工作区工具、权限审批
+  └─ PC 浏览器 / 已安装 PWA
+       └─ Cloudflare Pages Functions → 会话鉴权、模型转发、KV 限流、联网搜索
 ```
 
----
+浏览器显示桌面界面，不代表浏览器具有本机文件系统和终端执行权限。本地 Agent 工具依赖桌面网关与用户选择的工作区。
 
-## 2. 目录职责与代码物理隔离
+## 2. 目录职责
 
-| 目录 / 文件 | 归属端 | 作用与隔离原则 |
-| :--- | :--- | :--- |
-| `src-tauri/` | 💻 **电脑端** | **桌面独立内核**：Rust 实现的 Axum 本地 HTTP 网关、Agent 工具沙箱 (`fs`, `shell`, `git`, `web`)、AES-256 加密存储、系统托盘管理。手机端构建时完全不涉及此目录。 |
-| `src/components/desktop/` | 💻 **电脑端** | **桌面专属 UI**：工作区面板（`WorkspacePanel`）、文件树浏览器、终端日志输出。在手机端隐藏或仅在打开对应面板时展示。 |
-| `src/components/tools/` | 💻 **电脑端** | **Agent 工具状态卡片**（`ToolCard`）：展示智能体执行步骤与输出日志折叠。 |
-| `functions/` | 📱 **手机/Web 端** | **Cloudflare 边缘云函数**：负责 Pages 网页版与 APK 壳的云端 `/api/chat`、`/api/session`、KV 速率限制。电脑桌面端完全不经过此目录。 |
-| `android/` | 📱 **手机端** | **Capacitor 原生 Android 工程**：用于编译输出 Android APK 安装包。 |
-| `relay-worker/` | 🌐 **中继服务** | **Durable Objects 中继 Worker**：独立工程与独立配置，仅用于建立手机与电脑间的安全加密隧道。 |
-| `src/` (通用部分) | 🌐 **共享层** | **响应式星空前端**：React 19、Dexie IndexedDB、虚拟列表、双语 i18n 字典，自动根据屏幕与平台适配。 |
+| 目录 / 文件 | 职责 |
+| --- | --- |
+| `src/views/desktop/` | 桌面顶栏、侧栏、对话 / 编辑器切换、成果与工作区面板 |
+| `src/components/desktop/` | 项目选择、文件树、编辑器、审阅及终端等桌面组件 |
+| `src/app/` | 会话状态、生命周期和前端业务控制器 |
+| `src-tauri/` | Tauri 窗口、Rust 网关、本地工具与凭据存储 |
+| `functions/` | PC 浏览器使用的 Cloudflare Pages Functions |
+| `relay-worker/` | 独立的远程中继服务；不是桌面 UI 的启动前提 |
+| `android/`、`capacitor.config.ts` | 保留的历史 Android 原生工程与配置；不提供独立移动版界面 |
 
----
+`MobileLayout` 与闲置设备模式 Hook 已移除。原生平台适配、共享组件和 Capacitor 依赖继续保留，日常桌面开发不修改 Android 原生代码或构建配置。`public/live2d/` 为保留的历史素材，应用不加载其脚本、模型或样式。
 
-## 3. 分轨指令与工作流
+## 3. 开发与构建
 
-### 📱 手机端 / Web 端指令
+### Tauri 原生桌面
+
 ```powershell
-# 1. 网页前端本地调试 (Vite)
-npm run dev
-
-# 2. 模拟 Cloudflare Pages 边缘环境 (带 KV 限流)
-npm run dev:pages
-
-# 3. 运行云函数单元测试 (零回归保证)
-npm run test:functions
-
-# 4. 同步并打包 Android APK 安装包
-npm run mob:sync
-npm run mob:build
+npm install
+npm run desktop:dev
 ```
 
-### 💻 电脑桌面独立端指令
+该命令启动前端开发服务、原生窗口及桌面网关。Rust 网关与工具修改后执行 `npm run test:desktop`；生成安装包使用 `npm run desktop:build`。`tauri:dev`、`tauri:build` 是对应别名。
+
+### PC 浏览器联调
+
 ```powershell
-# 1. 启动桌面端开发模式 (Vite 热重载 + 原生窗口)
-npm run desktop:dev  # (或 npm run tauri:dev)
-
-# 2. 运行桌面端 Rust 网关与 Agent 工具单元测试
-npm run test:desktop
-
-# 3. 打包生成 Windows 原生安装包 (.msi / .exe)
-npm run desktop:build # (或 npm run tauri:build)
+npm run dev:mock
 ```
 
-### 🌐 远程中继 Worker 指令
-```powershell
-# 1. 中继 Worker 本地调试
-npm run relay:dev
+Mock 模式包含本地 Pages Functions 与 KV 模拟。访问终端输出的地址，应用会使用 `yachiyo-local-access` 在后台建立开发会话。需要真实云函数环境变量时使用 `npm run dev:pages`。
 
-# 2. 部署中继 Worker 到 Cloudflare
-npm run relay:deploy
-```
+`npm run dev` 只启动 Vite 前端，即使配置了 API 代理，也需要另行运行对应网关；不能单独用于完整接口联调。
 
----
+### 验证范围
 
-## 4. 安全与数据隔离保证
+| 修改内容 | 必需验证 |
+| --- | --- |
+| 前端组件 / 动效 | `npm run test:unit`、`npm run build`、`npm run lint`，并检查浏览器交互 |
+| Functions | `npm run test:functions` |
+| Rust / Tauri | `npm run test:desktop` |
+| 虚拟列表 / 长列表 | `npm run test:perf` |
 
-1. **API Key 隔离**：
-   - 手机网页端：使用 Cloudflare 环境变量或保存在本地 IndexedDB（仅限当前浏览器）。
-   - 电脑桌面端：使用机器盐生成的 AES-256-GCM 本地加密文件（`%APPDATA%/cn.amtale.yachiyo.desktop/keys.enc`），不上传任何云端。
-2. **工作区沙箱隔离**：
-   - 桌面 Agent 工具的所有读写与命令均限制在用户指定的 `WorkspaceRoot` 物理目录内，严格防止 `../` 路径穿越与破坏性高危系统指令。
-3. **零云端依赖**：
-   - 电脑端运行无需 Cloudflare 账号或边缘服务存活，只要电脑联网即可直连 AI 模型完成全部工作。
+## 4. 数据与权限
+
+- 聊天历史、图片、记忆与用户资料保存在当前设备的本地存储中；浏览器与 Tauri WebView 的存储空间独立，不会自动同步。
+- 桌面凭据由 Rust 本地存储管理；浏览器个人模型配置只保存在当前浏览器，调用时通过相应 API 转发。
+- 本地文件、终端与 Git 工具受工作区边界和权限审批约束。展开工作区面板本身不会授予目录访问权限。
+- 桌面本地模式通过本机网关连接模型，无需依赖 Cloudflare Pages；浏览器模式需要相应的 Pages Functions 服务。
+
+具体操作见 [桌面使用指南](DESKTOP_GUIDE.md)。历史设计记录保留在 `.agents/notes/`，涉及移动端和 Live2D 的旧方案不代表当前交付范围。

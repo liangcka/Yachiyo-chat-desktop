@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Folder, FolderPlus, FolderX, Settings } from "lucide-react";
+import { Check, ChevronDown, Folder, FolderCode, FolderPlus, FolderX, Settings, X } from "lucide-react";
 import {
   getProjectDisplayName,
   projectManager,
@@ -8,7 +8,7 @@ import {
 
 export interface ProjectSelectorProps {
   /** 触发样式变体：'composer' (对话框上方项目切换器，对标参考图), 'chip' (胶囊标签), 'new-chat' (旧版侧栏新建对话), 'header' (顶栏) */
-  variant?: "composer" | "chip" | "new-chat" | "header";
+  variant?: "composer" | "chip" | "new-chat" | "header" | "sidebar" | "rail";
   label?: string;
   className?: string;
   /** 选择项目后的回调 */
@@ -122,11 +122,23 @@ export function ProjectSelector({
       data-testid="project-selector"
     >
       {/* 触发按钮 */}
-      {variant === "composer" || variant === "chip" ? (
+      {variant === "rail" ? (
+        <button
+          type="button"
+          className="desktop-sidebar__rail-btn"
+          onClick={handleToggle}
+          aria-haspopup="menu"
+          aria-expanded={isOpen}
+          aria-label="工作区项目"
+          title={`工作区项目：${activeDisplayName}`}
+        >
+          <FolderCode size={17} />
+        </button>
+      ) : variant === "composer" || variant === "chip" || variant === "sidebar" ? (
         <button
           type="button"
           className={
-            variant === "composer"
+            variant === "composer" || variant === "sidebar"
               ? `project-selector__composer-trigger ${isOpen ? "project-selector__composer-trigger--open" : ""}`
               : "desktop-context-chip project-selector__chip-trigger"
           }
@@ -156,7 +168,6 @@ export function ProjectSelector({
             title="新建对话 (Ctrl+N)"
           >
             <span className="desktop-sidebar__new-btn-label">{buttonLabel}</span>
-            <kbd className="desktop-sidebar__kbd">^N</kbd>
           </button>
           <button
             type="button"
@@ -192,6 +203,7 @@ export function ProjectSelector({
                   tabIndex={0}
                   onClick={() => void handleSelectProject(projectPath)}
                   onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
                       void handleSelectProject(projectPath);
@@ -202,20 +214,30 @@ export function ProjectSelector({
                   <span className="project-dropdown__name" title={projectPath}>
                     {name}
                   </span>
-                  {isActive ? (
-                    <div className="project-dropdown__active-actions">
-                      <button
+                  <div className="project-dropdown__active-actions">
+                      {isActive && onOpenSettings ? <button
                         type="button"
                         className="project-dropdown__action-icon"
                         onClick={handleGearClick}
-                        title="项目配置"
-                        aria-label="项目配置"
+                        title="打开文件与终端"
+                        aria-label="打开文件与终端"
                       >
                         <Settings size={14} />
+                      </button> : null}
+                      {isActive ? <Check size={14} className="project-dropdown__check" /> : null}
+                      <button
+                        type="button"
+                        className="project-dropdown__action-icon"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          projectManager.removeRecentProject(projectPath);
+                        }}
+                        title="从最近项目中移除"
+                        aria-label={`从最近项目中移除 ${name}`}
+                      >
+                        <X size={13} />
                       </button>
-                      <Check size={14} className="project-dropdown__check" />
-                    </div>
-                  ) : null}
+                  </div>
                 </div>
               );
             })}
@@ -253,6 +275,12 @@ export function ProjectSelector({
 
           {/* 3. 无项目选项 */}
           <div className="project-dropdown__section project-dropdown__section--empty">
+            {recentProjects.length > 0 ? (
+              <button type="button" className="project-dropdown__item" role="menuitem" onClick={() => projectManager.clearRecentProjects()}>
+                <X size={15} className="project-dropdown__icon" />
+                <span className="project-dropdown__name">清空最近项目</span>
+              </button>
+            ) : null}
             <button
               type="button"
               className={`project-dropdown__item ${!activeProject ? "project-dropdown__item--active" : ""}`}

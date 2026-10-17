@@ -1,5 +1,8 @@
+import { REQUEST_CHARACTER_BUDGET, shouldCompressContext } from "../domain/context-budget";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import type { ChatMessage, ChatSource, Conversation, Locale, StoredImage, TokenUsage, ToolStep } from "../domain/chat";
+import type { ChatMessage, ChatSource, Conversation, Locale, MessageContentSegment, StoredImage, TokenUsage, ToolStep } from "../domain/chat";
+import { archiveBranch, restoreBranch } from "../domain/message-branches";
+import { appendContentSegment, finishThoughtSegment } from "../domain/message-content";
 import type { ActiveLlmConfig } from "../domain/llm";
 import type { SkillDefinition } from "../skills";
 import { desktopFileReader, expandFileReferences, hasFileReferences } from "../features/file-reference/expand-file-references";
@@ -39,6 +42,7 @@ export interface ChatRepository {
     options?: { beforeCreatedAt?: number; limit?: number },
   ): Promise<ChatMessage[]>;
   putMessage(message: ChatMessage): Promise<void>;
+  saveBranchState(conversation: Conversation, messages: ChatMessage[]): Promise<void>;
   updateConversationSummary(
     id: string,
     summary: string,
@@ -93,6 +97,8 @@ export interface ChatController extends ChatState {
   stop(): Promise<void>;
   recall(): Promise<RecalledMessageData | undefined>;
   regenerate(messageId?: string): Promise<void>;
+  editMessage(messageId: string, text: string): Promise<void>;
+  switchBranch(messageId: string, version: number): Promise<void>;
   compressConversation(manual?: boolean): Promise<boolean>;
   updateUserMemory(memory: string): Promise<boolean>;
   newConversation(): Promise<void>;
@@ -108,12 +114,10 @@ export interface ChatController extends ChatState {
   setPendingImage(image?: StoredImage): void;
   setOnline(online: boolean): void;
   clearError(): void;
-  /** Agent 运行模式：auto (自动判定) | on (总是开启) | off (已关闭) */
-  agentMode: "auto" | "on" | "off";
-  /** 兼容原有布尔语义：agentMode !== "off" */
+  agentMode: "readonly" | "confirm" | "full_auto";
   agentEnabled: boolean;
-  /** 循环切换 Agent 模式：auto -> on -> off */
   toggleAgent(): void;
+  setExecutionMode(mode: "readonly" | "confirm" | "full_auto"): void;
   approvePermission(requestId: string, approved: boolean, sessionScope?: boolean): Promise<void>;
 }
 
@@ -150,6 +154,7 @@ interface ActiveRun {
   sources?: ReadonlyArray<ChatSource>;
   /** Agent 工具步骤缓冲（onToolCall 追加、onToolResult 回填），终态快照进消息 */
   toolSteps: MutableToolStep[];
+  contentSegments: ReadonlyArray<MessageContentSegment>;
   timer?: ReturnType<typeof setTimeout>;
   token: number;
 }
@@ -159,8 +164,8 @@ const partialPersistenceInterval = 250;
 const historyWindowSize = 50;
 const historyLoadStep = 30;
 /** 流式 delta/thought 用 requestAnimationFrame 合并后再 dispatch，避免逐 chunk 触发全列表 reducer */
-const maximumRequestCharacters = 24_000;
-const maximumRequestMessageCharacters = 4_000;
+const maximumRequestCharacters = REQUEST_CHARACTER_BUDGET;
+const maximumRequestMessageCharacters = REQUEST_CHARACTER_BUDGET;
 const maximumRequestMessages = 20;
 /** 未压缩历史消息达到该数量时，发送前自动触发增量压缩（为摘要/长期记忆前缀预留槽位） */
 const compressionTriggerUncompressedMessages = maximumRequestMessages - 4;
@@ -169,6 +174,7 @@ interface PendingStreamDelta {
   messageId: string;
   text: string;
   type: "delta" | "thought-delta";
+  contentSegments: ReadonlyArray<MessageContentSegment>;
 }
 
 interface StreamBatcher {
@@ -181,7 +187,7 @@ interface StreamBatcher {
 function createStreamBatcher(
   emitAction: (action: ChatAction) => void,
 ): StreamBatcher {
-  let pending = new Map<string, PendingStreamDelta>();
+  let pending: PendingStreamDelta[] = [];
   let frameHandle: number | undefined;
 
   const flush = () => {
@@ -189,9 +195,9 @@ function createStreamBatcher(
       cancelAnimationFrame(frameHandle);
       frameHandle = undefined;
     }
-    if (pending.size === 0) return;
-    const batch = [...pending.values()];
-    pending = new Map();
+    if (pending.length === 0) return;
+    const batch = pending;
+    pending = [];
     for (const action of batch) {
       emitAction(action);
     }
@@ -211,13 +217,12 @@ function createStreamBatcher(
 
   return {
     push(action) {
-      const key = `${action.type}:${action.messageId}`;
-      pending.set(key, {
-        ...pending.get(key),
-        text: (pending.get(key)?.text ?? "") + action.text,
-        messageId: action.messageId,
-        type: action.type,
-      });
+      const last = pending.at(-1);
+      if (last?.type === action.type && last.messageId === action.messageId) {
+        pending[pending.length - 1] = { ...action, text: last.text + action.text };
+      } else {
+        pending.push(action);
+      }
       if (frameHandle === undefined) return schedule();
       return false;
     },
@@ -285,6 +290,7 @@ function requestHistory(
   reserveCharacters = 0,
   maxMessages = maximumRequestMessages,
   compressedUpTo?: number,
+  oldestFirst = false,
 ): Array<{ message: ChatMessage; text: string }> {
   // 早于压缩边界的消息已被摘要取代，不再重复进入请求（retained-tail 语义）
   const eligible = messages.filter(
@@ -295,7 +301,8 @@ function requestHistory(
   const selected: Array<{ message: ChatMessage; text: string }> = [];
   let totalCharacters = reserveCharacters;
 
-  for (let index = eligible.length - 1; index >= 0 && selected.length < maxMessages; index -= 1) {
+  for (let offset = 0; offset < eligible.length && selected.length < maxMessages; offset += 1) {
+    const index = oldestFirst ? offset : eligible.length - 1 - offset;
     const message = eligible[index];
     if (message === undefined) continue;
     const text = truncateUnicode(message.text, maximumRequestMessageCharacters);
@@ -303,7 +310,8 @@ function requestHistory(
     if (!isLastMessage && text.trim().length === 0) continue;
     const characterLength = [...text].length;
     if (totalCharacters + characterLength > maximumRequestCharacters) break;
-    selected.unshift({ message, text });
+    if (oldestFirst) selected.push({ message, text });
+    else selected.unshift({ message, text });
     totalCharacters += characterLength;
   }
 
@@ -381,6 +389,7 @@ function overlayStreamedText(state: ChatState): ChatMessage[] {
     i === index
       ? {
           ...message,
+          ...(streaming.contentSegments !== undefined ? { contentSegments: streaming.contentSegments } : {}),
           ...(streaming.text !== undefined ? { text: message.text + streaming.text } : {}),
           thought:
             streaming.thought === undefined
@@ -418,65 +427,23 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   useEffect(() => {
     autoAiTitleRef.current = options.autoAiTitle ?? true;
   }, [options.autoAiTitle]);
-  // Agent 模式：桌面端支持 auto (自动判定，默认) | on (常开) | off (关闭)，并持久化到本地存储
-  const STORAGE_KEY_AGENT_MODE = "yachiyo_desktop_agent_mode_v2";
-  const [agentMode, setAgentMode] = useState<"auto" | "on" | "off">(() => {
-    if (!isDesktopApp()) return "off";
+  const [agentMode, setAgentMode] = useState<"readonly" | "confirm" | "full_auto">(() => {
     try {
-      const stored = typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY_AGENT_MODE) : null;
-      if (stored === "auto" || stored === "on" || stored === "off") {
-        return stored;
-      }
-      // 兼容迁移旧版布尔配置
-      const legacyStored = typeof window !== "undefined" ? localStorage.getItem("yachiyo_desktop_agent_enabled") : null;
-      if (legacyStored === "false") {
-        return "off";
-      }
-    } catch {
-      // 容错降级
-    }
-    // 桌面端默认开启「自动 Agent」模式（由 AI 自主决定是否调用工具）
-    return "auto";
+      const stored = localStorage.getItem("yachiyo_execution_mode");
+      if (stored === "readonly" || stored === "confirm" || stored === "full_auto") return stored;
+    } catch { /* 存储不可用时采用需确认模式。 */ }
+    return "confirm";
   });
   const agentModeRef = useRef(agentMode);
-  useEffect(() => {
-    agentModeRef.current = agentMode;
-  }, [agentMode]);
-  const agentEnabled = agentMode !== "off";
-
-  // 监听活跃项目切换：当选定项目且此前处于已显式关闭状态时，自动切入就绪的 auto 模式
-  useEffect(() => {
-    if (!isDesktopApp()) return;
-    const unsub = projectManager.subscribe((projState) => {
-      if (projState.activeProject) {
-        try {
-          const stored = localStorage.getItem(STORAGE_KEY_AGENT_MODE);
-          if (stored === null || stored === "off") {
-            setAgentMode("auto");
-            agentModeRef.current = "auto";
-          }
-        } catch {
-          setAgentMode("auto");
-          agentModeRef.current = "auto";
-        }
-      }
-    });
-    return unsub;
+  const agentEnabled = isDesktopApp();
+  const setExecutionMode = useCallback((mode: "readonly" | "confirm" | "full_auto") => {
+    agentModeRef.current = mode;
+    setAgentMode(mode);
+    try { localStorage.setItem("yachiyo_execution_mode", mode); } catch { /* 不影响当前会话。 */ }
   }, []);
-
   const toggleAgent = useCallback(() => {
-    setAgentMode((prev) => {
-      const next = prev === "auto" ? "on" : prev === "on" ? "off" : "auto";
-      agentModeRef.current = next;
-      try {
-        localStorage.setItem(STORAGE_KEY_AGENT_MODE, next);
-        localStorage.setItem("yachiyo_desktop_agent_enabled", String(next !== "off"));
-      } catch {
-        // 容错降级
-      }
-      return next;
-    });
-  }, []);
+    setExecutionMode(agentModeRef.current === "readonly" ? "confirm" : agentModeRef.current === "confirm" ? "full_auto" : "readonly");
+  }, [setExecutionMode]);
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const stateRef = useRef<ChatState>(initialChatState);
   const activeRef = useRef<ActiveRun | undefined>(undefined);
@@ -486,6 +453,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const runTokenRef = useRef(0);
   const sendingRef = useRef(false);
+  const sendTokenRef = useRef(0);
   const newConversationLockRef = useRef(false);
   const lastTimestampRef = useRef(0);
   const onConversationUpdatedRef = useRef(options.onConversationUpdated);
@@ -726,6 +694,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         maxHistoryMessages,
         stateRef.current.activeConversation?.compressedUpTo,
       );
+      if (history.length === 0 && messages.some(isHistoryMessage)) throw new ChatClientError("INVALID_REQUEST");
       const lastIndex = history.length - 1;
 
       // 每条历史消息可能展开为多条请求消息（agent 工具步骤序列），故 map 后 flat 展平
@@ -897,6 +866,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         // 终态（completed/stopped/failed）必须晚于所有已缓冲的流式增量落地
         streamBatcherRef.current?.flush();
         const latencyMs = Math.max(0, servicesRef.current.now() - run.startTime);
+        run.contentSegments = finishThoughtSegment(run.contentSegments, latencyMs);
         const finalUsage = usage ?? run.usage;
         const message: ChatMessage = {
           ...run.assistant,
@@ -907,6 +877,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           ...(run.model !== undefined ? { model: run.model } : {}),
           ...(finalUsage !== undefined ? { usage: finalUsage } : {}),
           latencyMs,
+          contentSegments: run.contentSegments,
           ...(status === "stopped" ? { interrupted: true } : {}),
           ...(truncated === true ? { truncated: true } : {}),
           ...(run.sources !== undefined ? { sources: run.sources } : {}),
@@ -916,15 +887,16 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         };
         if (mountedRef.current) {
           if (status === "complete") {
-            emit({ messageId: run.assistant.id, type: "completed", usage: finalUsage, latencyMs });
+            emit({ messageId: run.assistant.id, type: "completed", usage: finalUsage, latencyMs, contentSegments: run.contentSegments });
           } else if (status === "stopped") {
-            emit({ messageId: run.assistant.id, type: "stopped", latencyMs });
+            emit({ messageId: run.assistant.id, type: "stopped", latencyMs, contentSegments: run.contentSegments });
           } else {
             emit({
               errorCode: errorCode ?? "SERVICE_UNAVAILABLE",
               messageId: run.assistant.id,
               type: "failed",
               latencyMs,
+              contentSegments: run.contentSegments,
             });
           }
         }
@@ -1004,6 +976,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       history: ChatMessage[],
       user: ChatMessage | undefined,
       pendingImage?: StoredImage,
+      branch?: { branchRootId: string; branchVersion: number },
+      preparedAssistant?: ChatMessage,
     ): Promise<void> => {
       const activeConfig = activeLlmConfigRef.current;
       const currentProvider = activeConfig?.provider ?? "stepfun";
@@ -1015,11 +989,13 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         createdAt: nextTimestamp(),
         id: servicesRef.current.id(),
         role: "assistant",
-        status: "streaming",
+        ...branch,
         text: "",
         provider: currentProvider,
         model: currentModel,
         ...(currentSkillNames.length > 0 ? { skills: currentSkillNames } : {}),
+        ...preparedAssistant,
+        status: "streaming",
       };
 
       const run: ActiveRun = {
@@ -1031,6 +1007,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         model: currentModel,
         startTime: servicesRef.current.now(),
         toolSteps: [],
+        contentSegments: [],
         token: ++runTokenRef.current,
       };
       activeRef.current = run;
@@ -1065,6 +1042,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             ...run.assistant,
             status: "streaming",
             text: run.text,
+            contentSegments: run.contentSegments,
             ...(run.thought !== undefined ? { thought: run.thought } : {}),
             ...(run.provider !== undefined ? { provider: run.provider } : {}),
             ...(run.model !== undefined ? { model: run.model } : {}),
@@ -1103,11 +1081,11 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             ...(webSearchEnabledRef.current === true && webSearchSmartRef.current === true
               ? { smartSearch: true }
               : {}),
-            ...(agentModeRef.current !== "off" && isDesktopApp()
+            ...(isDesktopApp()
               ? {
                   agent: {
                     enabled: true,
-                    auto: agentModeRef.current === "auto",
+                    executionMode: agentModeRef.current,
                     workspace: projectManager.getState().activeProject ?? undefined,
                   },
                 }
@@ -1116,17 +1094,25 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           {
             onDelta(text) {
               if (activeRef.current?.token !== run.token || text.length === 0) return;
+              const start = run.text.length;
               run.text += text;
-              streamBatcherRef.current?.push({ messageId: run.assistant.id, text, type: "delta" });
+              run.contentSegments = appendContentSegment(run.contentSegments,
+                { type: "text", start, end: run.text.length }, servicesRef.current.now() - run.startTime);
+              streamBatcherRef.current?.push({ messageId: run.assistant.id, text, type: "delta", contentSegments: run.contentSegments });
               schedulePartialPersistence();
             },
             onThought(text) {
               if (activeRef.current?.token !== run.token || text.length === 0) return;
+              const start = run.thought?.length ?? 0;
+              const atMs = servicesRef.current.now() - run.startTime;
               run.thought = (run.thought ?? "") + text;
+              run.contentSegments = appendContentSegment(run.contentSegments,
+                { type: "thought", start, end: run.thought.length, startedAtMs: atMs }, atMs);
               streamBatcherRef.current?.push({
                 messageId: run.assistant.id,
                 text,
                 type: "thought-delta",
+                contentSegments: run.contentSegments,
               });
               schedulePartialPersistence();
             },
@@ -1140,7 +1126,12 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
               if (activeRef.current?.token !== run.token) return;
               const argumentsJson = JSON.stringify(call.arguments ?? {});
               run.toolSteps.push({ id: call.id, name: call.name, argumentsJson });
-              emit({ messageId: run.assistant.id, call: { id: call.id, name: call.name, argumentsJson }, type: "tool-call" });
+              run.contentSegments = appendContentSegment(run.contentSegments,
+                { type: "tool", toolId: call.id }, servicesRef.current.now() - run.startTime);
+              // 工具边界前先提交 rAF 缓冲，避免稍后的增量覆盖工具位置。
+              streamBatcherRef.current?.flush();
+              emit({ messageId: run.assistant.id, call: { id: call.id, name: call.name, argumentsJson }, type: "tool-call", contentSegments: run.contentSegments });
+              schedulePartialPersistence();
             },
             onToolResult(result) {
               if (activeRef.current?.token !== run.token) return;
@@ -1154,6 +1145,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
                 result: { output: result.output, isError: result.isError, durationMs: result.durationMs },
                 type: "tool-result",
               });
+              schedulePartialPersistence();
             },
             onPermissionRequest(request) {
               if (activeRef.current?.token !== run.token) return;
@@ -1181,6 +1173,10 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             signal: run.controller.signal,
           },
         );
+        if (run.controller.signal.aborted) {
+          await finishRun(run, "stopped");
+          return;
+        }
         await finishRun(
           run,
           run.text.length === 0 ? "failed" : "complete",
@@ -1204,10 +1200,10 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   );
 
   const compressConversation = useCallback(
-    async (): Promise<boolean> => {
+    async (manual = true, allowSending = false): Promise<boolean> => {
       const snapshot = stateRef.current;
       if (
-        sendingRef.current ||
+        (sendingRef.current && !allowSending) ||
         snapshot.activeConversation === undefined ||
         snapshot.phase === "loading" ||
         snapshot.phase === "streaming" ||
@@ -1272,12 +1268,17 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
         const reservedSlots =
           (hasExistingSummary ? 2 : 0) + (hasExistingUserMemory ? 2 : 0) + 1;
+        const candidates = !manual && uncompressedCount > 4
+          ? snapshot.messages.filter((message) => isHistoryMessage(message) && (previousBoundary === undefined || message.createdAt > previousBoundary)).slice(0, -4)
+          : snapshot.messages;
         const history = requestHistory(
-          snapshot.messages,
+          candidates,
           reservedChars,
           maximumRequestMessages - reservedSlots,
           previousBoundary,
+          true,
         );
+        if (history.length === 0) { emit({ type: "clear-error" }); return false; }
 
         const requestMessages: StreamChatMessage[] = [];
         if (hasExistingSummary) {
@@ -1375,14 +1376,33 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         if (compressControllerRef.current === controller) {
           compressControllerRef.current = undefined;
         }
-        sendingRef.current = false;
+        if (!allowSending) sendingRef.current = false;
       }
     },
     [emit, nextTimestamp],
   );
 
+  const stop = useCallback(async (): Promise<void> => {
+    const compressController = compressControllerRef.current;
+    if (compressController !== undefined) {
+      compressControllerRef.current = undefined;
+      compressController.abort();
+      if (mountedRef.current) emit({ type: "clear-error" });
+    }
+    const run = activeRef.current;
+    if (run === undefined) return;
+    run.controller.abort();
+    await run.preparation.catch(() => undefined);
+    await finishRun(run, "stopped");
+  }, [emit, finishRun]);
+
   const send = useCallback(
     async (text: string): Promise<void> => {
+      if (!text.trim() && !stateRef.current.pendingImage) return;
+      if (stateRef.current.phase === "streaming") {
+        await stop();
+        sendingRef.current = false;
+      }
       const snapshot = stateRef.current;
       if (
         sendingRef.current ||
@@ -1399,19 +1419,17 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       if (normalized.length === 0 && snapshot.pendingImage === undefined) return;
 
       const targetConversationId = snapshot.activeConversation.id;
-      const currentMessages = snapshot.messages;
       sendingRef.current = true;
-        try {
+      const sendToken = ++sendTokenRef.current;
+      try {
         // 未压缩历史达到阈值时先增量压缩，再发送（为摘要/长期记忆前缀预留槽位）
-        if (
+        while (
           countUncompressedMessages(
-            currentMessages,
-            snapshot.activeConversation.compressedUpTo,
-          ) >= compressionTriggerUncompressedMessages
+            stateRef.current.messages,
+            stateRef.current.activeConversation?.compressedUpTo,
+          ) >= compressionTriggerUncompressedMessages || shouldCompressContext(stateRef.current.messages, stateRef.current.activeConversation?.compressedUpTo, stateRef.current.activeConversation?.summary)
         ) {
-          sendingRef.current = false;
-          await compressConversation();
-          sendingRef.current = true;
+          const compressed = await compressConversation(false, true);
 
           const currentSnapshot = stateRef.current;
           if (
@@ -1421,6 +1439,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           ) {
             return;
           }
+          if (!compressed) break;
         }
 
         const currentSnapshot = stateRef.current;
@@ -1449,10 +1468,10 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       } catch {
         if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
       } finally {
-        sendingRef.current = false;
+        if (sendTokenRef.current === sendToken) sendingRef.current = false;
       }
     },
-    [compressConversation, emit, nextTimestamp, startAssistant],
+    [compressConversation, emit, nextTimestamp, startAssistant, stop],
   );
 
   const retry = useCallback(async (): Promise<void> => {
@@ -1475,20 +1494,6 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       sendingRef.current = false;
     }
   }, [startAssistant]);
-
-  const stop = useCallback(async (): Promise<void> => {
-    const compressController = compressControllerRef.current;
-    if (compressController !== undefined) {
-      compressControllerRef.current = undefined;
-      compressController.abort();
-      if (mountedRef.current) emit({ type: "clear-error" });
-    }
-    const run = activeRef.current;
-    if (run === undefined) return;
-    run.controller.abort();
-    await run.preparation.catch(() => undefined);
-    await finishRun(run, "stopped");
-  }, [emit, finishRun]);
 
   const recall = useCallback(async (): Promise<RecalledMessageData | undefined> => {
     const snapshot = stateRef.current;
@@ -1559,84 +1564,65 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     }
   }, [emit]);
 
-  const regenerate = useCallback(
-    async (messageId?: string): Promise<void> => {
-      const snapshot = stateRef.current;
-      if (
-        sendingRef.current ||
-        snapshot.activeConversation === undefined ||
-        snapshot.phase === "loading" ||
-        snapshot.phase === "streaming" ||
-        snapshot.phase === "compressing" ||
-        snapshot.phase === "offline"
-      ) {
-        return;
+  const forkMessage = useCallback(async (messageId: string, text?: string): Promise<void> => {
+    const current = stateRef.current;
+    if (sendingRef.current || !current.activeConversation || ["loading", "streaming", "compressing", "offline"].includes(current.phase)) return;
+    if (text !== undefined && !text.trim()) return;
+    sendingRef.current = true;
+    try {
+      await persistQueueRef.current;
+      const messages = await servicesRef.current.repository.listMessages(current.activeConversation.id);
+      const index = messages.findIndex((message) => message.id === messageId);
+      const target = messages[index];
+      if (!target || (text !== undefined && target.role !== "user") || (text === undefined && target.role !== "assistant")) return;
+      const fork = archiveBranch(current.activeConversation, messages, target);
+      const preceding = messages.slice(0, index);
+      const branch = { branchRootId: fork.rootId, branchVersion: fork.version };
+      const user: ChatMessage | undefined = text === undefined ? undefined : {
+        ...target, ...branch, id: servicesRef.current.id(), text: text.trim(), createdAt: nextTimestamp(), status: "complete",
+      };
+      if (!user && !preceding.some((message) => message.role === "user")) return;
+      const preparedAssistant: ChatMessage | undefined = user ? undefined : {
+        conversationId: current.activeConversation.id, id: servicesRef.current.id(), createdAt: nextTimestamp(),
+        role: "assistant", status: "stopped", text: "", ...branch,
+      };
+      // 分支锚点与旧路径在同一事务提交，生成或后续写入失败仍能切回旧版本。
+      await servicesRef.current.repository.saveBranchState(fork.conversation, [...preceding, ...(user ? [user] : [preparedAssistant!])]);
+      if (stateRef.current.activeConversation?.id !== current.activeConversation.id || !mountedRef.current) return;
+      emit({ type: "conversation-selected", conversation: fork.conversation, messages: preceding, hasMoreHistory: false });
+      while (countUncompressedMessages(stateRef.current.messages, stateRef.current.activeConversation?.compressedUpTo) >= compressionTriggerUncompressedMessages || shouldCompressContext(stateRef.current.messages, stateRef.current.activeConversation?.compressedUpTo, stateRef.current.activeConversation?.summary)) {
+        const compressed = await compressConversation(false, true);
+        if (!mountedRef.current || stateRef.current.activeConversation?.id !== current.activeConversation.id) return;
+        if (!compressed) break;
       }
+      await startAssistant(user ? [...preceding, user] : preceding, user, undefined, user ? undefined : branch, preparedAssistant);
+      onConversationUpdatedRef.current?.();
+    } catch {
+      if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
+    } finally { sendingRef.current = false; }
+  }, [compressConversation, emit, nextTimestamp, startAssistant]);
 
-      const messages = snapshot.messages;
-      let targetIndex = -1;
-      if (messageId !== undefined) {
-        targetIndex = messages.findIndex(
-          (msg) => msg.id === messageId && msg.role === "assistant",
-        );
-      } else {
-        for (let index = messages.length - 1; index >= 0; index -= 1) {
-          if (messages[index]?.role === "assistant") {
-            targetIndex = index;
-            break;
-          }
-        }
-      }
-
-      if (targetIndex === -1) return;
-
-      const precedingMessages = messages.slice(0, targetIndex);
-      const hasPrecedingUser = precedingMessages.some((msg) => msg.role === "user");
-      if (!hasPrecedingUser) return;
-
-      const compressController = compressControllerRef.current;
-      if (compressController !== undefined) {
-        compressControllerRef.current = undefined;
-        compressController.abort();
-        if (mountedRef.current) emit({ type: "clear-error" });
-      }
-
-      const active = activeRef.current;
-      if (active !== undefined) {
-        activeRef.current = undefined;
-        if (active.timer !== undefined) clearTimeout(active.timer);
-        streamBatcherRef.current?.flush();
-        active.controller.abort();
-      }
-
-      sendingRef.current = true;
-      const conversationId = snapshot.activeConversation.id;
-      // 水位线 = 被重生成的 assistant 消息；它及其后的所有记录（含窗口外）定点删除
-      const targetMessage = messages[targetIndex]!;
-
-      try {
-        const task = persistQueueRef.current.then(async () => {
-          await servicesRef.current.repository.deleteMessagesFrom(
-            conversationId,
-            targetMessage.createdAt,
-          );
-        });
-        persistQueueRef.current = task.catch(() => undefined);
-        await task;
-
-        if (mountedRef.current) {
-          emit({ messages: precedingMessages, type: "messages-reverted" });
-        }
-
-        await startAssistant(precedingMessages, undefined);
-      } catch {
-        if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
-      } finally {
-        sendingRef.current = false;
-      }
-    },
-    [emit, startAssistant],
-  );
+  const editMessage = useCallback((messageId: string, text: string) => forkMessage(messageId, text), [forkMessage]);
+  const regenerate = useCallback(async (messageId?: string): Promise<void> => {
+    const target = messageId ?? [...stateRef.current.messages].reverse().find((message) => message.role === "assistant")?.id;
+    if (target) await forkMessage(target);
+  }, [forkMessage]);
+  const switchBranch = useCallback(async (messageId: string, version: number): Promise<void> => {
+    const current = stateRef.current;
+    if (sendingRef.current || !current.activeConversation || !["idle", "error"].includes(current.phase)) return;
+    sendingRef.current = true;
+    try {
+      await persistQueueRef.current;
+      const messages = await servicesRef.current.repository.listMessages(current.activeConversation.id);
+      const target = messages.find((message) => message.id === messageId);
+      if (!target) return;
+      const restored = restoreBranch(current.activeConversation, messages, target, version);
+      await servicesRef.current.repository.saveBranchState(restored.conversation, restored.messages);
+      if (mountedRef.current && stateRef.current.activeConversation?.id === current.activeConversation.id)
+        emit({ type: "conversation-selected", conversation: restored.conversation, messages: restored.messages, hasMoreHistory: false });
+    } catch { if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" }); }
+    finally { sendingRef.current = false; }
+  }, [emit]);
 
   const stopAndWait = useCallback(async () => {
     await stop();
@@ -1857,6 +1843,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     pendingPermission: state.pendingPermission,
     recall,
     regenerate,
+    editMessage,
+    switchBranch,
+    setExecutionMode,
     retry,
     selectConversation,
     renameConversation,
