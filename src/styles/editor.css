@@ -359,18 +359,18 @@
   gap: 6px;
   padding: 8px 16px;
   border-radius: 8px;
-  background: var(--yx-alias-button-primary-fill, #3b82f6);
-  color: #fff;
+  background: var(--yx-alias-button-primary-fill);
+  color: var(--yx-alias-button-primary-text);
   font-size: 13px;
   font-weight: 500;
   border: none;
   cursor: pointer;
-  transition: opacity 0.15s ease;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-hover), opacity 0.15s ease;
   margin-top: 4px;
 }
 
 .editor-view__empty-btn:hover {
-  opacity: 0.9;
+  background: var(--yx-alias-button-primary-hover);
 }
 
 .editor-view__empty-hints {
@@ -440,19 +440,40 @@
 }
 
 .review-panel--empty {
-  position: relative;
+  display: flex;
+  flex: 1;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 32px 24px;
   color: var(--text-muted);
   text-align: center;
-  font-size: 13px;
 }
 
-.review-empty-refresh {
-  position: absolute;
-  top: 12px;
-  right: 12px;
+.review-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 280px;
+}
+
+.review-empty-icon {
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.review-empty-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.review-empty-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 
 .review-panel__toolbar {

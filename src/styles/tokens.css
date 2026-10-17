@@ -20,6 +20,7 @@
   --text-muted: #9b9b9b;
   --text-dim: #707070;
   --danger: #e05252;
+  --warning: #f59e0b;
 
   --interactive-hover: rgba(255, 255, 255, 0.05);
   --interactive-active: rgba(255, 255, 255, 0.08);
@@ -46,6 +47,13 @@
   --accent-brand-soft: rgba(75, 139, 245, 0.12);
 
   --focus-ring: #4b8bf5;
+
+  --yx-alias-button-primary-fill: #ffffff;
+  --yx-alias-button-primary-text: #1a1a1a;
+  --yx-alias-button-primary-hover: #e5e5e5;
+  --dsw-alias-button-primary-fill: var(--yx-alias-button-primary-fill);
+  --dsw-alias-button-primary-text: var(--yx-alias-button-primary-text);
+  --dsw-alias-button-primary-hover: var(--yx-alias-button-primary-hover);
 
   /* 角色动作与专属视觉 Tokens */
   --yachiyo-emote-bg: rgba(168, 85, 247, 0.14);
@@ -126,6 +134,7 @@
   --text-muted: #9b9b9b;
   --text-dim: #707070;
   --danger: #e05252;
+  --warning: #f59e0b;
 
   --interactive-hover: rgba(255, 255, 255, 0.05);
   --interactive-active: rgba(255, 255, 255, 0.08);
@@ -163,7 +172,7 @@
   --yx-alias-bg-layer-2: #282828;
   --yx-alias-bg-layer-3: #2d2d2d;
   --yx-alias-bg-overlay: #212121;
-  --yx-alias-bg-mask: rgba(0, 0, 0, 0.65);
+  --yx-alias-bg-mask: rgba(0, 0, 0, 0.88);
 
   --yx-alias-border-l1: rgba(255, 255, 255, 0.08);
   --yx-alias-border-l2: rgba(255, 255, 255, 0.12);
@@ -178,8 +187,12 @@
   --yx-alias-interactive-bg-active: rgba(255, 255, 255, 0.08);
   --yx-alias-interactive-bg-hover-accent: rgba(75, 139, 245, 0.12);
 
-  --yx-alias-button-primary-fill: var(--accent-brand);
-  --yx-alias-button-primary-hover: #3b7ce6;
+  --yx-alias-button-primary-fill: #ffffff;
+  --yx-alias-button-primary-text: #1a1a1a;
+  --yx-alias-button-primary-hover: #e5e5e5;
+  --dsw-alias-button-primary-fill: var(--yx-alias-button-primary-fill);
+  --dsw-alias-button-primary-text: var(--yx-alias-button-primary-text);
+  --dsw-alias-button-primary-hover: var(--yx-alias-button-primary-hover);
   --yx-alias-button-ghost-fill: transparent;
   --yx-alias-button-floating-fill: #262626;
   --yx-alias-button-floating-hover: rgba(255, 255, 255, 0.08);
@@ -210,7 +223,7 @@
   --dsw-alias-bg-layer-2: #282828;
   --dsw-alias-bg-layer-3: #2d2d2d;
   --dsw-alias-bg-overlay: #212121;
-  --dsw-alias-bg-mask-1: rgba(0, 0, 0, 0.65);
+  --dsw-alias-bg-mask-1: rgba(0, 0, 0, 0.88);
   --dsw-alias-border-inverted: rgba(255, 255, 255, 0.12);
   --dsw-alias-border-l1: rgba(255, 255, 255, 0.08);
   --dsw-alias-border-l2: rgba(255, 255, 255, 0.12);
@@ -267,6 +280,7 @@
   --text-muted: #6b6b6b;
   --text-dim: #8c8c8c;
   --danger: #d9383a;
+  --warning: #d97706;
 
   --interactive-hover: rgba(0, 0, 0, 0.04);
   --interactive-active: rgba(0, 0, 0, 0.07);
@@ -320,8 +334,12 @@
   --yx-alias-interactive-bg-active: rgba(0, 0, 0, 0.07);
   --yx-alias-interactive-bg-hover-accent: rgba(75, 139, 245, 0.10);
 
-  --yx-alias-button-primary-fill: var(--accent-brand);
-  --yx-alias-button-primary-hover: #3b7ce6;
+  --yx-alias-button-primary-fill: #1f1f1f;
+  --yx-alias-button-primary-text: #ffffff;
+  --yx-alias-button-primary-hover: #333333;
+  --dsw-alias-button-primary-fill: var(--yx-alias-button-primary-fill);
+  --dsw-alias-button-primary-text: var(--yx-alias-button-primary-text);
+  --dsw-alias-button-primary-hover: var(--yx-alias-button-primary-hover);
   --yx-alias-button-ghost-fill: transparent;
   --yx-alias-button-floating-fill: #ffffff;
   --yx-alias-button-floating-hover: rgba(0, 0, 0, 0.04);

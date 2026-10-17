@@ -42,8 +42,8 @@
   gap: 6px;
   padding: 4px 8px;
   border-radius: 7px;
-  font-size: 12.5px;
-  font-family: var(--ds-font-family-code);
+  font-size: 13px;
+  font-family: var(--dsw-font-family);
   color: var(--dsw-alias-label-secondary);
   text-align: left;
   width: 100%;
