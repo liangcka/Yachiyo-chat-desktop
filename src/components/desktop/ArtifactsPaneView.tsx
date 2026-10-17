@@ -97,7 +97,7 @@ export function ArtifactsPaneView({
         <div className="artifacts-pane__meta-left">
           <Layers size={14} className="artifacts-pane__meta-icon" />
           <span className="artifacts-pane__meta-title">产出工件与活动步骤</span>
-          <span className="artifacts-pane__count-badge">{artifacts.length}</span>
+          <span className="artifacts-pane__count-text">（{artifacts.length}）</span>
         </div>
         {onOpenReview ? (
           <button

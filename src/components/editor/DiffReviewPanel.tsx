@@ -20,6 +20,7 @@ type HunkDecision = "pending" | "accepted" | "rejected";
 export interface DiffReviewPanelProps {
   copy?: UiCopy;
   resolvedTheme: "light" | "dark";
+  refreshKey?: number;
 }
 
 function statusBadgeClass(status: GitChangeEntry["status"]): string {
@@ -34,7 +35,7 @@ function statusBadgeText(status: GitChangeEntry["status"]): string {
   return "M";
 }
 
-export function DiffReviewPanel({ copy, resolvedTheme }: DiffReviewPanelProps) {
+export function DiffReviewPanel({ copy, resolvedTheme, refreshKey: externalRefreshKey }: DiffReviewPanelProps) {
   const [changes, setChanges] = useState<GitChangeEntry[] | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [original, setOriginal] = useState("");
@@ -44,7 +45,8 @@ export function DiffReviewPanel({ copy, resolvedTheme }: DiffReviewPanelProps) {
   const [mode, setMode] = useState<"cards" | "compare">("cards");
   const [loadingFile, setLoadingFile] = useState(false);
   const [applying, setApplying] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [internalRefreshKey, setInternalRefreshKey] = useState(0);
+  const refreshKey = (externalRefreshKey ?? 0) + internalRefreshKey;
 
   const selected = changes?.find((c) => c.path === selectedPath) ?? null;
   const anyAccepted = decisions.some((d) => d === "accepted");
@@ -178,7 +180,7 @@ export function DiffReviewPanel({ copy, resolvedTheme }: DiffReviewPanelProps) {
       );
       const res = await executeDesktopAgentTool("write_file", { path: selectedPath, content: merged });
       if (!res.isError) {
-        setRefreshKey((key) => key + 1);
+        setInternalRefreshKey((key) => key + 1);
       }
     } finally {
       setApplying(false);
@@ -190,16 +192,13 @@ export function DiffReviewPanel({ copy, resolvedTheme }: DiffReviewPanelProps) {
   if (changes?.length === 0) {
     return (
       <section className="review-panel review-panel--empty" aria-label="变更审阅">
-        <p>{copy?.reviewEmpty ?? "工作区无未提交变更"}</p>
-        <button
-          type="button"
-          className="review-ghost-btn review-empty-refresh"
-          onClick={() => setRefreshKey((key) => key + 1)}
-          title={copy?.refreshFileTree ?? "刷新变更列表"}
-          aria-label={copy?.refreshFileTree ?? "刷新变更列表"}
-        >
-          <RefreshCw size={13} />
-        </button>
+        <div className="review-empty-state">
+          <GitCompareArrows size={36} className="review-empty-icon" />
+          <h3 className="review-empty-title">{copy?.reviewEmptyTitle ?? "没有未提交的改动"}</h3>
+          <p className="review-empty-desc">
+            {copy?.reviewEmptyDesc ?? "Agent 修改项目内的文件后，改动会显示在这里"}
+          </p>
+        </div>
       </section>
     );
   }
@@ -253,7 +252,7 @@ export function DiffReviewPanel({ copy, resolvedTheme }: DiffReviewPanelProps) {
           <button
             type="button"
             className="review-ghost-btn review-ghost-btn--icon"
-            onClick={() => setRefreshKey((key) => key + 1)}
+            onClick={() => setInternalRefreshKey((key) => key + 1)}
             title={copy?.refreshFileTree ?? "刷新变更列表"}
           >
             <RefreshCw size={13} />

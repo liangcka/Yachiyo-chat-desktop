@@ -402,10 +402,16 @@ export function App({ services, autoAiTitle }: AppProps) {
       if (errorCode === "SESSION_REQUIRED" && activeServices.session) {
         void activeServices.session.authenticate("yachiyo-local-access").catch(() => undefined);
       }
-      showToast(controllerErrorMessage(errorCode, copy), "error");
+      const isBannerError =
+        controller.phase === "error" &&
+        errorCode !== "DAILY_QUOTA_EXCEEDED" &&
+        errorCode !== "SESSION_REQUIRED";
+      if (!isBannerError) {
+        showToast(controllerErrorMessage(errorCode, copy), "error");
+      }
     }, 0);
     return () => clearTimeout(timeout);
-  }, [activeServices.session, controller.errorCode, copy, showToast]);
+  }, [activeServices.session, controller.errorCode, controller.phase, copy, showToast]);
 
   const handleImage = useCallback(
     (image: ProcessedImage) => {

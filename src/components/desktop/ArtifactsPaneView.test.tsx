@@ -92,7 +92,7 @@ describe("ArtifactsPaneView", () => {
 
     // 统计栏信息
     expect(screen.getByText("产出工件与活动步骤")).toBeInTheDocument();
-    expect(screen.getByText("4")).toBeInTheDocument();
+    expect(screen.getByText("（4）")).toBeInTheDocument();
 
     // 检查图片卡片
     expect(screen.getByText("多模态视觉图像")).toBeInTheDocument();

@@ -131,6 +131,12 @@ function TreeNode({
   );
 }
 
+const IGNORED_DIR_NAMES = new Set(["node_modules", ".git", ".pnpm-store", "dist"]);
+
+function filterIgnoredEntries(entries: WorkspaceEntry[]): WorkspaceEntry[] {
+  return entries.filter((e) => !IGNORED_DIR_NAMES.has(e.name));
+}
+
 export function FileTree({ copy, activePath, onOpenFile, onReferenceFile }: FileTreeProps) {
   const [rootEntries, setRootEntries] = useState<WorkspaceEntry[] | null>(null);
   const [entriesByDir, setEntriesByDir] = useState<ReadonlyMap<string, WorkspaceEntry[]>>(new Map());
@@ -150,7 +156,7 @@ export function FileTree({ copy, activePath, onOpenFile, onReferenceFile }: File
       return next;
     });
     if (entries === undefined) return;
-    setEntriesByDir((current) => new Map(current).set(dir, entries));
+    setEntriesByDir((current) => new Map(current).set(dir, filterIgnoredEntries(entries)));
   }, []);
 
   // 全树刷新由父组件经 key 重挂载实现（缓存与展开态随组件销毁一并清空）
@@ -160,7 +166,7 @@ export function FileTree({ copy, activePath, onOpenFile, onReferenceFile }: File
     void (async () => {
       const entries = await listWorkspaceEntries("");
       if (cancelled) return;
-      setRootEntries(entries ?? []);
+      setRootEntries(entries ? filterIgnoredEntries(entries) : []);
     })();
     return () => {
       cancelled = true;

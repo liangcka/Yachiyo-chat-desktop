@@ -3,12 +3,14 @@ import { History, RefreshCw, Undo2 } from "lucide-react";
 import { listCheckpoints, restoreCheckpoint, type Checkpoint } from "../../services/checkpoint-client";
 import { useProjectState } from "../../services/project-manager";
 
-interface CheckpointPanelProps {
+export interface CheckpointPanelProps {
   isRunning: boolean;
   onRestored?: () => void;
+  hideHeader?: boolean;
+  externalRefreshKey?: number;
 }
 
-export function CheckpointPanel({ isRunning, onRestored }: CheckpointPanelProps) {
+export function CheckpointPanel({ isRunning, onRestored, hideHeader, externalRefreshKey }: CheckpointPanelProps) {
   const { activeProject } = useProjectState();
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -34,7 +36,7 @@ export function CheckpointPanel({ isRunning, onRestored }: CheckpointPanelProps)
       }
     })();
     return () => { cancelled = true; };
-  }, [activeProject, refreshKey, isRunning]);
+  }, [activeProject, refreshKey, externalRefreshKey, isRunning]);
 
   const handleRestore = async (id: string): Promise<void> => {
     if (!activeProject || isRunning || restoring) return;
@@ -54,17 +56,19 @@ export function CheckpointPanel({ isRunning, onRestored }: CheckpointPanelProps)
 
   return (
     <section className="checkpoint-panel" aria-label="文件检查点">
-      <div className="checkpoint-panel__header">
-        <h3><History size={14} /> 检查点</h3>
-        <button
-          type="button"
-          className="workspace-panel__btn workspace-panel__btn--icon"
-          aria-label="刷新检查点"
-          title="刷新检查点"
-          disabled={restoring}
-          onClick={() => setRefreshKey((value) => value + 1)}
-        ><RefreshCw size={13} /></button>
-      </div>
+      {!hideHeader ? (
+        <div className="checkpoint-panel__header">
+          <h3><History size={14} /> 检查点</h3>
+          <button
+            type="button"
+            className="workspace-panel__btn workspace-panel__btn--icon"
+            aria-label="刷新检查点"
+            title="刷新检查点"
+            disabled={restoring}
+            onClick={() => setRefreshKey((value) => value + 1)}
+          ><RefreshCw size={13} /></button>
+        </div>
+      ) : null}
       {error ? <p className="checkpoint-panel__error" role="alert">{error}</p> : null}
       {!activeProject ? <p className="checkpoint-panel__hint">选择工作区后可查看文件检查点。</p> : null}
       {activeProject && checkpoints.length === 0 && !error ? <p className="checkpoint-panel__hint">Agent 修改文件前会自动保存检查点。</p> : null}

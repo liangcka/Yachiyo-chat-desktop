@@ -84,17 +84,6 @@ export function ModelSelect({
             {entries.length === 0 ? (
               <div className="dsh-model-select__empty">
                 <span>尚未配置 API Key</span>
-                <button
-                  type="button"
-                  className="dsh-model-select__settings-btn"
-                  onClick={() => {
-                    setOpen(false);
-                    onOpenSettings();
-                  }}
-                >
-                  <Cpu size={13} />
-                  <span>前往配置</span>
-                </button>
               </div>
             ) : (
               entries.map((entry) => {

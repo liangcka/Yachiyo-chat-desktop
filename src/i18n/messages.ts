@@ -94,6 +94,7 @@ export interface UiCopy {
   readonly recallSuccess: string;
   readonly copyText: string;
   readonly copied: string;
+  readonly expandMessage: string;
   readonly regenerate: string;
   readonly thinking: string;
   readonly deepThinking: string;
@@ -129,6 +130,14 @@ export interface UiCopy {
   readonly editorCloseTab: string;
   readonly reviewTitle: string;
   readonly reviewEmpty: string;
+  readonly reviewEmptyTitle: string;
+  readonly reviewEmptyDesc: string;
+  readonly selectProject: string;
+  readonly changeProject: string;
+  readonly noProjectSelected: string;
+  readonly fileTreeTitle: string;
+  readonly checkpointsTitle: string;
+  readonly terminalTitle: string;
   readonly reviewCards: string;
   readonly reviewCompare: string;
   readonly reviewAccept: string;
@@ -251,6 +260,7 @@ const chinese = Object.freeze({
   recallSuccess: "已撤回最新一条消息",
   copyText: "复制",
   copied: "已复制",
+  expandMessage: "展开",
   regenerate: "重新生成",
   thinking: "思考中…",
   deepThinking: "深度思考中…",
@@ -284,7 +294,15 @@ const chinese = Object.freeze({
   editorSaveHint: "Ctrl+S 保存（write_file + checkpoint）",
   editorCloseTab: "关闭标签页",
   reviewTitle: "变更审阅",
-  reviewEmpty: "工作区无未提交变更",
+  reviewEmpty: "没有未提交的改动",
+  reviewEmptyTitle: "没有未提交的改动",
+  reviewEmptyDesc: "Agent 修改项目内的文件后，改动会显示在这里",
+  selectProject: "选择项目",
+  changeProject: "更换",
+  noProjectSelected: "未选择项目",
+  fileTreeTitle: "文件树",
+  checkpointsTitle: "检查点",
+  terminalTitle: "终端",
   reviewCards: "卡片",
   reviewCompare: "对比",
   reviewAccept: "采纳",
@@ -408,6 +426,7 @@ const japanese = Object.freeze({
   recallSuccess: "最新のメッセージを取り消しました",
   copyText: "コピー",
   copied: "コピーしました",
+  expandMessage: "展開",
   regenerate: "再生成",
   thinking: "考え中…",
   deepThinking: "深く思考中…",
@@ -441,7 +460,15 @@ const japanese = Object.freeze({
   editorSaveHint: "Ctrl+S 保存（write_file + checkpoint）",
   editorCloseTab: "タブを閉じる",
   reviewTitle: "変更レビュー",
-  reviewEmpty: "ワークスペースに未コミットの変更はありません",
+  reviewEmpty: "未コミットの変更はありません",
+  reviewEmptyTitle: "未コミットの変更はありません",
+  reviewEmptyDesc: "Agentがプロジェクト内のファイルを変更すると、変更内容がここに表示されます",
+  selectProject: "プロジェクトを選択",
+  changeProject: "変更",
+  noProjectSelected: "プロジェクト未選択",
+  fileTreeTitle: "ファイルツリー",
+  checkpointsTitle: "チェックポイント",
+  terminalTitle: "ターミナル",
   reviewCards: "カード",
   reviewCompare: "比較",
   reviewAccept: "採用",

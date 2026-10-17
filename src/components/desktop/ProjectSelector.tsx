@@ -7,10 +7,13 @@ import {
 } from "../../services/project-manager";
 
 export interface ProjectSelectorProps {
-  /** 触发样式变体：'composer' (对话框上方项目切换器，对标参考图), 'chip' (胶囊标签), 'new-chat' (旧版侧栏新建对话), 'header' (顶栏) */
-  variant?: "composer" | "chip" | "new-chat" | "header" | "sidebar" | "rail";
+  /** 触发样式变体：'composer' (对话框上方项目切换器), 'chip' (胶囊标签), 'new-chat' (旧版侧栏新建对话), 'header' (顶栏), 'sidebar' (侧边栏), 'rail' (紧凑栏), 'workspace' (工作区单行面板) */
+  variant?: "composer" | "chip" | "new-chat" | "header" | "sidebar" | "rail" | "workspace";
   label?: string;
   className?: string;
+  changeLabel?: string;
+  selectLabel?: string;
+  noProjectLabel?: string;
   /** 选择项目后的回调 */
   onSelectProject?: (path: string | null) => void;
   /** 点击项目齿轮或设置 */
@@ -24,6 +27,9 @@ export function ProjectSelector({
   variant = "new-chat",
   label,
   className = "",
+  changeLabel,
+  selectLabel,
+  noProjectLabel,
   onSelectProject,
   onOpenSettings,
   onNewChat,
@@ -122,7 +128,28 @@ export function ProjectSelector({
       data-testid="project-selector"
     >
       {/* 触发按钮 */}
-      {variant === "rail" ? (
+      {variant === "workspace" ? (
+        <div className="workspace-panel__project-row">
+          <div className="workspace-panel__project-info">
+            <Folder size={14} className="workspace-panel__project-icon" />
+            <span
+              className="workspace-panel__project-name"
+              title={activeProject ?? ""}
+            >
+              {activeProject ? activeDisplayName : (noProjectLabel ?? "未选择项目")}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="workspace-panel__project-btn"
+            onClick={handleToggle}
+            aria-haspopup="menu"
+            aria-expanded={isOpen}
+          >
+            {activeProject ? (changeLabel ?? "更换") : (selectLabel ?? "选择项目")}
+          </button>
+        </div>
+      ) : variant === "rail" ? (
         <button
           type="button"
           className="desktop-sidebar__rail-btn"

@@ -2,9 +2,10 @@ import {
   FolderCode,
   GitCompareArrows,
   Layers,
+  RefreshCw,
   X,
 } from "lucide-react";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
 import type { EditorWorkspaceController } from "../../app/use-editor-workspace";
 import { ArtifactsPaneView } from "../../components/desktop/ArtifactsPaneView";
 import { LlmSettingsPanel } from "../../components/LlmSettingsPanel";
@@ -46,6 +47,8 @@ export function DesktopRightPane({
   shared,
   resolvedTheme = "dark",
 }: DesktopRightPaneProps) {
+  const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
+
   if (activeTab === "none") return null;
   const visibleTab = activeTab === "editor" ? "workspace" : activeTab;
 
@@ -94,15 +97,28 @@ export function DesktopRightPane({
           </button>
         </div>
 
-        <button
-          type="button"
-          className="desktop-right-pane__close-btn"
-          onClick={onClose}
-          title="关闭右侧面板 (Ctrl+B / Esc)"
-          aria-label="关闭成果面板"
-        >
-          <X size={15} />
-        </button>
+        <div className="desktop-right-pane__actions">
+          {activeTab === "review" ? (
+            <button
+              type="button"
+              className="desktop-right-pane__action-btn"
+              onClick={() => setReviewRefreshKey((k) => k + 1)}
+              title={shared.copy.refreshFileTree ?? "刷新变更列表"}
+              aria-label={shared.copy.refreshFileTree ?? "刷新变更列表"}
+            >
+              <RefreshCw size={14} />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="desktop-right-pane__close-btn"
+            onClick={onClose}
+            title="关闭右侧面板 (Ctrl+B / Esc)"
+            aria-label="关闭成果面板"
+          >
+            <X size={15} />
+          </button>
+        </div>
       </div>
 
       {/* 面板内容容器 */}
@@ -110,7 +126,7 @@ export function DesktopRightPane({
         {/* 1. 代码差异审阅 Tab */}
         {activeTab === "review" ? (
           <Suspense fallback={<div className="desktop-right-pane__loading" />}>
-            <DiffReviewPanel copy={shared.copy} resolvedTheme={resolvedTheme} />
+            <DiffReviewPanel copy={shared.copy} resolvedTheme={resolvedTheme} refreshKey={reviewRefreshKey} />
           </Suspense>
         ) : null}
 

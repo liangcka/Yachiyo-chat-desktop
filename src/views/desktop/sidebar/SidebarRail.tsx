@@ -1,4 +1,4 @@
-import { Plus, User } from "lucide-react";
+import { Plus, Settings, User } from "lucide-react";
 import { ProjectSelector } from "../../../components/desktop/ProjectSelector";
 import { useState, type ReactNode } from "react";
 import type { UiCopy } from "../../../i18n/messages";
@@ -79,7 +79,6 @@ export function SidebarRail({
         <RailButton
           icon={<Plus size={18} />}
           label="新建会话 (Ctrl+N)"
-          highlight
           onClick={() => void onNewChat()}
         />
         <ProjectSelector variant="rail" label={copy.workspaceEntry} onNewChat={onNewChat} onOpenSettings={onOpenWorkspace} />
@@ -100,6 +99,14 @@ export function SidebarRail({
           showToast={showToast}
           userSettings={userSettings}
         />
+
+        {onOpenSettings ? (
+          <RailButton
+            icon={<Settings size={18} />}
+            label={locale === "ja-JP" ? "設定" : "设置"}
+            onClick={() => onOpenSettings("general")}
+          />
+        ) : null}
 
         <button
           type="button"

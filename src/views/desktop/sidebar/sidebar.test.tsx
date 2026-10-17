@@ -5,6 +5,7 @@ import type { Conversation } from "../../../domain/chat";
 import { copyFor } from "../../../i18n/messages";
 import { DesktopSidebar } from "./DesktopSidebar";
 import { SidebarConversationItem } from "./SidebarConversationItem";
+import { SidebarRail } from "./SidebarRail";
 import { SidebarSearch } from "./SidebarSearch";
 import { groupConversationsByDate } from "./use-conversation-groups";
 
@@ -311,5 +312,27 @@ describe("DesktopSidebar & Submodules", () => {
     expect(screen.getByRole("dialog", { name: "用户账户与设置菜单" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "用户账户与设置菜单" })).not.toBeInTheDocument();
+  });
+
+  it("SidebarRail 折叠态下顶部加号为普通按钮，底部头像上方提供设置入口", async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+    const onNewChat = vi.fn(async () => undefined);
+
+    render(
+      <SidebarRail
+        copy={copy}
+        onNewChat={onNewChat}
+        onOpenSettings={onOpenSettings}
+      />,
+    );
+
+    const newChatBtn = screen.getByRole("button", { name: "新建会话 (Ctrl+N)" });
+    expect(newChatBtn).not.toHaveClass("desktop-sidebar__rail-btn--highlight");
+
+    const settingsBtn = screen.getByRole("button", { name: "设置" });
+    expect(settingsBtn).toBeInTheDocument();
+    await user.click(settingsBtn);
+    expect(onOpenSettings).toHaveBeenCalledWith("general");
   });
 });
