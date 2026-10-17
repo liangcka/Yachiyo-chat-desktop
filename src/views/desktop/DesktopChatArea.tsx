@@ -2,19 +2,20 @@ import {
   ArrowUp,
   Bot,
   Check,
+  ChevronRight,
   Globe,
+  Paperclip,
   Plus,
   Sparkles,
   Square,
   X,
 } from "lucide-react";
 import type { KeyboardEvent } from "react";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ContextMeter } from "../../components/ContextMeter";
 import { ConversationView } from "../../components/ConversationView";
 import { ModelSelect } from "../../components/desktop/ModelSelect";
 import { PlanStrip } from "../../components/desktop/PlanStrip";
-import { ProjectSelector } from "../../components/desktop/ProjectSelector";
 import { PermissionCard } from "../../components/tools/PermissionCard";
 import { appendAttachments, COMPOSER_CHARACTER_LIMIT, readTextAttachment, type TextAttachment } from "../../features/file-reference/attachments";
 import { extractLatestTodos } from "../../domain/chat";
@@ -88,7 +89,6 @@ export function DesktopChatArea({
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const composerHintId = useId();
 
   // 技能快捷面板状态
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -503,7 +503,6 @@ export function DesktopChatArea({
           <textarea
             ref={textareaRef}
             aria-label={copy.inputHint}
-            aria-describedby={slashPickerOpen || filePickerOpen ? composerHintId : undefined}
             className="dsh-composer-card__textarea"
             value={composerValue}
             onChange={(e) => {
@@ -546,18 +545,38 @@ export function DesktopChatArea({
               </button>
               {addMenuOpen && !skillPopoverOpen ? (
                 <div className="dsh-skill-popover dsh-add-menu" role="dialog" aria-label={isJapanese ? "コンテンツを追加" : "添加内容"}>
-                  <button type="button" onClick={() => { fileInputRef.current?.click(); setAddMenuOpen(false); }}>
-                    {isJapanese ? "ファイルまたは画像を追加" : "添加文件或图片"}
+                  <button
+                    type="button"
+                    className="dsh-add-menu__item"
+                    onClick={() => {
+                      fileInputRef.current?.click();
+                      setAddMenuOpen(false);
+                    }}
+                  >
+                    <span className="dsh-add-menu__item-main">
+                      <Paperclip size={14} />
+                      <span>{isJapanese ? "ファイルまたは画像を追加" : "添加文件或图片"}</span>
+                    </span>
                   </button>
-                  <ProjectSelector variant="composer" onNewChat={onNewChat} />
-                  <button type="button" onClick={() => { setSkillPopoverOpen(true); setAddMenuOpen(false); }}>
-                    <Sparkles size={14} />{isJapanese ? "スキルを読み込む" : "加载技能"}
+                  <button
+                    type="button"
+                    className="dsh-add-menu__item"
+                    onClick={() => {
+                      setSkillPopoverOpen(true);
+                      setAddMenuOpen(false);
+                    }}
+                  >
+                    <span className="dsh-add-menu__item-main">
+                      <Sparkles size={14} />
+                      <span>{isJapanese ? "スキルを読み込む" : "加载技能"}</span>
+                    </span>
+                    <ChevronRight size={14} className="dsh-add-menu__arrow" />
                   </button>
                   <button
                     type="button"
                     role="menuitemcheckbox"
                     aria-checked={webSearchSettings.enabled}
-                    className="dsh-add-menu__item--checkable"
+                    className="dsh-add-menu__item dsh-add-menu__item--checkable"
                     onClick={() => {
                       onWebSearchSettingsChange?.({ enabled: !webSearchSettings.enabled });
                     }}
@@ -706,11 +725,6 @@ export function DesktopChatArea({
           </div>
         </div>
       </div>
-      {slashPickerOpen || filePickerOpen ? (
-        <p className="desktop-composer-hint" id={composerHintId}>
-          {isJapanese ? "↑↓ で移動 · Enter / Tab で選択 · Esc で閉じる" : "↑↓ 移动 · Enter / Tab 选取 · Esc 关闭"}
-        </p>
-      ) : null}
     </div>
   );
 
@@ -733,6 +747,7 @@ export function DesktopChatArea({
               key={controller.activeConversation?.id}
               locale={controller.locale}
               messages={controller.messages}
+              pendingToolName={pendingPermission?.toolName}
               conversation={controller.activeConversation}
               onEdit={isOffline || isStreaming || isCompressing ? undefined : controller.editMessage}
               onVersionChange={isStreaming || isCompressing ? undefined : controller.switchBranch}

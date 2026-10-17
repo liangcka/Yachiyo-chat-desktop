@@ -21,10 +21,9 @@ export const ThinkingBlock = memo(function ThinkingBlock({
   const hasThought = typeof thought === "string" && thought.trim().length > 0;
   const copy = copyFor(locale);
 
-  // 当处于纯思考期（无正文）时默认展开；正文开始输出后默认折叠，并允许用户手动展开/收起
   const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
 
-  // 监听正文开始输出，重置用户手动状态（若未手动干预）
+  // 正文开始后收起思考，避免全文继续占据答案区域。
   useEffect(() => {
     if (hasText) {
       setUserExpanded(null);
@@ -44,8 +43,9 @@ export const ThinkingBlock = memo(function ThinkingBlock({
     );
   }
 
-  // 存在深度思维链内容（Thought）
-  const isExpanded = userExpanded ?? (!hasText && isStreaming);
+  const isExpanded = userExpanded ?? false;
+  const thinking = isStreaming && !hasText;
+  const latestLine = thought?.trim().split(/\r?\n/u).at(-1);
 
   return (
     <div className={`thinking-block${isExpanded ? " thinking-block--expanded" : ""}`} aria-live="polite">
@@ -57,13 +57,17 @@ export const ThinkingBlock = memo(function ThinkingBlock({
       >
         <span className="thinking-block__toggle-lead">
           <span className="thinking-block__label">
-            {isStreaming && !hasText ? copy.deepThinking : durationMs !== undefined && durationMs >= 1000
-              ? (locale === "ja-JP" ? `${Math.round(durationMs / 1000)} 秒考えました` : `思考了 ${Math.round(durationMs / 1000)} 秒`)
+            {thinking ? copy.thinking : durationMs !== undefined
+              ? durationMs < 1000
+                ? (locale === "ja-JP" ? "1 秒未満考えました" : "思考了不到 1 秒")
+                : (locale === "ja-JP" ? `${Math.round(durationMs / 1000)} 秒考えました` : `思考了 ${Math.round(durationMs / 1000)} 秒`)
               : (locale === "ja-JP" ? "思考を見る" : "查看思考")}
           </span>
+          {thinking ? <span className="thinking-block__preview">{latestLine}</span> : null}
         </span>
         <ChevronRight
           size={14}
+          aria-hidden="true"
           className={`thinking-block__chevron${isExpanded ? " thinking-block__chevron--open" : ""}`}
         />
       </button>

@@ -63,6 +63,7 @@ export interface ConversationViewProps {
   onScrolledFromTopChange?: (scrolledFromTop: boolean) => void;
   /** 当前激活的技能定义列表 */
   activeSkills?: readonly SkillDefinition[];
+  pendingToolName?: string;
 }
 
 export function ConversationView({
@@ -81,6 +82,7 @@ export function ConversationView({
   onScrolledFromTopChange,
   showSources,
   summary,
+  pendingToolName,
 }: ConversationViewProps) {
   const containerRef = useRef<HTMLElement>(null);
   const endRef = useRef<HTMLLIElement>(null);
@@ -137,14 +139,20 @@ export function ConversationView({
   }, [messages, onScrolledFromTopChange, scrollToBottom]);
 
   let lastUserMessageIndex = -1;
+  let lastAssistantMessageIndex = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (lastUserMessageIndex === -1 && messages[index]?.role === "user") {
       lastUserMessageIndex = index;
     }
-    if (lastUserMessageIndex !== -1) {
+    if (lastAssistantMessageIndex === -1 && messages[index]?.role === "assistant") {
+      lastAssistantMessageIndex = index;
+    }
+    if (lastUserMessageIndex !== -1 && lastAssistantMessageIndex !== -1) {
       break;
     }
   }
+
+  const isGenerating = messages.some((m) => m.status === "streaming");
 
   const handleImageLoad = useCallback(() => {
     if (followingRef.current) {
@@ -172,10 +180,13 @@ export function ConversationView({
           versions={conversation ? branchVersions(conversation, message) : undefined}
           onVersionChange={onVersionChange ? (version) => onVersionChange(message.id, version) : undefined}
           onToast={onToast}
+          isLastAssistant={message.role === "assistant" && index === lastAssistantMessageIndex}
+          isGenerating={isGenerating}
+          pendingToolName={index === lastAssistantMessageIndex ? pendingToolName : undefined}
         />
       </li>
     ),
-    [handleImageLoad, imageUrls, lastUserMessageIndex, locale, onRecall, onRegenerate, onToast, showSources, onEdit, onVersionChange, conversation],
+    [handleImageLoad, imageUrls, lastUserMessageIndex, lastAssistantMessageIndex, isGenerating, locale, onRecall, onRegenerate, onToast, showSources, onEdit, onVersionChange, conversation, pendingToolName],
   );
 
   const skillsCard =

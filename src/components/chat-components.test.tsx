@@ -165,6 +165,55 @@ describe("reference chat components", () => {
     expect(screen.queryByText("本次回复未生成。")).not.toBeInTheDocument();
   });
 
+  it("流式生成期间隐藏版本切换器", () => {
+    const { rerender } = render(
+      <MessageBubble
+        locale="zh-CN"
+        message={makeAssistantMessage({ status: "streaming", branchVersion: 2 })}
+        versions={[1, 2]}
+        onVersionChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText("消息版本")).not.toBeInTheDocument();
+
+    rerender(
+      <MessageBubble
+        locale="zh-CN"
+        message={makeAssistantMessage({ status: "complete", branchVersion: 2 })}
+        isGenerating={true}
+        versions={[1, 2]}
+        onVersionChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText("消息版本")).not.toBeInTheDocument();
+  });
+
+  it("用户消息超过 12 行时折叠，点击展开显示全文", () => {
+    const longText = Array.from({ length: 15 }, (_, i) => `这是第 ${i + 1} 行消息`).join("\n");
+    const userMessage: ChatMessage = {
+      conversationId: "one",
+      id: "u-long",
+      role: "user",
+      text: longText,
+      status: "complete",
+      createdAt: Date.now(),
+    };
+    const { container } = render(<MessageBubble locale="zh-CN" message={userMessage} />);
+
+    expect(screen.getByRole("button", { name: "展开" })).toBeInTheDocument();
+    expect(container.querySelector(".message-bubble__user-content--collapsed")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开" }));
+    expect(screen.queryByRole("button", { name: "展开" })).not.toBeInTheDocument();
+    expect(container.querySelector(".message-bubble__user-content--collapsed")).not.toBeInTheDocument();
+  });
+
+  it("最后一条助手消息带有 message-bubble--last-assistant 类", () => {
+    const message = makeAssistantMessage({ status: "complete", text: "最后一条助手消息" });
+    const { container } = render(<MessageBubble locale="zh-CN" message={message} isLastAssistant={true} />);
+    expect(container.querySelector(".message-bubble--last-assistant")).toBeInTheDocument();
+  });
+
   it("按事件顺序穿插正文、思考与工具，仅折叠相邻工具", () => {
     const message = makeAssistantMessage({
       text: "执行之前。执行之后。最终结果。",
@@ -186,9 +235,13 @@ describe("reference chat components", () => {
     const { container } = render(<MessageBubble locale="zh-CN" message={message} />);
     const content = screen.getByRole("article", { name: "八千代的回复" });
     const children = [...content.children].filter((node) => !node.classList.contains("message-bubble__actions"));
-    expect(children.map((node) => node.textContent)).toEqual([
+    expect(children.map((node) => node.matches("details") ? node.querySelector("summary")!.textContent : node.textContent)).toEqual([
+      "运行 3 步· 1 步失败", "最终结果。",
+    ]);
+    fireEvent.click(screen.getByText("运行 3 步"));
+    expect([...container.querySelector(".message-process__content")!.children].map((node) => node.textContent)).toEqual([
       "执行之前。", "思考了 6 秒", expect.stringContaining("已运行 2 步"),
-      "执行之后。", expect.stringContaining("已运行 1 步"), "最终结果。",
+      "执行之后。", expect.stringContaining("已运行 1 步"),
     ]);
     const groups = container.querySelectorAll(".message-tool-group");
     expect(groups).toHaveLength(2);
@@ -822,13 +875,11 @@ describe("reference chat components", () => {
     });
 
     const { rerender } = render(<MessageBubble locale="zh-CN" message={message} />);
-    // 流式思考无正文时默认展开
-    expect(screen.getByText("深度思考中…")).toBeInTheDocument();
+    expect(screen.getByText("思考中…")).toBeInTheDocument();
     expect(screen.getByText("先分析用户的问题，再构思回答...")).toBeInTheDocument();
 
-    // 点击折叠按钮可收起
-    fireEvent.click(screen.getByRole("button", { name: /深度思考中/ }));
-    expect(screen.queryByText("先分析用户的问题，再构思回答...")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /思考中/ }));
+    expect(screen.getAllByText("先分析用户的问题，再构思回答...")).toHaveLength(2);
 
     // 正文到达且完成思考
     rerender(

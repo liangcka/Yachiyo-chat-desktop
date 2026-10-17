@@ -155,6 +155,7 @@ interface ActiveRun {
   /** Agent 工具步骤缓冲（onToolCall 追加、onToolResult 回填），终态快照进消息 */
   toolSteps: MutableToolStep[];
   contentSegments: ReadonlyArray<MessageContentSegment>;
+  contentStartedAtMs?: number;
   timer?: ReturnType<typeof setTimeout>;
   token: number;
 }
@@ -878,6 +879,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           ...(finalUsage !== undefined ? { usage: finalUsage } : {}),
           latencyMs,
           contentSegments: run.contentSegments,
+          contentStartedAtMs: run.contentStartedAtMs,
           ...(status === "stopped" ? { interrupted: true } : {}),
           ...(truncated === true ? { truncated: true } : {}),
           ...(run.sources !== undefined ? { sources: run.sources } : {}),
@@ -887,7 +889,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         };
         if (mountedRef.current) {
           if (status === "complete") {
-            emit({ messageId: run.assistant.id, type: "completed", usage: finalUsage, latencyMs, contentSegments: run.contentSegments });
+            emit({ messageId: run.assistant.id, type: "completed", usage: finalUsage, latencyMs, contentSegments: run.contentSegments, contentStartedAtMs: run.contentStartedAtMs });
           } else if (status === "stopped") {
             emit({ messageId: run.assistant.id, type: "stopped", latencyMs, contentSegments: run.contentSegments });
           } else {
@@ -1043,6 +1045,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             status: "streaming",
             text: run.text,
             contentSegments: run.contentSegments,
+            contentStartedAtMs: run.contentStartedAtMs,
             ...(run.thought !== undefined ? { thought: run.thought } : {}),
             ...(run.provider !== undefined ? { provider: run.provider } : {}),
             ...(run.model !== undefined ? { model: run.model } : {}),
@@ -1095,9 +1098,11 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             onDelta(text) {
               if (activeRef.current?.token !== run.token || text.length === 0) return;
               const start = run.text.length;
+              const atMs = servicesRef.current.now() - run.startTime;
+              run.contentStartedAtMs ??= atMs;
               run.text += text;
               run.contentSegments = appendContentSegment(run.contentSegments,
-                { type: "text", start, end: run.text.length }, servicesRef.current.now() - run.startTime);
+                { type: "text", start, end: run.text.length }, atMs);
               streamBatcherRef.current?.push({ messageId: run.assistant.id, text, type: "delta", contentSegments: run.contentSegments });
               schedulePartialPersistence();
             },
@@ -1105,6 +1110,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
               if (activeRef.current?.token !== run.token || text.length === 0) return;
               const start = run.thought?.length ?? 0;
               const atMs = servicesRef.current.now() - run.startTime;
+              run.contentStartedAtMs ??= atMs;
               run.thought = (run.thought ?? "") + text;
               run.contentSegments = appendContentSegment(run.contentSegments,
                 { type: "thought", start, end: run.thought.length, startedAtMs: atMs }, atMs);
@@ -1125,24 +1131,29 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             onToolCall(call) {
               if (activeRef.current?.token !== run.token) return;
               const argumentsJson = JSON.stringify(call.arguments ?? {});
-              run.toolSteps.push({ id: call.id, name: call.name, argumentsJson });
+              const atMs = servicesRef.current.now() - run.startTime;
+              run.contentStartedAtMs ??= atMs;
+              const step: ToolStep = { id: call.id, name: call.name, argumentsJson, startedAtMs: atMs };
+              run.toolSteps.push(step);
               run.contentSegments = appendContentSegment(run.contentSegments,
-                { type: "tool", toolId: call.id }, servicesRef.current.now() - run.startTime);
+                { type: "tool", toolId: call.id }, atMs);
               // 工具边界前先提交 rAF 缓冲，避免稍后的增量覆盖工具位置。
               streamBatcherRef.current?.flush();
-              emit({ messageId: run.assistant.id, call: { id: call.id, name: call.name, argumentsJson }, type: "tool-call", contentSegments: run.contentSegments });
+              emit({ messageId: run.assistant.id, call: step, type: "tool-call", contentSegments: run.contentSegments });
               schedulePartialPersistence();
             },
             onToolResult(result) {
               if (activeRef.current?.token !== run.token) return;
               const step = run.toolSteps.find((s) => s.id === result.id);
+              const timedResult = { output: result.output, isError: result.isError, durationMs: result.durationMs,
+                endedAtMs: servicesRef.current.now() - run.startTime };
               if (step !== undefined) {
-                step.result = { output: result.output, isError: result.isError, durationMs: result.durationMs };
+                step.result = timedResult;
               }
               emit({
                 messageId: run.assistant.id,
                 callId: result.id,
-                result: { output: result.output, isError: result.isError, durationMs: result.durationMs },
+                result: timedResult,
                 type: "tool-result",
               });
               schedulePartialPersistence();

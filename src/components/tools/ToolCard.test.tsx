@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ToolCard } from "./ToolCard";
+import { projectManager } from "../../services/project-manager";
 
 describe("ToolCard", () => {
   it("渲染动词化描述而非原始工具名和 JSON", () => {
@@ -102,5 +103,41 @@ describe("ToolCard", () => {
     // 确保没有内联样式
     const inlineStyled = container.querySelectorAll("[style]");
     expect(inlineStyled).toHaveLength(0);
+  });
+
+  it("等待批准文字优先于转圈，并保留日文", () => {
+    const { container, rerender } = render(<ToolCard toolName="run_command" isRunning isWaitingForApproval locale="ja-JP" />);
+    expect(screen.getByRole("status")).toHaveTextContent("承認待ち");
+    expect(container.querySelector(".tool-card__spinner")).toBeNull();
+    rerender(<ToolCard toolName="run_command" isRunning locale="ja-JP" />);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(container.querySelector(".tool-card__spinner")).toBeInTheDocument();
+  });
+
+  it("失败步骤展开后默认显示错误输出，参数仍收在详情内", () => {
+    render(<ToolCard toolName="run_command" args={{ command: "check" }} isError output="配置缺失" />);
+    fireEvent.click(screen.getByRole("button", { name: /运行 `check`/ }));
+    expect(screen.getByText("配置缺失")).toBeVisible();
+    expect(screen.getByText(/"command": "check"/)).not.toBeVisible();
+  });
+
+  it.each(["zh-CN", "ja-JP"] as const)("未选择项目的失败步骤提供项目选择入口（%s）", async (locale) => {
+    const pick = vi.spyOn(projectManager, "pickAndOpenProject").mockResolvedValue(undefined);
+    render(<ToolCard toolName="write_file" isError locale={locale}
+      output="当前未选择项目，无法写入。请让用户在侧栏选择项目。" />);
+    const label = locale === "ja-JP" ? "プロジェクトを選択" : "选择项目";
+    await fireEvent.click(screen.getByRole("button", { name: label }));
+    expect(pick).toHaveBeenCalledWith(label);
+    pick.mockRestore();
+  });
+
+  it("其他工具错误不显示项目选择入口", () => {
+    render(<ToolCard toolName="read_file" isError output="文件不存在" />);
+    expect(screen.queryByRole("button", { name: "选择项目" })).not.toBeInTheDocument();
+  });
+
+  it.each(["当前未打开项目工作区，请使用用户提供的绝对路径读取文件或目录。", "当前未选择工作区项目，无法写入文件。"])("历史记录和相对路径错误也提供项目入口：%s", (output) => {
+    render(<ToolCard toolName="read_file" isError output={output} />);
+    expect(screen.getByRole("button", { name: "选择项目" })).toBeVisible();
   });
 });

@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatSource, Conversation, Locale, MessageContentSegment, StoredImage, TokenUsage } from "../domain/chat";
+import type { ChatMessage, ChatSource, Conversation, Locale, MessageContentSegment, StoredImage, TokenUsage, ToolStep } from "../domain/chat";
 
 export type ChatPhase = "loading" | "idle" | "streaming" | "offline" | "error" | "compressing";
 
@@ -41,7 +41,7 @@ export type ChatAction =
   | { type: "delta"; messageId: string; text: string; contentSegments?: ReadonlyArray<MessageContentSegment> }
   | { type: "thought-delta"; messageId: string; text: string; contentSegments?: ReadonlyArray<MessageContentSegment> }
   | { type: "sources-received"; messageId: string; sources: ReadonlyArray<ChatSource> }
-  | { type: "completed"; messageId: string; usage?: TokenUsage; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment> }
+  | { type: "completed"; messageId: string; usage?: TokenUsage; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment>; contentStartedAtMs?: number }
   | { type: "stopped"; messageId: string; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment> }
   | { type: "failed"; messageId: string; errorCode: string; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment> }
   | { type: "connectivity-changed"; online: boolean }
@@ -68,14 +68,14 @@ export type ChatAction =
   | {
       type: "tool-call";
       messageId: string;
-      call: { id: string; name: string; argumentsJson: string };
+      call: Omit<ToolStep, "result">;
       contentSegments?: ReadonlyArray<MessageContentSegment>;
     }
   | {
       type: "tool-result";
       messageId: string;
       callId: string;
-      result: { output: string; isError: boolean; durationMs: number };
+      result: NonNullable<ToolStep["result"]>;
     }
   | {
       type: "permission-requested";
@@ -205,6 +205,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           ...streamedFields(folded),
           ...(action.contentSegments !== undefined ? { contentSegments: action.contentSegments } : {}),
           status: "complete" as const,
+          ...(action.contentStartedAtMs !== undefined ? { contentStartedAtMs: action.contentStartedAtMs } : {}),
           ...(action.usage !== undefined ? { usage: action.usage } : {}),
           ...(action.latencyMs !== undefined ? { latencyMs: action.latencyMs } : {}),
         })),
@@ -352,7 +353,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           ...(action.contentSegments !== undefined ? { contentSegments: action.contentSegments } : {}),
           toolSteps: [
             ...(message.toolSteps ?? []),
-            { id: action.call.id, name: action.call.name, argumentsJson: action.call.argumentsJson },
+            { ...action.call },
           ],
         })),
       };

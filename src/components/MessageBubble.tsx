@@ -18,6 +18,9 @@ export interface MessageBubbleProps {
   onVersionChange?: (version: number) => void;
   onToast?: (message: string) => void;
   onImageLoad?: () => void;
+  isLastAssistant?: boolean;
+  isGenerating?: boolean;
+  pendingToolName?: string;
 }
 
 function messageLabel(role: ChatMessage["role"], locale: Locale): string {
@@ -33,6 +36,8 @@ function stripCitationMarkers(text: string): string {
 /** memo 化：流式期间只有最后一条消息变化，其余气泡跳过重渲（配合上游稳定回调引用） */
 export const MessageBubble = memo(function MessageBubble({
   imageUrl,
+  isGenerating,
+  isLastAssistant,
   locale,
   message,
   onImageLoad,
@@ -43,6 +48,7 @@ export const MessageBubble = memo(function MessageBubble({
   onVersionChange,
   onToast,
   showSources,
+  pendingToolName,
 }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(message.text);
@@ -57,6 +63,26 @@ export const MessageBubble = memo(function MessageBubble({
   const hideCitations = showSources === false && message.sources !== undefined && message.sources.length > 0;
   const strippedText = hideCitations ? stripCitationMarkers(message.text) : message.text;
   const displayText = strippedText.trim().length > 0 ? strippedText : message.text;
+
+  const [userExpanded, setUserExpanded] = useState(false);
+  const [isLongUserMessage, setIsLongUserMessage] = useState(
+    () => message.role === "user" && displayText.split("\n").length > 12,
+  );
+  const userContentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (message.role !== "user") return;
+    const el = userContentRef.current;
+    if (!el) return;
+    const style = window.getComputedStyle(el);
+    const lh = parseFloat(style.lineHeight) || 24;
+    const maxHeight = lh * 12;
+    if (el.scrollHeight > maxHeight + 4 || displayText.split("\n").length > 12) {
+      setIsLongUserMessage(true);
+    } else {
+      setIsLongUserMessage(false);
+    }
+  }, [displayText, message.role]);
 
   const hasText = displayText.trim().length > 0;
   const hasImage = message.imageId !== undefined;
@@ -204,7 +230,7 @@ export const MessageBubble = memo(function MessageBubble({
     <article
       ref={bubbleRef}
       aria-label={messageLabel(message.role, locale)}
-      className={`message-bubble message-bubble--${message.role}${isTyping ? " message-bubble--typing" : ""}${menuOpen ? " message-bubble--menu-open" : ""}`}
+      className={`message-bubble message-bubble--${message.role}${isTyping ? " message-bubble--typing" : ""}${menuOpen ? " message-bubble--menu-open" : ""}${isLastAssistant ? " message-bubble--last-assistant" : ""}`}
       data-status={message.status}
       onContextMenu={hasMenuOptions ? handleContextMenu : undefined}
       onPointerCancel={handlePointerUp}
@@ -234,8 +260,31 @@ export const MessageBubble = memo(function MessageBubble({
       ) : isEmpty && message.status === "failed" && message.role === "assistant" ? (
         <p>{locale === "ja-JP" ? "返信を生成できませんでした。" : "本次回复未生成。"}</p>
       ) : message.role === "assistant" ? (
-        <MessageContent message={message} locale={locale} hideCitations={hideCitations} />
-      ) : hasText ? <MarkdownContent text={displayText} /> : null}
+        <MessageContent message={message} locale={locale} hideCitations={hideCitations} pendingToolName={pendingToolName} />
+      ) : hasText ? (
+        <div
+          ref={userContentRef}
+          className={`message-bubble__user-content${
+            isLongUserMessage && !userExpanded ? " message-bubble__user-content--collapsed" : ""
+          }`}
+        >
+          <MarkdownContent text={displayText} />
+          {isLongUserMessage && !userExpanded ? (
+            <div className="message-bubble__expand-wrapper">
+              <button
+                type="button"
+                className="message-bubble__expand-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setUserExpanded(true);
+                }}
+              >
+                {copyFor(locale).expandMessage}
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {message.truncated === true ? (
         <span className="message-bubble__truncated">{copyFor(locale).truncated}</span>
       ) : null}
@@ -255,7 +304,7 @@ export const MessageBubble = memo(function MessageBubble({
       ) : null}
       {!editing && (hasText || onEdit || onRegenerate || (versions && versions.length > 1)) ? (
         <div className="message-bubble__actions">
-          {versions && versions.length > 1 ? (
+          {versions && versions.length > 1 && !isGenerating && message.status !== "streaming" ? (
             <div className="message-bubble__versions" aria-label="消息版本">
               <button type="button" aria-label="上一个版本" disabled={!onVersionChange || versions.indexOf(message.branchVersion ?? 1) <= 0} onClick={() => onVersionChange?.(versions[versions.indexOf(message.branchVersion ?? 1) - 1]!)}><ChevronLeft size={13} /></button>
               <span>{versions.indexOf(message.branchVersion ?? 1) + 1} / {versions.length}</span>

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Check, ChevronDown, ChevronRight, Copy, FileCode, Globe, Play, Server, Terminal } from "lucide-react";
 import type { Locale } from "../../domain/chat";
 import { formatToolDescription } from "./tool-description";
+import { projectManager } from "../../services/project-manager";
+import { copyFor } from "../../i18n/messages";
 
 export interface ToolCardProps {
   toolName: string;
@@ -9,10 +11,11 @@ export interface ToolCardProps {
   output?: string;
   isError?: boolean;
   isRunning?: boolean;
+  isWaitingForApproval?: boolean;
   locale?: Locale;
 }
 
-export function ToolCard({ toolName, args, output, isError, isRunning, locale = "zh-CN" }: ToolCardProps) {
+export function ToolCard({ toolName, args, output, isError, isRunning, isWaitingForApproval, locale = "zh-CN" }: ToolCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -36,6 +39,8 @@ export function ToolCard({ toolName, args, output, isError, isRunning, locale = 
 
   const description = formatToolDescription(toolName, args, locale);
   const hasArgs = Boolean(args && Object.keys(args).length > 0);
+  const needsProject = isError && output !== undefined && /未选择(?:工作区)?项目|未打开项目工作区/u.test(output);
+  const selectProject = copyFor(locale).selectProject;
 
   return (
     <div className={`tool-card ${isError ? "tool-card--error" : ""}`}>
@@ -52,10 +57,17 @@ export function ToolCard({ toolName, args, output, isError, isRunning, locale = 
           {getToolIcon()}
           <span className="tool-card__description">{description}</span>
         </div>
-        {isRunning ? (
+        {isWaitingForApproval ? (
+          <span className="tool-card__waiting" role="status">{locale === "ja-JP" ? "承認待ち" : "等待批准"}</span>
+        ) : isRunning ? (
           <span className="tool-card__spinner" aria-hidden="true" />
         ) : null}
       </button>
+
+      {needsProject ? <button type="button" className="tool-card__select-project"
+        onClick={() => { void projectManager.pickAndOpenProject(selectProject); }}>
+        {selectProject}
+      </button> : null}
 
       {expanded ? (
         <div className="tool-card__content">

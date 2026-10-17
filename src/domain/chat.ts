@@ -45,10 +45,13 @@ export interface ToolStep {
   readonly id: string;
   readonly name: string;
   readonly argumentsJson: string;
+  /** 相对本轮请求开始的时间，包含权限等待。旧记录可缺省。 */
+  readonly startedAtMs?: number;
   readonly result?: {
     readonly output: string;
     readonly isError: boolean;
     readonly durationMs: number;
+    readonly endedAtMs?: number;
   };
 }
 
@@ -120,6 +123,8 @@ export interface ChatMessage {
   toolSteps?: ReadonlyArray<ToolStep>;
   /** 旧记录缺省；新回复按此顺序展示，text/thought 仍供复制与请求历史使用。 */
   contentSegments?: ReadonlyArray<MessageContentSegment>;
+  /** 第一个内容片段相对请求开始的时间；不以请求延迟代替过程耗时。 */
+  contentStartedAtMs?: number;
   /** 生成该消息时生效的技能列表（名称快照） */
   skills?: ReadonlyArray<string>;
 }
