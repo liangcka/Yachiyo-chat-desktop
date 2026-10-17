@@ -1,0 +1,134 @@
+.edit-file-diff {
+  min-width: 0;
+  margin-block: 0.5rem;
+  overflow: hidden;
+  border: 1px solid var(--border-l2);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--text-primary);
+}
+
+.edit-file-diff__header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.edit-file-diff__body {
+  max-height: 18rem;
+  overflow: auto;
+  font-family: var(--ds-font-family-code);
+  font-size: 0.75rem;
+  line-height: 1.65;
+}
+
+.edit-file-diff__body p {
+  margin: 0.5rem 0.75rem;
+  color: var(--text-muted);
+}
+
+.edit-file-diff__range {
+  padding: 0.25rem 0.75rem;
+  background: var(--space-2);
+  color: var(--text-muted);
+}
+
+.edit-file-diff__line {
+  display: flex;
+  min-width: max-content;
+  padding-inline: 0.5rem;
+  white-space: pre;
+}
+
+.edit-file-diff__line--add {
+  background: var(--interactive-active);
+  font-weight: 600;
+}
+
+.edit-file-diff__line--del {
+  background: var(--interactive-hover);
+}
+
+.edit-file-diff__line--del code {
+  text-decoration: line-through;
+}
+
+.edit-file-diff__number {
+  flex: 0 0 3.5ch;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.edit-file-diff__sign {
+  flex: 0 0 3ch;
+  text-align: center;
+}
+
+.edit-file-diff__line code {
+  padding-right: 0.75rem;
+  font: inherit;
+}
+
+.edit-file-diff__body:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.file-change-summary {
+  margin-top: 1rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--border-l2);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--text-primary);
+}
+
+.file-change-summary__title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.file-change-summary ul {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.625rem 0 0.875rem;
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.file-change-summary code {
+  overflow-wrap: anywhere;
+  font-family: var(--ds-font-family-code);
+}
+
+.file-change-summary__review {
+  padding: 0.5rem 0.875rem;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--yx-alias-button-primary-fill);
+  color: var(--yx-alias-button-primary-text);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.file-change-summary__review:hover {
+  background: var(--yx-alias-button-primary-hover);
+}
+
+.file-change-summary__review:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.file-change-summary__review:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

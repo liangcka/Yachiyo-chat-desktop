@@ -1,4 +1,4 @@
-import { useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, Ref } from "react";
 import { Bot, Check, Globe, Minimize2, Plus, Sparkles, Terminal, X } from "lucide-react";
 import type { Locale } from "../../domain/chat";
@@ -200,9 +200,37 @@ export function SlashCommandPicker({
     }
   };
 
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [placement, setPlacement] = useState<"up" | "down">("up");
+  const [maxHeight, setMaxHeight] = useState<number | undefined>(undefined);
+
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const parent = el.parentElement;
+    if (!parent) return;
+
+    const parentRect = parent.getBoundingClientRect();
+    // 顶部顶栏高度约 52px，安全间隙 8px，浮层与输入框间隔 8px
+    const topBarOffset = 60;
+    const gap = 8;
+    const spaceAbove = parentRect.top - gap - topBarOffset;
+    const spaceBelow = window.innerHeight - parentRect.bottom - gap - 16;
+
+    if (spaceAbove < 220 && spaceBelow > spaceAbove) {
+      setPlacement("down");
+      setMaxHeight(Math.max(120, Math.floor(spaceBelow)));
+    } else {
+      setPlacement("up");
+      setMaxHeight(Math.max(120, Math.floor(spaceAbove)));
+    }
+  }, []);
+
   return (
     <div
-      className="slash-cmd-picker"
+      ref={rootRef}
+      className={`slash-cmd-picker ${placement === "down" ? "slash-cmd-picker--down" : ""}`}
+      style={maxHeight !== undefined ? { maxHeight: `${maxHeight}px` } : undefined}
       role="listbox"
       aria-label={isJapanese ? "コマンドとスキルの選択" : "快捷指令与技能选择"}
       tabIndex={-1}
@@ -214,8 +242,9 @@ export function SlashCommandPicker({
           {query ? <span className="slash-cmd-picker__query-tag">/{query}</span> : null}
         </div>
         <div className="slash-cmd-picker__hints">
-          <span className="slash-cmd-picker__hint-badge">{isJapanese ? "↑↓ 移動" : "↑↓ 移动"}</span>
-          <span className="slash-cmd-picker__hint-badge">{isJapanese ? "Enter / Tab で選択" : "Enter / Tab 选取"}</span>
+          <span className="slash-cmd-picker__hint-badge">
+            {isJapanese ? "↑↓ 移動 · Enter / Tab 選択 · Esc 閉じる" : "↑↓ 移动 · Enter / Tab 选取 · Esc 关闭"}
+          </span>
           <button
             type="button"
             className="slash-cmd-picker__close-btn"

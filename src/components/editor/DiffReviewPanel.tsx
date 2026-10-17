@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Clock, GitCompareArrows, Loader2, RefreshCw, X } from "lucide-react";
+import { Check, ChevronDown, Clock, GitCompareArrows, Loader2, X } from "lucide-react";
 import type { UiCopy } from "../../i18n/messages";
 import { executeDesktopAgentTool, readHeadFile } from "../../services/desktop-bridge";
 import {
@@ -30,7 +30,7 @@ function statusBadgeClass(status: GitChangeEntry["status"]): string {
 }
 
 function statusBadgeText(status: GitChangeEntry["status"]): string {
-  if (status === "added") return "?";
+  if (status === "added") return "A";
   if (status === "deleted") return "D";
   return "M";
 }
@@ -47,6 +47,22 @@ export function DiffReviewPanel({ copy, resolvedTheme, refreshKey: externalRefre
   const [applying, setApplying] = useState(false);
   const [internalRefreshKey, setInternalRefreshKey] = useState(0);
   const refreshKey = (externalRefreshKey ?? 0) + internalRefreshKey;
+
+  const panelRef = useRef<HTMLElement>(null);
+  const [isCompact, setIsCompact] = useState(false);
+  const [isFilesCollapsed, setIsFilesCollapsed] = useState(false);
+
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setIsCompact(entry.contentRect.width < 640);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const selected = changes?.find((c) => c.path === selectedPath) ?? null;
   const anyAccepted = decisions.some((d) => d === "accepted");
@@ -204,7 +220,7 @@ export function DiffReviewPanel({ copy, resolvedTheme, refreshKey: externalRefre
   }
 
   return (
-    <section className="review-panel" aria-label="变更审阅">
+    <section ref={panelRef} className={`review-panel ${isCompact ? "review-panel--compact" : ""}`} aria-label="变更审阅">
       <div className="review-panel__toolbar">
         <span className="review-panel__title">
           <GitCompareArrows size={15} />
@@ -249,54 +265,106 @@ export function DiffReviewPanel({ copy, resolvedTheme, refreshKey: externalRefre
             {applying ? <Loader2 size={12} className="review-spin" /> : <Check size={12} />}
             {copy?.reviewApply ?? "应用采纳"}
           </button>
-          <button
-            type="button"
-            className="review-ghost-btn review-ghost-btn--icon"
-            onClick={() => setInternalRefreshKey((key) => key + 1)}
-            title={copy?.refreshFileTree ?? "刷新变更列表"}
-          >
-            <RefreshCw size={13} />
-          </button>
         </div>
       </div>
 
       <div className="review-panel__body">
         {/* 变更文件列表 */}
-        <div className="review-files">
-          <p className="review-files__label">{copy?.reviewFilesLabel ?? "变更文件"}</p>
-          {changes === null ? (
-            <p className="review-files__hint">
-              <Loader2 size={12} className="review-spin" /> …
-            </p>
-          ) : changes.length === 0 ? (
-            <p className="review-files__hint">{copy?.reviewEmpty ?? "工作区无未提交变更"}</p>
-          ) : (
-            changes.map((change) => (
-              <button
-                key={change.path}
-                type="button"
-                className={`review-file ${change.path === selectedPath ? "review-file--active" : ""} ${
-                  change.status === "deleted" ? "review-file--disabled" : ""
-                }`}
-                onClick={() => setSelectedPath(change.path)}
-                disabled={change.status === "deleted"}
-                title={change.path}
-              >
-                <span className={`review-file__badge ${statusBadgeClass(change.status)}`}>
-                  {statusBadgeText(change.status)}
+        {isCompact ? (
+          <div className="review-files-collapsible">
+            <button
+              type="button"
+              className="review-files-collapsible__trigger"
+              onClick={() => setIsFilesCollapsed((v) => !v)}
+              aria-expanded={!isFilesCollapsed}
+            >
+              <ChevronDown
+                size={13}
+                className={`review-files-collapsible__caret ${isFilesCollapsed ? "review-files-collapsible__caret--collapsed" : ""}`}
+              />
+              <span className="review-files-collapsible__title">
+                {copy?.reviewFilesLabel ?? "变更文件"} ({changes?.length ?? 0})
+              </span>
+              {selectedPath ? (
+                <span className="review-files-collapsible__selected" title={selectedPath}>
+                  {selectedPath}
                 </span>
-                <span className="review-file__path">{change.path}</span>
-                {change.status !== "modified" ? (
-                  <span className="review-file__note">
-                    {change.status === "added"
-                      ? copy?.reviewAddedNote ?? "新文件 · 仅查看"
-                      : copy?.reviewDeletedNote ?? "删除 · 不支持恢复"}
+              ) : null}
+            </button>
+            {!isFilesCollapsed ? (
+              <div className="review-files review-files--compact">
+                {changes === null ? (
+                  <p className="review-files__hint">
+                    <Loader2 size={12} className="review-spin" /> …
+                  </p>
+                ) : changes.length === 0 ? (
+                  <p className="review-files__hint">{copy?.reviewEmpty ?? "工作区无未提交变更"}</p>
+                ) : (
+                  changes.map((change) => (
+                    <button
+                      key={change.path}
+                      type="button"
+                      className={`review-file ${change.path === selectedPath ? "review-file--active" : ""} ${
+                        change.status === "deleted" ? "review-file--disabled" : ""
+                      }`}
+                      onClick={() => setSelectedPath(change.path)}
+                      disabled={change.status === "deleted"}
+                      title={change.path}
+                    >
+                      <span className={`review-file__badge ${statusBadgeClass(change.status)}`}>
+                        {statusBadgeText(change.status)}
+                      </span>
+                      <span className="review-file__path">{change.path}</span>
+                      {change.status !== "modified" ? (
+                        <span className="review-file__note">
+                          {change.status === "added"
+                            ? copy?.reviewAddedNote ?? "新文件 · 仅查看"
+                            : copy?.reviewDeletedNote ?? "删除 · 不支持恢复"}
+                        </span>
+                      ) : null}
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="review-files">
+            <p className="review-files__label">{copy?.reviewFilesLabel ?? "变更文件"}</p>
+            {changes === null ? (
+              <p className="review-files__hint">
+                <Loader2 size={12} className="review-spin" /> …
+              </p>
+            ) : changes.length === 0 ? (
+              <p className="review-files__hint">{copy?.reviewEmpty ?? "工作区无未提交变更"}</p>
+            ) : (
+              changes.map((change) => (
+                <button
+                  key={change.path}
+                  type="button"
+                  className={`review-file ${change.path === selectedPath ? "review-file--active" : ""} ${
+                    change.status === "deleted" ? "review-file--disabled" : ""
+                  }`}
+                  onClick={() => setSelectedPath(change.path)}
+                  disabled={change.status === "deleted"}
+                  title={change.path}
+                >
+                  <span className={`review-file__badge ${statusBadgeClass(change.status)}`}>
+                    {statusBadgeText(change.status)}
                   </span>
-                ) : null}
-              </button>
-            ))
-          )}
-        </div>
+                  <span className="review-file__path">{change.path}</span>
+                  {change.status !== "modified" ? (
+                    <span className="review-file__note">
+                      {change.status === "added"
+                        ? copy?.reviewAddedNote ?? "新文件 · 仅查看"
+                        : copy?.reviewDeletedNote ?? "删除 · 不支持恢复"}
+                    </span>
+                  ) : null}
+                </button>
+              ))
+            )}
+          </div>
+        )}
 
         {/* 差异区 */}
         <div className="review-content">

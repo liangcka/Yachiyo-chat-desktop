@@ -118,7 +118,7 @@ export interface ChatController extends ChatState {
   agentEnabled: boolean;
   toggleAgent(): void;
   setExecutionMode(mode: "readonly" | "confirm" | "full_auto"): void;
-  approvePermission(requestId: string, approved: boolean, sessionScope?: boolean): Promise<void>;
+  approvePermission(requestId: string, approved: boolean, sessionScope?: boolean): Promise<boolean>;
 }
 
 interface ControllerServices {
@@ -1836,8 +1836,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   const clearError = useCallback(() => emit({ type: "clear-error" }), [emit]);
 
   const approvePermission = useCallback(
-    async (requestId: string, approved: boolean, sessionScope = false): Promise<void> => {
-      await submitAgentApproval({ requestId, approved, ...(sessionScope ? { sessionScope: true } : {}) });
+    async (requestId: string, approved: boolean, sessionScope = false): Promise<boolean> => {
+      return await submitAgentApproval({ requestId, approved, ...(sessionScope ? { sessionScope: true } : {}) });
     },
     [],
   );

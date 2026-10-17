@@ -174,7 +174,7 @@ pub async fn run_agent_loop_ext(
                 Some(ToolRisk::Read) if !is_unbound_file_read(&call.name, workspace_root) => true,
                 None => true,
                 Some(ToolRisk::Write) if config.execution_mode == AgentExecutionMode::Readonly => false,
-                Some(ToolRisk::Write) if workspace_root.is_none() && call.name == "write_file" => false,
+                Some(ToolRisk::Write) if workspace_root.is_none() && matches!(call.name.as_str(), "write_file" | "edit_file") => false,
                 _ if config.execution_mode == AgentExecutionMode::FullAuto => true,
                 _ => {
                     let key = approval_key(&call.name, &call.arguments, workspace_root)?;
@@ -275,7 +275,7 @@ pub async fn run_agent_loop_ext(
             } else {
                 (if let Some(error) = read_path_error.as_deref() {
                     error
-                } else if call.name == "write_file" && workspace_root.is_none() {
+                } else if matches!(call.name.as_str(), "write_file" | "edit_file") && workspace_root.is_none() {
                     PROJECT_REQUIRED_FOR_WRITE
                 } else if config.execution_mode == AgentExecutionMode::Readonly && tool_risk(&call.name) == Some(ToolRisk::Write) {
                     "当前为只读模式，该操作不会执行。请用户显式切换执行模式后再操作。"

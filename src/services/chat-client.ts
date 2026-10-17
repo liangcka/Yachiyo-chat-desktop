@@ -353,15 +353,16 @@ export async function submitAgentApproval(payload: {
   requestId: string;
   approved: boolean;
   sessionScope?: boolean;
-}): Promise<void> {
+}): Promise<boolean> {
   try {
-    await apiFetch("/api/agent/approval", {
+    const res = await apiFetch("/api/agent/approval", {
       method: "POST",
       body: JSON.stringify(payload),
       credentials: apiCredentials(),
       headers: { "content-type": "application/json" },
     });
+    return res.ok;
   } catch {
-    // 网络失败静默：流内 permission_resolved 不会到达，UI 卡片最终走超时拒绝
+    return false;
   }
 }

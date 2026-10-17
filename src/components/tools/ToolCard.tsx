@@ -4,6 +4,7 @@ import type { Locale } from "../../domain/chat";
 import { formatToolDescription } from "./tool-description";
 import { projectManager } from "../../services/project-manager";
 import { copyFor } from "../../i18n/messages";
+import { EditFileDiff } from "./EditFileDiff";
 
 export interface ToolCardProps {
   toolName: string;
@@ -28,6 +29,7 @@ export function ToolCard({ toolName, args, output, isError, isRunning, isWaiting
         return <Terminal size={14} className="tool-card__icon" aria-hidden="true" />;
       case "read_file":
       case "write_file":
+      case "edit_file":
       case "list_directory":
         return <FileCode size={14} className="tool-card__icon" aria-hidden="true" />;
       case "web_fetch":
@@ -71,6 +73,7 @@ export function ToolCard({ toolName, args, output, isError, isRunning, isWaiting
 
       {expanded ? (
         <div className="tool-card__content">
+          {toolName === "edit_file" ? <EditFileDiff args={args} locale={locale} /> : null}
           {output ? (
             <div className="tool-card__section">
               <div className="tool-card__section-header">

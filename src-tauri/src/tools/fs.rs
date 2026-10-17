@@ -246,6 +246,46 @@ pub fn write_file(path_str: &str, content: &str, workspace_root: &Path) -> Resul
     write_file_guarded(path_str, content, workspace_root, None)
 }
 
+/// 片段编辑不建立新的读取观察；匹配与落盘均基于调用方已观察的文件版本。
+pub fn edit_file_guarded(
+    path_str: &str,
+    old_string: &str,
+    new_string: &str,
+    replace_all: bool,
+    workspace_root: &Path,
+    tracker: &FsObservationTracker,
+) -> Result<String, String> {
+    if old_string.is_empty() {
+        return Err("old_string 不能为空；新建文件请使用 write_file。".to_string());
+    }
+    let resolved = resolve_tool_path(path_str, workspace_root)?;
+    tracker.check_write(&resolved, true)?;
+    let bytes = fs::read(&resolved).map_err(|error| format!("无法读取文件，请重新读取后重试: {error}"))?;
+    let content = decode_file_bytes(&bytes);
+    // 只转换输入片段的换行，未匹配的文件内容保持原样。
+    let crlf = content.find('\n').is_some_and(|index| index > 0 && content.as_bytes()[index - 1] == b'\r');
+    let align_newlines = |text: &str| {
+        let lf = text.replace("\r\n", "\n");
+        if crlf { lf.replace('\n', "\r\n") } else { lf }
+    };
+    let old = align_newlines(old_string);
+    let new = align_newlines(new_string);
+    let first = content.find(&old)
+        .ok_or("找不到 old_string，请重新读取文件后提供当前内容。")?;
+    // 从首个匹配的下一个字符继续查找，重叠匹配也构成定位歧义。
+    let after_first_char = first + old.chars().next().map_or(0, char::len_utf8);
+    if !replace_all && content[after_first_char..].contains(&old) {
+        return Err("old_string 出现多次，请补充上下文以唯一定位，或使用 replace_all。".to_string());
+    }
+    let count = if replace_all { content.matches(&old).count() } else { 1 };
+    let mut edited = if replace_all { content.replace(&old, &new) } else { content.replacen(&old, &new, 1) };
+    if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
+        edited.insert(0, '\u{feff}');
+    }
+    write_file_guarded(path_str, &edited, workspace_root, Some(tracker))?;
+    Ok(format!("已编辑 '{path_str}'，替换了 {count} 处。"))
+}
+
 pub fn write_file_guarded(
     path_str: &str,
     content: &str,

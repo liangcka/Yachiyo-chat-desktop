@@ -89,7 +89,7 @@
 
 .tree-row__folder {
   flex-shrink: 0;
-  color: var(--dsw-alias-state-business-primary);
+  color: var(--text-muted);
 }
 
 .tree-row__file-icon {

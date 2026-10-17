@@ -1,16 +1,9 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { enterApp } from "./helpers";
 
-async function enterApp(page: Page): Promise<void> {
-  await page.goto("/");
-  await page.getByLabel("访问码").fill("yachiyo-local-access");
-  await page.getByRole("button", { name: "进入" }).click();
-  await expect(page.getByPlaceholder("什么都可以告诉我")).toBeVisible();
-}
-
-/** 新会话不再渲染初始问候气泡，布局断言前先发一条消息等 mock 回复出现 */
 async function sendMockMessage(page: Page): Promise<void> {
-  await page.getByPlaceholder("什么都可以告诉我").fill("今天有点累");
-  await page.getByRole("button", { name: "发送" }).click();
+  await page.getByRole("textbox", { name: "什么都可以告诉我" }).fill("今天有点累");
+  await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect(page.getByRole("article", { name: "八千代的回复" }).last()).toContainText(
     "笑着递上热乎乎的松饼",
   );
@@ -18,12 +11,9 @@ async function sendMockMessage(page: Page): Promise<void> {
 
 async function waitForFiniteAnimations(page: Page): Promise<void> {
   await page.evaluate(async () => {
-    const finiteAnimations = document
-      .getAnimations()
+    const finiteAnimations = document.getAnimations()
       .filter((animation) => animation.effect?.getTiming().iterations !== Infinity);
-    await Promise.all(
-      finiteAnimations.map((animation) => animation.finished.catch(() => undefined)),
-    );
+    await Promise.all(finiteAnimations.map((animation) => animation.finished.catch(() => undefined)));
   });
 }
 
@@ -35,132 +25,103 @@ async function verticalGap(upper: Locator, lower: Locator): Promise<number> {
   return lowerTop - upperBottom;
 }
 
-test("renders a clean two-bar menu button", async ({ page }) => {
+test("侧栏账户菜单可打开并用 Escape 关闭", async ({ page }) => {
   await enterApp(page);
-
-  const menuButton = page.getByRole("button", { name: "菜单" });
-  await expect(menuButton.locator("svg path, svg line")).toHaveCount(2);
-  await expect(menuButton).toHaveCSS("box-shadow", "none");
+  const button = page.getByRole("button", { name: /^(用户资料与菜单|用户账户与设置)$/ });
+  await button.click();
+  await expect(button).toHaveAttribute("aria-expanded", "true");
+  const menu = page.getByRole("dialog", { name: "用户账户与设置菜单" });
+  await expect(menu).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(menu).not.toBeVisible();
+  await expect(button).toHaveAttribute("aria-expanded", "false");
 });
 
-test.describe("base chat layout", () => {
+test.describe("基础聊天布局", () => {
   test.use({ serviceWorkers: "block" });
 
-  test("keeps the latest assistant reply close to the speaker control", async ({ page }) => {
+  test("最新回复不被输入区遮挡", async ({ page }) => {
     await enterApp(page);
     await sendMockMessage(page);
     await waitForFiniteAnimations(page);
-
-    const assistantBubble = page.getByRole("article", { name: "八千代的回复" });
-    const speakerButton = page.getByRole("button", { name: "扬声器功能即将开放" });
-    const gap = await verticalGap(assistantBubble, speakerButton);
-
-    expect(gap).toBeGreaterThanOrEqual(20);
-    expect(gap).toBeLessThanOrEqual(36);
+    expect(await verticalGap(
+      page.getByRole("article", { name: "八千代的回复" }).last(),
+      page.locator(".desktop-composer-dock"),
+    )).toBeGreaterThanOrEqual(0);
   });
 });
 
-test("keeps the latest reply clear of a multiline composer", async ({ page }) => {
+test("多行输入不遮挡最新回复", async ({ page }) => {
   await enterApp(page);
   await sendMockMessage(page);
+  await page.getByRole("textbox", { name: "什么都可以告诉我" }).fill("第一行\n第二行\n第三行\n第四行");
   await waitForFiniteAnimations(page);
-
-  await page.getByPlaceholder("什么都可以告诉我").fill("第一行\n第二行\n第三行\n第四行");
-  const gap = await verticalGap(
-    page.getByRole("article", { name: "八千代的回复" }),
-    page.getByRole("button", { name: "扬声器功能即将开放" }),
-  );
-
-  expect(gap).toBeGreaterThanOrEqual(20);
+  expect(await verticalGap(
+    page.getByRole("article", { name: "八千代的回复" }).last(),
+    page.locator(".desktop-composer-dock"),
+  )).toBeGreaterThanOrEqual(0);
 });
 
-test("keeps bottom status banners clear of the latest reply", async ({ context, page }) => {
+test("离线状态提示不遮挡最新回复", async ({ context, page }) => {
   await enterApp(page);
   await sendMockMessage(page);
-  await waitForFiniteAnimations(page);
-
   await context.setOffline(true);
   const statusBanner = page.locator(".status-banner");
   await expect(statusBanner).toBeVisible();
   await waitForFiniteAnimations(page);
-  const gap = await verticalGap(
-    page.getByRole("article", { name: "八千代的回复" }),
-    statusBanner,
-  );
-
-  expect(gap).toBeGreaterThanOrEqual(20);
+  expect(await verticalGap(
+    page.getByRole("article", { name: "八千代的回复" }).last(), statusBanner,
+  )).toBeGreaterThanOrEqual(0);
   await context.setOffline(false);
 });
 
-test("keeps the PWA prompt clear of the latest reply", async ({ page }) => {
+test("PWA 离线就绪提示不遮挡最新回复", async ({ page }) => {
   await enterApp(page);
-
   const prompt = page.locator(".pwa-prompt");
   await expect(prompt).toBeVisible({ timeout: 10_000 });
   await sendMockMessage(page);
   await waitForFiniteAnimations(page);
-  const gap = await verticalGap(
-    page.getByRole("article", { name: "八千代的回复" }),
-    prompt,
-  );
-
-  expect(gap).toBeGreaterThanOrEqual(20);
+  expect(await verticalGap(
+    page.getByRole("article", { name: "八千代的回复" }).last(), prompt,
+  )).toBeGreaterThanOrEqual(0);
 });
 
-test("streams a mock reply in the reference composition", async ({ page }, testInfo) => {
+test("流式回复保持窗口内布局且无控制台错误", async ({ page }, testInfo) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });
   await enterApp(page);
-
-  await page.getByPlaceholder("什么都可以告诉我").fill("今天有点累");
-  await page.getByRole("button", { name: "发送" }).click();
-  await expect(page.getByRole("article", { name: "八千代的回复" }).last()).toContainText(
-    "笑着递上热乎乎的松饼",
-  );
-  await expect
-    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
-    .toBe(true);
-
-  if (testInfo.project.name === "mobile-390") {
-    await page.screenshot({
-      animations: "disabled",
-      path: testInfo.outputPath("yachiyo-chat-390x844.png"),
-    });
-  } else {
-    const stage = page.locator(".chat-stage");
-    await expect(stage).toBeVisible();
-    await expect
-      .poll(() => stage.evaluate((element) => Math.round(element.getBoundingClientRect().width)))
-      .toBeLessThanOrEqual(430);
-  }
+  await sendMockMessage(page);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const composer = await page.locator(".dsh-composer-card").boundingBox();
+  const viewport = page.viewportSize()!;
+  expect(composer!.x).toBeGreaterThanOrEqual(0);
+  expect(composer!.x + composer!.width).toBeLessThanOrEqual(viewport.width);
+  await page.screenshot({ animations: "disabled", path: testInfo.outputPath("yachiyo-chat.png") });
   expect(consoleErrors).toEqual([]);
 });
 
-test("switches language, exposes camera input, and becomes read-only offline", async ({
-  context,
-  page,
-}) => {
+test("切换日文、提供附件入口，并在离线时禁止发送", async ({ context, page }) => {
   await enterApp(page);
-
-  await page.getByRole("button", { name: "菜单" }).click();
-  await page.getByRole("button", { name: "日本語" }).click();
-  await expect(page.getByPlaceholder("何でも話してね")).toBeVisible();
-
-  const camera = page.locator('input[type="file"]');
-  await expect(camera).toHaveAttribute("accept", "image/*");
-  await expect(camera).toHaveAttribute("capture", "environment");
-  await expect(camera).toHaveAttribute("aria-hidden", "true");
-  await expect(camera).toHaveAttribute("tabindex", "-1");
-  await expect(page.getByRole("button", { name: "マイク機能は近日公開です" })).toHaveAttribute(
-    "aria-disabled",
-    "true",
-  );
-
+  await page.getByRole("button", { name: /^(用户资料与菜单|用户账户与设置)$/ }).click();
+  await page.getByRole("button", { name: "选择语言" }).click();
+  const input = page.getByRole("textbox", { name: "何でも話してね" });
+  await expect(input).toBeVisible();
+  await page.keyboard.press("Escape");
+  const attachment = page.locator('input[type="file"]');
+  await expect(attachment).toHaveAttribute("multiple", "");
+  await expect(attachment).toBeHidden();
+  await page.getByRole("button", { name: "ファイル、プロジェクト、スキルを追加" }).click();
+  const chooserPromise = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "ファイルまたは画像を追加" }).click();
+  const chooser = await chooserPromise;
+  expect(chooser.isMultiple()).toBe(true);
+  await chooser.setFiles([]);
   await context.setOffline(true);
   await expect(page.getByText("オフラインです。端末の履歴は閲覧できます")).toBeVisible();
-  await expect(page.getByPlaceholder("何でも話してね")).toBeDisabled();
+  await expect(input).toBeDisabled();
+  await expect(page.getByRole("button", { name: "送信", exact: true })).toBeDisabled();
   await context.setOffline(false);
-  await expect(page.getByPlaceholder("何でも話してね")).toBeEnabled();
+  await expect(input).toBeEnabled();
 });

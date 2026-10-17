@@ -188,7 +188,7 @@ pub fn approval_key(
                 .ok_or("缺少命令")?
                 .trim()
         ),
-        "write_file" => {
+        "write_file" | "edit_file" => {
             let path = args
                 .get("path")
                 .and_then(|v| v.as_str())

@@ -36,10 +36,10 @@ describe("MessageContent 过程摘要", () => {
     const process = container.querySelector(".message-process__content")!;
     expect([...process.children].map((node) => node.textContent)).toEqual([
       "思考了不到 1 秒", "先检查。", expect.stringContaining("已运行 1 步"),
-      "已检查。", expect.stringContaining("1 项失败"), "思考了 1 秒",
+      "已检查。", expect.stringContaining("1 步失败"), "思考了 1 秒",
     ]);
     expect(screen.getByText("先检查。")).toBeVisible();
-    const failedGroup = screen.getByText("1 项失败").closest("details")!;
+    const failedGroup = screen.getByText("1 步失败").closest("details")!;
     fireEvent.click(failedGroup.querySelector("summary")!);
     fireEvent.click(screen.getByRole("button", { name: /运行 `check`/ }));
     expect(screen.getByText("配置缺失")).toBeVisible();

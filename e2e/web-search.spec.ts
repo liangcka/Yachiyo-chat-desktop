@@ -1,25 +1,19 @@
 import { expect, test, type Page } from "@playwright/test";
+import { enterApp } from "./helpers";
 
-/** 与 yachiyo-chat.spec.ts 保持一致的应用进入流程 */
-async function enterApp(page: Page): Promise<void> {
-  await page.goto("/");
-  await page.getByLabel("访问码").fill("yachiyo-local-access");
-  await page.getByRole("button", { name: "进入" }).click();
-  await expect(page.getByPlaceholder("什么都可以告诉我")).toBeVisible();
-}
+test.use({ serviceWorkers: "block" });
 
-/** 通过 菜单 → 技能 入口打开技能面板 */
+/** 联网搜索配置位于设置中心，快捷菜单只负责启停。 */
 async function openSkillsPanel(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "菜单" }).click();
-  await page.getByRole("button", { name: "技能" }).click();
-  await expect(page.getByRole("dialog", { name: "技能" })).toBeVisible();
+  await page.getByRole("button", { name: /^(打开设置|设置)$/ }).click();
+  await page.getByRole("tab", { name: "联网搜索", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "设置中心" })).toBeVisible();
 }
 
 /** 点击面板右上角关闭按钮并等待面板完全收起（避免残留 overlay 拦截后续点击） */
 async function closeSkillsPanel(page: Page): Promise<void> {
-  // 菜单 drawer 关闭动画期间可能仍残留"关闭菜单"按钮，因此限定在技能面板内查找
-  const panel = page.getByRole("dialog", { name: "技能" });
-  await panel.getByRole("button", { name: "关闭菜单" }).click();
+  const panel = page.getByRole("dialog", { name: "设置中心" });
+  await panel.getByRole("button", { name: "关闭设置" }).click();
   await expect(panel).toBeHidden();
 }
 

@@ -13,12 +13,10 @@ import {
 } from "lucide-react";
 import type { EditorWorkspaceController } from "../../app/use-editor-workspace";
 import type { UiCopy } from "../../i18n/messages";
-import { DiffReviewPanel } from "./DiffReviewPanel";
 import { languageForPath } from "./editor-language";
 import { editorThemeFor, loadMonaco } from "./monaco-loader";
 import { FileTree } from "../desktop/FileTree";
-import { getDesktopWorkspaceRoot } from "../../services/desktop-bridge";
-import { projectManager } from "../../services/project-manager";
+import { projectManager, useProjectState } from "../../services/project-manager";
 
 type CodeEditor = import("monaco-editor").editor.IStandaloneCodeEditor;
 type TextModel = import("monaco-editor").editor.ITextModel;
@@ -55,9 +53,8 @@ export interface EditorViewProps {
   resolvedTheme: "light" | "dark";
   /** 隐藏但保持 Monaco 实例与 model 缓存（中栏视图切换不卸载编辑器） */
   hidden?: boolean;
-  /** 变更审阅 tab 激活态（受控；激活时以 DiffReviewPanel 替代 Monaco 区域） */
-  reviewActive?: boolean;
-  onReviewActiveChange?: (active: boolean) => void;
+  /** 点击顶部变更审阅标签：直接打开右侧面板的代码审阅标签 */
+  onOpenReview?: () => void;
 }
 
 /** 文件名 basename 显示 */
@@ -71,8 +68,7 @@ export function EditorView({
   copy,
   resolvedTheme,
   hidden = false,
-  reviewActive = false,
-  onReviewActiveChange,
+  onOpenReview,
 }: EditorViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<CodeEditor | null>(null);
@@ -95,8 +91,10 @@ export function EditorView({
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readStoredSidebarCollapsed);
-  const [workspaceRoot, setWorkspaceRoot] = useState<string>("");
+  const { activeProject } = useProjectState();
   const [treeRefreshKey, setTreeRefreshKey] = useState(0);
+
+  const isJa = copy?.editorViewTab === "チャット";
 
   const toggleSidebar = useCallback((collapsed: boolean) => {
     setSidebarCollapsed(collapsed);
@@ -107,16 +105,9 @@ export function EditorView({
     setTreeRefreshKey((k) => k + 1);
   }, []);
 
-  useEffect(() => {
-    void getDesktopWorkspaceRoot().then((root) => {
-      if (root) setWorkspaceRoot(root);
-    });
-  }, [treeRefreshKey]);
-
   const handlePickFolder = useCallback(async () => {
     const picked = await projectManager.pickAndOpenProject("Open workspace");
     if (picked) {
-      setWorkspaceRoot(picked);
       refreshTree();
     }
   }, [refreshTree]);
@@ -216,24 +207,26 @@ export function EditorView({
         {!sidebarCollapsed ? (
           <aside className="editor-view__sidebar" aria-label="工作区文件浏览">
             <div className="editor-sidebar__header">
-              <div className="editor-sidebar__title" title={workspaceRoot || "工作区"}>
+              <div className="editor-sidebar__title" title={activeProject || "工作区"}>
                 <Folder size={14} className="editor-sidebar__folder-icon" />
-                <span className="editor-sidebar__name">{getWorkspaceName(workspaceRoot)}</span>
+                <span className="editor-sidebar__name">{activeProject ? getWorkspaceName(activeProject) : (isJa ? "ワークスペース" : "工作区")}</span>
               </div>
               <div className="editor-sidebar__actions">
-                <button
-                  type="button"
-                  className="editor-sidebar__btn"
-                  onClick={refreshTree}
-                  title={copy?.refreshFileTree ?? "刷新文件树"}
-                >
-                  <RefreshCw size={13} />
-                </button>
+                {activeProject ? (
+                  <button
+                    type="button"
+                    className="editor-sidebar__btn"
+                    onClick={refreshTree}
+                    title={copy?.refreshFileTree ?? "刷新文件树"}
+                  >
+                    <RefreshCw size={13} />
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="editor-sidebar__btn"
                   onClick={() => void handlePickFolder()}
-                  title="打开工作区文件夹"
+                  title={isJa ? "プロジェクトを開く" : "打开工作区文件夹"}
                 >
                   <FolderPlus size={13} />
                 </button>
@@ -248,15 +241,28 @@ export function EditorView({
               </div>
             </div>
             <div className="editor-sidebar__tree">
-              <FileTree
-                key={treeRefreshKey}
-                copy={copy}
-                activePath={workspace.activePath}
-                onOpenFile={(path) => {
-                  void workspace.openFile(path);
-                  onReviewActiveChange?.(false);
-                }}
-              />
+              {activeProject ? (
+                <FileTree
+                  key={`${activeProject}-${treeRefreshKey}`}
+                  copy={copy}
+                  activePath={workspace.activePath}
+                  onOpenFile={(path) => {
+                    void workspace.openFile(path);
+                  }}
+                />
+              ) : (
+                <div className="editor-sidebar__empty">
+                  <p className="editor-sidebar__empty-text">{isJa ? "プロジェクト未選択" : "未选择项目"}</p>
+                  <button
+                    type="button"
+                    className="editor-sidebar__empty-btn"
+                    onClick={() => void handlePickFolder()}
+                  >
+                    <FolderPlus size={13} />
+                    <span>{isJa ? "プロジェクトを選択" : "选择项目"}</span>
+                  </button>
+                </div>
+              )}
             </div>
           </aside>
         ) : null}
@@ -284,10 +290,9 @@ export function EditorView({
                   type="button"
                   role="tab"
                   aria-selected={tab.path === workspace.activePath}
-                  className={`editor-tab ${tab.path === workspace.activePath && !reviewActive ? "editor-tab--active" : ""}`}
+                  className={`editor-tab ${tab.path === workspace.activePath ? "editor-tab--active" : ""}`}
                   onClick={() => {
                     workspace.setActive(tab.path);
-                    onReviewActiveChange?.(false);
                   }}
                   title={tab.path}
                 >
@@ -320,36 +325,41 @@ export function EditorView({
             <button
               type="button"
               role="tab"
-              aria-selected={reviewActive}
-              className={`editor-tab editor-tab--review ${reviewActive ? "editor-tab--active" : ""}`}
-              onClick={() => onReviewActiveChange?.(!reviewActive)}
+              aria-selected={false}
+              className="editor-tab editor-tab--review"
+              onClick={onOpenReview}
+              title={copy?.reviewTitle ?? "变更审阅"}
             >
               <GitCompareArrows size={13} className="editor-tab__icon" />
               <span className="editor-tab__name">{copy?.reviewTitle ?? "变更审阅"}</span>
             </button>
           </div>
 
-          <div className={`editor-view__body ${reviewActive ? "editor-view__body--review" : ""}`}>
+          <div className="editor-view__body">
             <div
               ref={containerRef}
               className="editor-view__monaco"
-              style={{ display: workspace.tabs.length === 0 && !reviewActive ? "none" : "block" }}
+              style={{ display: workspace.tabs.length === 0 ? "none" : "block" }}
             />
-            {workspace.tabs.length === 0 && !reviewActive ? (
+            {workspace.tabs.length === 0 ? (
               <div className="editor-view__empty-state">
                 <Code2 size={40} className="editor-view__empty-icon" />
                 <h3 className="editor-view__empty-title">工作区代码编辑器</h3>
                 <p className="editor-view__empty-desc">
-                  从左侧文件树直接选择并打开代码文件，或点击下方打开本地文件夹开启工程开发。
+                  {activeProject
+                    ? (isJa ? "左側のファイルツリーからファイルを選択して開く" : "从左侧选择文件打开")
+                    : (isJa ? "プロジェクトフォルダを開いて開発を開始してください。" : "从左侧文件树直接选择并打开代码文件，或点击下方打开本地文件夹开启工程开发。")}
                 </p>
-                <button
-                  type="button"
-                  className="editor-view__empty-btn"
-                  onClick={() => void handlePickFolder()}
-                >
-                  <FolderPlus size={14} />
-                  <span>打开工作区文件夹</span>
-                </button>
+                {!activeProject ? (
+                  <button
+                    type="button"
+                    className="editor-view__empty-btn"
+                    onClick={() => void handlePickFolder()}
+                  >
+                    <FolderPlus size={14} />
+                    <span>{isJa ? "プロジェクトを開く" : "打开工作区文件夹"}</span>
+                  </button>
+                ) : null}
                 <div className="editor-view__empty-hints">
                   <span>Ctrl+S 保存</span>
                   <span>•</span>
@@ -359,7 +369,6 @@ export function EditorView({
                 </div>
               </div>
             ) : null}
-            {reviewActive ? <DiffReviewPanel copy={copy} resolvedTheme={resolvedTheme} /> : null}
           </div>
 
           <footer className="editor-view__statusbar">

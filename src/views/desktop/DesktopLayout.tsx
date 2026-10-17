@@ -12,6 +12,7 @@ import { useTheme } from "../../app/use-theme";
 import { useEditorWorkspace } from "../../app/use-editor-workspace";
 import type { SharedViewProps } from "../layout-types";
 import { DesktopChatArea } from "./DesktopChatArea";
+import { OpenReviewContext } from "../../components/chat/review-context";
 import { DesktopSidebar } from "./sidebar";
 import { DesktopTopBar } from "./DesktopTopBar";
 import { DesktopRightPane } from "./DesktopRightPane";
@@ -121,7 +122,6 @@ export function DesktopLayout(props: SharedViewProps) {
   // 中栏视图切换（对话 ↔ 编辑器）：editor 一旦挂载即常驻（隐藏不卸载），保留 Monaco 实例与 model
   const [centerView, setCenterView] = useState<CenterView>(readStoredCenterView);
   const [editorMounted, setEditorMounted] = useState(() => readStoredCenterView() === "editor");
-  const [reviewActive, setReviewActive] = useState(false);
   const editorWorkspace = useEditorWorkspace();
 
   const switchCenterView = useCallback((view: CenterView) => {
@@ -162,6 +162,11 @@ export function DesktopLayout(props: SharedViewProps) {
       /* 隐私模式下 localStorage 不可用 */
     }
   }, []);
+
+  const handleOpenRightReview = useCallback(() => {
+    setRightPaneOpen(true);
+    handleSelectRightTab("review");
+  }, [handleSelectRightTab]);
 
   // 拖拽态标志：拖拽期间禁用 grid 过渡动画防止抖动
   const [dragging, setDragging] = useState(false);
@@ -433,14 +438,16 @@ export function DesktopLayout(props: SharedViewProps) {
         {/* 中列：对话/编辑器双视图 */}
         <div className="desktop-shell__center" data-center-view={centerView}>
           <div className="desktop-shell__chat">
-            <DesktopChatArea
-              {...props}
-              onOpenSettings={handleOpenSettings}
-              onRenameConversation={props.onRename}
-              onToggleRightPane={toggleRightPane}
-              rightPaneOpen={rightPaneOpen}
-              resolvedTheme={resolved}
-            />
+            <OpenReviewContext.Provider value={handleOpenRightReview}>
+              <DesktopChatArea
+                {...props}
+                onOpenSettings={handleOpenSettings}
+                onRenameConversation={props.onRename}
+                onToggleRightPane={toggleRightPane}
+                rightPaneOpen={rightPaneOpen}
+                resolvedTheme={resolved}
+              />
+            </OpenReviewContext.Provider>
           </div>
 
           {editorMounted ? (
@@ -450,8 +457,7 @@ export function DesktopLayout(props: SharedViewProps) {
                 copy={props.copy}
                 resolvedTheme={resolved}
                 hidden={centerView !== "editor"}
-                reviewActive={reviewActive}
-                onReviewActiveChange={setReviewActive}
+                onOpenReview={handleOpenRightReview}
               />
             </Suspense>
           ) : null}
@@ -478,7 +484,7 @@ export function DesktopLayout(props: SharedViewProps) {
                   /* 隐私模式下 localStorage 不可用 */
                 }
               }}
-              onCheckpointRestored={() => { editorWorkspace.resetTabs(); setReviewActive(false); }}
+              onCheckpointRestored={() => { editorWorkspace.resetTabs(); }}
               onOpenFile={(path) => {
                 void editorWorkspace.openFile(path);
                 switchCenterView("editor");

@@ -28,12 +28,15 @@ vi.mock("./monaco-loader", () => ({
 
 vi.mock("../../services/desktop-bridge", () => ({
   getDesktopWorkspaceRoot: vi.fn().mockResolvedValue("D:/test/my-workspace"),
+  setDesktopWorkspaceRoot: vi.fn().mockResolvedValue(true),
   listWorkspaceEntries: vi.fn().mockResolvedValue([
     { name: "index.ts", isDir: false },
     { name: "src", isDir: true },
   ]),
   pickDesktopFolder: vi.fn().mockResolvedValue("D:/test/another-project"),
 }));
+
+import { projectManager } from "../../services/project-manager";
 
 describe("EditorView", () => {
   const createMockWorkspace = (override?: Partial<EditorWorkspaceController>): EditorWorkspaceController => ({
@@ -52,17 +55,29 @@ describe("EditorView", () => {
     ...override,
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     localStorage.clear();
+    await projectManager.switchProject(null);
   });
 
-  it("无 tab 时展示左侧工作区文件树与右侧空状态引导", async () => {
+  it("未选择项目时展示左侧未选择项目与选择项目按钮，右侧显示打开工作区文件夹", async () => {
     const ws = createMockWorkspace();
     render(<EditorView workspace={ws} resolvedTheme="dark" />);
 
     expect(screen.getByLabelText("工作区文件浏览")).toBeInTheDocument();
+    expect(screen.getByText("未选择项目")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /选择项目/ })).toBeInTheDocument();
     expect(screen.getByText("工作区代码编辑器")).toBeInTheDocument();
     expect(screen.getByText("打开工作区文件夹")).toBeInTheDocument();
+  });
+
+  it("已有文件树时，空状态文案只显示从左侧选择文件打开，不显示打开工作区文件夹按钮", async () => {
+    const ws = createMockWorkspace();
+    await projectManager.switchProject("D:/test/my-workspace");
+    render(<EditorView workspace={ws} resolvedTheme="dark" />);
+
+    expect(await screen.findByText("从左侧选择文件打开")).toBeInTheDocument();
+    expect(screen.queryByText("打开工作区文件夹")).not.toBeInTheDocument();
   });
 
   it("支持折叠侧栏与通过展开按钮还原", () => {

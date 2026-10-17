@@ -1,19 +1,13 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { enterApp } from "./helpers";
 
 test.use({ serviceWorkers: "block" });
 test.skip(({ isMobile }) => isMobile, "验证桌面浏览器布局");
 
-async function enterApp(page: Page): Promise<void> {
-  await page.goto("/");
-  await expect(page.getByRole("textbox", { name: "什么都可以告诉我" })).toBeVisible();
-}
-
 test("工具入口集中在输入区，弹层在窄窗口内可操作", async ({ page }) => {
   await enterApp(page);
   const toolbar = page.getByRole("group", { name: "对话工具栏" });
-  for (const name of ["联网搜索快捷切换", "添加文件、项目或技能"]) {
-    await expect(toolbar.getByRole("button", { name })).toBeVisible();
-  }
+  await expect(toolbar.getByRole("button", { name: "添加文件、项目或技能" })).toBeVisible();
   await expect(page.locator(".desktop-chat-header .desktop-header-pill")).toHaveCount(0);
   await expect(page.getByText("Enter 发送 · Shift+Enter 换行")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "发送", exact: true })).toBeDisabled();
@@ -24,6 +18,7 @@ test("工具入口集中在输入区，弹层在窄窗口内可操作", async ({
   for (const width of [1440, 960, 640]) {
     await page.setViewportSize({ width, height: 800 });
     await toolbar.getByRole("button", { name: "添加文件、项目或技能" }).click();
+    await expect(page.getByRole("menuitemcheckbox", { name: "联网搜索" })).toBeVisible();
     await page.getByRole("button", { name: "加载技能", exact: true }).click();
     const skills = page.getByRole("dialog", { name: "快捷加载技能" });
     await expect(skills).toBeVisible();
@@ -31,7 +26,7 @@ test("工具入口集中在输入区，弹层在窄窗口内可操作", async ({
     expect(bounds!.x).toBeGreaterThanOrEqual(0);
     expect(bounds!.y).toBeGreaterThanOrEqual(0);
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
-    await page.locator(".desktop-chat-header").click({ position: { x: 12, y: 12 } });
+    await page.keyboard.press("Escape");
     await expect(skills).not.toBeVisible();
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
@@ -56,20 +51,25 @@ test("正文与工具按事件顺序展示，重载后保留顺序并默认折�
   await page.getByRole("button", { name: "发送", exact: true }).click();
   const reply = page.getByRole("article", { name: "八千代的回复" }).last();
   await expect(reply).toContainText("最终结果");
-  const orderedContent = async (): Promise<string[]> => reply.evaluate((element) => [...element.children]
-    .filter((child) => !child.classList.contains("message-bubble__actions"))
+  const process = reply.locator(".message-process");
+  await expect(process).not.toHaveAttribute("open");
+  await process.locator(":scope > summary").click();
+  const orderedContent = async (): Promise<string[]> => process.locator(".message-process__content").evaluate((element) => [...element.children]
     .map((child) => child.matches("details") ? child.querySelector("summary")!.textContent! : child.textContent!));
-  const expected = ["先检查工作区。", expect.stringContaining("查看思考"), "运行了 2 条命令", "已检查配置。",
-    "运行了 1 条命令1 项失败", expect.stringContaining("最终结果：需要补充配置。")];
+  const expected = ["先检查工作区。", expect.stringContaining("思考了"), "已运行 2 步", "已检查配置。",
+    "已运行 1 步1 步失败"];
   await expect.poll(orderedContent).toEqual(expected);
   await expect(reply.locator(".message-tool-group[open]")).toHaveCount(0);
-  await reply.getByText("运行了 2 条命令", { exact: true }).click();
+  await reply.getByText("已运行 2 步", { exact: true }).click();
   await expect(reply.locator(".message-tool-group[open]")).toHaveCount(1);
   await expect(reply.getByText("完成", { exact: true })).toHaveCount(0);
   await expect(reply.locator(".assistant-identity-header")).toHaveCount(0);
   await expect(reply.locator(".yachiyo-emote-badge")).toHaveCSS("font-style", "italic");
   await expect(page.getByRole("button", { name: "发送", exact: true })).toBeDisabled();
   await page.reload();
+  await expect(process).not.toHaveAttribute("open");
+  await expect(reply).toContainText("最终结果：需要补充配置。");
+  await process.locator(":scope > summary").click();
   await expect.poll(orderedContent).toEqual(expected);
   await expect(reply.locator(".message-tool-group[open]")).toHaveCount(0);
 });
@@ -84,6 +84,7 @@ test("命令面板可键盘搜索，编辑消息保留版本且重载后可切�
   await expect(palette).toBeVisible();
   await palette.getByRole("combobox").fill("联网搜索");
   await page.keyboard.press("Enter");
+  await expect(page.getByRole("dialog", { name: "设置中心" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "联网搜索" })).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Escape");
   const input = page.getByRole("textbox", { name: "什么都可以告诉我" });
@@ -97,8 +98,10 @@ test("命令面板可键盘搜索，编辑消息保留版本且重载后可切�
   await expect(user.getByLabel("消息版本")).toContainText("2 / 2");
   await page.reload();
   const restored = page.getByRole("article", { name: "我的消息" }).last();
+  await restored.hover();
   await restored.getByRole("button", { name: "上一个版本" }).click();
   await expect(restored).toContainText("旧问题");
+  await restored.hover();
   await restored.getByRole("button", { name: "下一个版本" }).click();
   await expect(restored).toContainText("新问题");
 });

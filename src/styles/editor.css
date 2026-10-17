@@ -147,7 +147,7 @@
 }
 
 .editor-sidebar__folder-icon {
-  color: var(--dsw-alias-state-business-primary, #3b82f6);
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
@@ -181,6 +181,41 @@
   flex: 1;
   overflow-y: auto;
   padding: 4px;
+}
+
+.editor-sidebar__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.editor-sidebar__empty-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.editor-sidebar__empty-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-control);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+  border: 1px solid var(--border-l2);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.editor-sidebar__empty-btn:hover {
+  background: var(--interactive-hover);
 }
 
 /* 右侧主工作区 */
@@ -622,18 +657,19 @@
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-button-info-fill);
+  color: var(--dsw-alias-button-primary-text);
+  background: var(--dsw-alias-button-primary-fill);
   border: none;
   cursor: pointer;
   transition:
     transform var(--motion-duration-press) var(--ease-out),
-    background var(--ds-transition-duration-fast) var(--ds-ease-hover);
+    background var(--ds-transition-duration-fast) var(--ds-ease-hover),
+    color var(--ds-transition-duration-fast) var(--ds-ease-hover);
 }
 
 @media (hover: hover) and (pointer: fine) {
   .review-primary-btn:not(:disabled):hover {
-    background: var(--dsw-alias-button-info-hover);
+    background: var(--dsw-alias-button-primary-hover);
   }
 }
 
@@ -661,6 +697,68 @@
   min-height: 0;
   display: grid;
   grid-template-columns: 250px minmax(0, 1fr);
+}
+
+.review-panel--compact .review-panel__body {
+  display: flex;
+  flex-direction: column;
+}
+
+.review-files-collapsible {
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.review-files-collapsible__trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11.5px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.review-files-collapsible__trigger:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.review-files-collapsible__caret {
+  transition: transform var(--motion-duration-fast) var(--ease-out);
+}
+
+.review-files-collapsible__caret--collapsed {
+  transform: rotate(-90deg);
+}
+
+.review-files-collapsible__title {
+  font-weight: 500;
+}
+
+.review-files-collapsible__selected {
+  font-family: var(--ds-font-family-code);
+  font-size: 11px;
+  color: var(--dsw-alias-label-dimmed);
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-panel--compact .review-files {
+  border-right: none;
+  max-height: 160px;
+}
+
+.review-panel--compact .review-content {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
 }
 
 /* 变更文件列表 */
@@ -723,26 +821,19 @@
   place-items: center;
   width: 17px;
   height: 17px;
-  border-radius: 5px;
+  border-radius: 4px;
   font-size: 10.5px;
-  font-weight: 800;
+  font-weight: 700;
   font-family: var(--ds-font-family-code);
   flex-shrink: 0;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-border-l1);
 }
 
-.review-file__badge--modified {
-  color: var(--dsw-alias-state-warn-label);
-  background: rgb(247 173 49 / 14%);
-}
-
-.review-file__badge--added {
-  color: var(--dsw-alias-label-primary);
-  background: var(--yx-alias-interactive-bg-hover-accent);
-}
-
+.review-file__badge--modified,
+.review-file__badge--added,
 .review-file__badge--deleted {
-  color: var(--dsw-alias-state-error-primary);
-  background: var(--dsw-alias-interactive-bg-hover-danger);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .review-file__path {

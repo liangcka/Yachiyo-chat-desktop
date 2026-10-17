@@ -401,14 +401,15 @@ export function DesktopChatArea({
       {/* 写入操作在继续执行前需要授权。 */}
       {pendingPermission !== undefined ? (
         <PermissionCard
+          key={pendingPermission.requestId}
           argumentsJson={pendingPermission.argumentsJson}
           toolName={pendingPermission.toolName}
           locale={controller.locale}
           onApprove={(sessionScope) => {
-            void controller.approvePermission(pendingPermission.requestId, true, sessionScope);
+            return controller.approvePermission(pendingPermission.requestId, true, sessionScope);
           }}
           onDeny={() => {
-            void controller.approvePermission(pendingPermission.requestId, false);
+            return controller.approvePermission(pendingPermission.requestId, false);
           }}
         />
       ) : null}

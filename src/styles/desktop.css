@@ -3711,6 +3711,15 @@
   word-break: break-all;
 }
 
+.permission-card__error {
+  padding: 4px 12px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--danger);
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+  border-top: 1px solid var(--dsw-alias-border-l1);
+}
+
 /* 底部操作区 */
 .permission-card__actions {
   display: flex;
@@ -7176,15 +7185,20 @@
   left: 0;
   width: 100%;
   max-width: 480px;
-  background: var(--dsw-alias-bg-layer-2, #18191f);
-  border: 1px solid var(--dsw-alias-border-l1, rgba(255, 255, 255, 0.12));
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-elevated);
   z-index: 100;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   animation: slash-picker-appear 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.slash-cmd-picker--down {
+  bottom: auto;
+  top: calc(100% + 8px);
 }
 
 @keyframes slash-picker-appear {
@@ -7202,12 +7216,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(255, 255, 255, 0.08));
-  background: var(--dsw-alias-bg-layer-1, rgba(255, 255, 255, 0.02));
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
   font-size: 11.5px;
-  color: var(--dsw-alias-label-secondary, #94a3b8);
+  color: var(--dsw-alias-label-secondary);
   user-select: none;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .slash-cmd-picker__title {
@@ -7215,13 +7232,14 @@
   align-items: center;
   gap: 6px;
   font-weight: 500;
+  flex-shrink: 0;
 }
 
 .slash-cmd-picker__query-tag {
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(59, 130, 246, 0.16);
-  color: var(--accent-brand, #3b82f6);
+  background: var(--accent-brand-soft);
+  color: var(--accent-brand);
   font-family: var(--ds-font-family-code, monospace);
   font-size: 11px;
 }
@@ -7230,14 +7248,16 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .slash-cmd-picker__hint-badge {
   font-size: 10.5px;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--dsw-alias-border-l1, rgba(255, 255, 255, 0.06));
-  color: var(--dsw-alias-label-tertiary, #64748b);
+  padding: 2px 6px;
+  border-radius: var(--radius-control);
+  background: var(--dsw-alias-border-l1);
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
 }
 
 .slash-cmd-picker__close-btn {
@@ -7249,14 +7269,14 @@
   border-radius: 4px;
   border: none;
   background: transparent;
-  color: var(--dsw-alias-label-tertiary, #64748b);
+  color: var(--dsw-alias-label-tertiary);
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
 }
 
 .slash-cmd-picker__close-btn:hover {
-  background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.08));
-  color: var(--dsw-alias-label-primary, #f1f5f9);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
 }
 
 .slash-cmd-picker__list {
@@ -7264,7 +7284,8 @@
   margin: 0;
   padding: 6px;
   overflow-y: auto;
-  max-height: 280px;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 3px;

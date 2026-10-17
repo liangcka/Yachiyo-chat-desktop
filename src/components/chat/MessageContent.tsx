@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import type { ChatMessage, Locale, MessageContentSegment, ToolStep } from "../../domain/chat";
+import { collectModifiedFiles } from "../../domain/file-changes";
 import { ToolCard } from "../tools/ToolCard";
+import { FileChangeSummary } from "./FileChangeSummary";
 import { MarkdownContent } from "./MarkdownContent";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { processDurationMs, splitContentSegments } from "./content-segments";
@@ -88,7 +90,7 @@ function ToolGroup({ steps, streaming, locale, pendingStepId }: {
     >
       <summary className="message-tool-group__summary">
         <span>{label}</span>
-        {failed > 0 ? <span className="message-tool-group__error">{locale === "ja-JP" ? `${failed} 件失敗` : `${failed} 项失败`}</span> : null}
+        {failed > 0 ? <span className="message-tool-group__error">{locale === "ja-JP" ? `${failed} ステップ失敗` : `${failed} 步失败`}</span> : null}
         <ChevronRight size={13} aria-hidden="true" />
       </summary>
       <div className="message-tool-group__details">
@@ -124,6 +126,7 @@ export function MessageContent({ message, locale, hideCitations, pendingPermissi
     : undefined;
   const { processSegments, finalSegments } = splitContentSegments(segments);
   const collapseProcess = message.status === "complete" && processSegments.length > 0;
+  const changes = <FileChangeSummary paths={collectModifiedFiles(message)} locale={locale} />;
 
   function renderSegments(parts: ReadonlyArray<MessageContentSegment>): ReactNode[] {
     const content: ReactNode[] = [];
@@ -156,7 +159,7 @@ export function MessageContent({ message, locale, hideCitations, pendingPermissi
   if (segments.length === 0 && message.status === "streaming") {
     return <ThinkingBlock locale={locale} hasText={false} isStreaming />;
   }
-  if (!collapseProcess) return <>{renderSegments(segments)}</>;
+  if (!collapseProcess) return <>{renderSegments(segments)}{changes}</>;
 
   const processSteps = processSegments.flatMap((segment) => {
     const step = segment.type === "tool" ? tools.get(segment.toolId) : undefined;
@@ -179,5 +182,6 @@ export function MessageContent({ message, locale, hideCitations, pendingPermissi
       <div className="message-process__content">{renderSegments(processSegments)}</div>
     </details>
     {renderSegments(finalSegments)}
+    {changes}
   </>;
 }

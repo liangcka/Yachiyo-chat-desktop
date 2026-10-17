@@ -59,7 +59,7 @@ pub fn tool_risk(name: &str) -> Option<ToolRisk> {
         "read_file" | "list_directory" | "git_status" | "git_diff" | "web_fetch" | "todo_write" => {
             Some(ToolRisk::Read)
         }
-        "write_file" | "run_command" => Some(ToolRisk::Write),
+        "write_file" | "edit_file" | "run_command" => Some(ToolRisk::Write),
         _ => None,
     }
 }
@@ -283,7 +283,7 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
             "type": "function",
             "function": {
                 "name": "write_file",
-                "description": "写入或覆盖工作区中的文件内容（需彩叶批准）。创建新文件或修改现有代码必须使用此工具，以生成检查点和代码审阅记录。必须先选择项目，不得改用 run_command 写入。",
+                "description": "新建文件或整体重写工作区中的文件（需彩叶批准），生成检查点和代码审阅记录。修改已有文件的局部内容请使用 edit_file；整体重写前必须先用 read_file 读取。必须先选择项目，不得改用 run_command 写入。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -291,6 +291,23 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
                         "content": { "type": "string", "description": "Content to write into the file" }
                     },
                     "required": ["path", "content"]
+                }
+            }
+        }),
+        serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "edit_file",
+                "description": "按片段替换已有文件（需彩叶批准）。修改已有文件优先使用此工具；write_file 只用于新建文件或整体重写。必须先选择项目并用 read_file 读取目标文件，写前校验版本，保留原有换行符。old_string 默认必须唯一匹配；找不到时重新读取，多处匹配时补充上下文或使用 replace_all。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "工作区内的相对或绝对文件路径" },
+                        "old_string": { "type": "string", "minLength": 1, "description": "待替换的原文片段，包含足够上下文以唯一定位" },
+                        "new_string": { "type": "string", "description": "替换后的片段，可为空以删除原文" },
+                        "replace_all": { "type": "boolean", "default": false, "description": "是否替换所有匹配，默认 false" }
+                    },
+                    "required": ["path", "old_string", "new_string"]
                 }
             }
         }),
@@ -311,7 +328,7 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
             "type": "function",
             "function": {
                 "name": "run_command",
-                "description": "在终端执行命令（Windows 使用 PowerShell，Unix 使用 sh，需彩叶批准）。只用于构建、测试、git 和查询系统信息；禁止用 Get-Content、Set-Content、cat、echo > 等命令读写文件，必须使用 read_file / write_file。未选择项目时在默认用户环境中执行。（宿主探查准则：遇到存疑、溢出或冲突数据必须多步交叉求证；Windows 下查询显存请使用 nvidia-smi 或注册表 HardwareInformation.qwMemorySize，避免使用有 4GB 截断限制的 Win32_VideoController.AdapterRAM）。",
+                "description": "在终端执行命令（Windows 使用 PowerShell，Unix 使用 sh，需彩叶批准）。只用于构建、测试、git 和查询系统信息；禁止用 Get-Content、Set-Content、cat、echo > 等命令读写文件，读取使用 read_file，局部修改使用 edit_file，新建或整体重写使用 write_file。未选择项目时在默认用户环境中执行。（宿主探查准则：遇到存疑、溢出或冲突数据必须多步交叉求证；Windows 下查询显存请使用 nvidia-smi 或注册表 HardwareInformation.qwMemorySize，避免使用有 4GB 截断限制的 Win32_VideoController.AdapterRAM）。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -394,7 +411,7 @@ pub async fn execute_tool_with_context(
 ) -> Result<String, String> {
     // 执行边界自带授权判定：写类工具须有人类发起凭据或模型侧的获批标记，
     // 调用方漏判也不会落地破坏性动作
-    if name == "write_file" && workspace_root.is_none() {
+    if matches!(name, "write_file" | "edit_file") && workspace_root.is_none() {
         return Err(PROJECT_REQUIRED_FOR_WRITE.to_string());
     }
     authorize_tool(name, auth)?;
@@ -424,6 +441,18 @@ pub async fn execute_tool_with_context(
             let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path' argument")?;
             let content = args.get("content").and_then(|v| v.as_str()).ok_or("Missing 'content' argument")?;
             fs::write_file_guarded(path, content, root, fs_tracker)
+        }
+        "edit_file" => {
+            let root = workspace_root.ok_or(PROJECT_REQUIRED_FOR_WRITE)?;
+            let path = args.get("path").and_then(|v| v.as_str()).ok_or("缺少 path 参数")?;
+            let old = args.get("old_string").and_then(|v| v.as_str()).ok_or("缺少 old_string 参数")?;
+            let new = args.get("new_string").and_then(|v| v.as_str()).ok_or("缺少 new_string 参数")?;
+            let replace_all = match args.get("replace_all") {
+                None => false,
+                Some(value) => value.as_bool().ok_or("replace_all 必须为布尔值")?,
+            };
+            let tracker = fs_tracker.ok_or("FS_NOT_OBSERVED: 请先用 read_file 读取目标文件后重试。")?;
+            fs::edit_file_guarded(path, old, new, replace_all, root, tracker)
         }
         "list_directory" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");

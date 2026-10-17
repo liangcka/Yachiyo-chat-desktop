@@ -249,7 +249,7 @@ describe("reference chat components", () => {
     fireEvent.click(groups[0]!.querySelector("summary")!);
     expect(groups[0]).toHaveAttribute("open");
     expect(screen.queryByText("完成", { exact: true })).not.toBeInTheDocument();
-    expect(screen.getByText("1 项失败")).toBeInTheDocument();
+    expect(screen.getByText("1 步失败")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "思考了 6 秒" }));
     expect(screen.getByText("需要检查配置。")).toBeVisible();
   });

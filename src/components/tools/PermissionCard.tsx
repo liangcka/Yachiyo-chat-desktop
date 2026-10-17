@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy, FileCode2, ShieldAlert, Terminal, X } from "lucide-react";
 import type { Locale } from "../../domain/chat";
+import { EditFileDiff } from "./EditFileDiff";
 
 export interface PermissionCardProps {
   toolName: string;
   argumentsJson: string;
-  onApprove: (sessionScope: boolean) => void;
-  onDeny: () => void;
+  onApprove: (sessionScope: boolean) => void | boolean | Promise<boolean | void>;
+  onDeny: () => void | boolean | Promise<boolean | void>;
   locale?: Locale;
 }
 
@@ -19,6 +20,7 @@ interface ParsedPermissionInfo {
   fileDescription?: string;
   extraMeta?: string;
   formattedJson?: string;
+  editArguments?: Record<string, unknown>;
 }
 
 /** 智能解析写操作工具参数，提取关键命令或文件路径以供语义化展示 */
@@ -52,7 +54,7 @@ function parsePermissionArguments(
     };
   }
 
-  if ((toolName === "write_file" || toolName === "replace_file_content") && parsed) {
+  if ((toolName === "write_file" || toolName === "edit_file" || toolName === "replace_file_content") && parsed) {
     const filePath =
       typeof parsed.path === "string"
         ? parsed.path
@@ -74,6 +76,7 @@ function parsePermissionArguments(
       filePath,
       fileDescription: desc,
       formattedJson: JSON.stringify(parsed, null, 2),
+      editArguments: toolName === "edit_file" ? parsed : undefined,
     };
   }
 
@@ -108,9 +111,8 @@ export function PermissionCard({
 }: PermissionCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
-  const currentKey = `${toolName}:${argumentsJson}`;
-  const [submittedKey, setSubmittedKey] = useState<string | null>(null);
-  const isSubmitting = submittedKey === currentKey;
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const info = parsePermissionArguments(toolName, argumentsJson, locale);
   const isJa = locale === "ja-JP";
 
@@ -126,17 +128,37 @@ export function PermissionCard({
     }
   }, [copyContent]);
 
-  const handleDeny = useCallback(() => {
+  const handleDeny = useCallback(async () => {
     if (isSubmitting) return;
-    setSubmittedKey(currentKey);
-    onDeny();
-  }, [currentKey, isSubmitting, onDeny]);
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    try {
+      const res = await onDeny();
+      if (res === false) {
+        setIsSubmitting(false);
+        setErrorMessage(isJa ? "送信に失敗しました。もう一度お試しください" : "提交失败，请重试");
+      }
+    } catch {
+      setIsSubmitting(false);
+      setErrorMessage(isJa ? "送信に失敗しました。もう一度お試しください" : "提交失败，请重试");
+    }
+  }, [isJa, isSubmitting, onDeny]);
 
-  const handleApprove = useCallback((sessionScope: boolean) => {
+  const handleApprove = useCallback(async (sessionScope: boolean) => {
     if (isSubmitting) return;
-    setSubmittedKey(currentKey);
-    onApprove(sessionScope);
-  }, [currentKey, isSubmitting, onApprove]);
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    try {
+      const res = await onApprove(sessionScope);
+      if (res === false) {
+        setIsSubmitting(false);
+        setErrorMessage(isJa ? "送信に失敗しました。もう一度お試しください" : "提交失败，请重试");
+      }
+    } catch {
+      setIsSubmitting(false);
+      setErrorMessage(isJa ? "送信に失敗しました。もう一度お試しください" : "提交失败，请重试");
+    }
+  }, [isJa, isSubmitting, onApprove]);
 
   // 快捷键仅在焦点位于权限卡内部且未被 defaultPrevented 时响应，避免全局拦截
   useEffect(() => {
@@ -246,6 +268,7 @@ export function PermissionCard({
                 {info.fileDescription}
               </p>
             ) : null}
+            {info.editArguments ? <EditFileDiff args={info.editArguments} locale={locale} /> : null}
             {info.formattedJson ? (
               <details className="permission-card__details">
                 <summary className="permission-card__details-summary">
@@ -271,6 +294,12 @@ export function PermissionCard({
           </div>
         )}
       </div>
+
+      {errorMessage ? (
+        <div className="permission-card__error" role="alert">
+          {errorMessage}
+        </div>
+      ) : null}
 
       {/* 底部操作行：拒绝、本会话允许、允许一次 */}
       <div className="permission-card__actions">

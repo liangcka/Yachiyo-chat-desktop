@@ -200,5 +200,51 @@ describe("PermissionCard", () => {
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("Get-Content run.ps1");
   });
+
+  it("同参数的两个请求先后出现时，第二张卡的按钮可用", () => {
+    const onApprove = vi.fn();
+    const { unmount } = render(
+      <PermissionCard
+        key="req-1"
+        {...defaultProps}
+        onApprove={onApprove}
+      />,
+    );
+
+    const firstOnceBtn = screen.getByRole("button", { name: /允许一次/ });
+    fireEvent.click(firstOnceBtn);
+    expect(firstOnceBtn).toBeDisabled();
+    unmount();
+
+    // 相同参数的新请求（对应新实例）
+    render(
+      <PermissionCard
+        key="req-2"
+        {...defaultProps}
+        onApprove={onApprove}
+      />,
+    );
+
+    const secondOnceBtn = screen.getByRole("button", { name: /允许一次/ });
+    const secondDenyBtn = screen.getByRole("button", { name: /拒绝/ });
+    expect(secondOnceBtn).not.toBeDisabled();
+    expect(secondDenyBtn).not.toBeDisabled();
+  });
+
+  it("提交失败后按钮恢复可用并显示错误提示", async () => {
+    const onApprove = vi.fn().mockResolvedValue(false);
+    render(<PermissionCard {...defaultProps} onApprove={onApprove} />);
+
+    const onceBtn = screen.getByRole("button", { name: /允许一次/ });
+    const denyBtn = screen.getByRole("button", { name: /拒绝/ });
+    const sessionBtn = screen.getByRole("button", { name: /本会话允许/ });
+
+    fireEvent.click(onceBtn);
+
+    expect(await screen.findByText("提交失败，请重试")).toBeInTheDocument();
+    expect(onceBtn).not.toBeDisabled();
+    expect(denyBtn).not.toBeDisabled();
+    expect(sessionBtn).not.toBeDisabled();
+  });
 });
 
