@@ -153,6 +153,10 @@ export function App({ services, autoAiTitle }: AppProps) {
   const setControllerOnline = controller.setOnline;
   const copy = copyFor(controller.locale);
   const handledErrorRef = useRef<string | undefined>(undefined);
+  const phaseRef = useRef(controller.phase);
+  useEffect(() => {
+    phaseRef.current = controller.phase;
+  }, [controller.phase]);
   const toastSequenceRef = useRef(0);
 
   useEffect(() => {
@@ -403,7 +407,7 @@ export function App({ services, autoAiTitle }: AppProps) {
         void activeServices.session.authenticate("yachiyo-local-access").catch(() => undefined);
       }
       const isBannerError =
-        controller.phase === "error" &&
+        phaseRef.current === "error" &&
         errorCode !== "DAILY_QUOTA_EXCEEDED" &&
         errorCode !== "SESSION_REQUIRED";
       if (!isBannerError) {
@@ -411,7 +415,7 @@ export function App({ services, autoAiTitle }: AppProps) {
       }
     }, 0);
     return () => clearTimeout(timeout);
-  }, [activeServices.session, controller.errorCode, controller.phase, copy, showToast]);
+  }, [activeServices.session, controller.errorCode, copy, showToast]);
 
   const handleImage = useCallback(
     (image: ProcessedImage) => {

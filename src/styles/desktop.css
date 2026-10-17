@@ -3738,6 +3738,12 @@
   transform: scale(0.98);
 }
 
+.permission-card__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .permission-card__kbd {
   display: inline-flex;
   align-items: center;

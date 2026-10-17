@@ -63,6 +63,7 @@ export interface ConversationViewProps {
   onScrolledFromTopChange?: (scrolledFromTop: boolean) => void;
   /** 当前激活的技能定义列表 */
   activeSkills?: readonly SkillDefinition[];
+  pendingPermission?: { toolName: string; argumentsJson: string };
   pendingToolName?: string;
 }
 
@@ -82,6 +83,7 @@ export function ConversationView({
   onScrolledFromTopChange,
   showSources,
   summary,
+  pendingPermission,
   pendingToolName,
 }: ConversationViewProps) {
   const containerRef = useRef<HTMLElement>(null);
@@ -182,11 +184,12 @@ export function ConversationView({
           onToast={onToast}
           isLastAssistant={message.role === "assistant" && index === lastAssistantMessageIndex}
           isGenerating={isGenerating}
+          pendingPermission={index === lastAssistantMessageIndex ? pendingPermission : undefined}
           pendingToolName={index === lastAssistantMessageIndex ? pendingToolName : undefined}
         />
       </li>
     ),
-    [handleImageLoad, imageUrls, lastUserMessageIndex, lastAssistantMessageIndex, isGenerating, locale, onRecall, onRegenerate, onToast, showSources, onEdit, onVersionChange, conversation, pendingToolName],
+    [handleImageLoad, imageUrls, lastUserMessageIndex, lastAssistantMessageIndex, isGenerating, locale, onRecall, onRegenerate, onToast, showSources, onEdit, onVersionChange, conversation, pendingPermission, pendingToolName],
   );
 
   const skillsCard =

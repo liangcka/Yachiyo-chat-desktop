@@ -20,6 +20,7 @@ export interface MessageBubbleProps {
   onImageLoad?: () => void;
   isLastAssistant?: boolean;
   isGenerating?: boolean;
+  pendingPermission?: { toolName: string; argumentsJson: string };
   pendingToolName?: string;
 }
 
@@ -48,6 +49,7 @@ export const MessageBubble = memo(function MessageBubble({
   onVersionChange,
   onToast,
   showSources,
+  pendingPermission,
   pendingToolName,
 }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
@@ -223,7 +225,11 @@ export const MessageBubble = memo(function MessageBubble({
     return null;
   }
 
-  const hasMenuOptions = onRecall !== undefined || onRegenerate !== undefined || hasText;
+  const isStreamingMessage = message.status === "streaming";
+  const hasMenuOptions = onRecall !== undefined || (!isStreamingMessage && (onRegenerate !== undefined || hasText));
+  const showVersions = Boolean(hasVersions && !isGenerating && !isStreamingMessage);
+  const showCopy = Boolean(hasText && !isStreamingMessage);
+  const showRegenerate = Boolean(onRegenerate !== undefined && !isStreamingMessage);
 
   return (
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions
@@ -260,7 +266,7 @@ export const MessageBubble = memo(function MessageBubble({
       ) : isEmpty && message.status === "failed" && message.role === "assistant" ? (
         <p>{locale === "ja-JP" ? "返信を生成できませんでした。" : "本次回复未生成。"}</p>
       ) : message.role === "assistant" ? (
-        <MessageContent message={message} locale={locale} hideCitations={hideCitations} pendingToolName={pendingToolName} />
+        <MessageContent message={message} locale={locale} hideCitations={hideCitations} pendingPermission={pendingPermission} pendingToolName={pendingToolName} />
       ) : hasText ? (
         <div
           ref={userContentRef}
@@ -302,22 +308,22 @@ export const MessageBubble = memo(function MessageBubble({
           ))}
         </div>
       ) : null}
-      {!editing && (hasText || onEdit || onRegenerate || (versions && versions.length > 1)) ? (
+      {!editing && (showCopy || onEdit || showRegenerate || showVersions) ? (
         <div className="message-bubble__actions">
-          {versions && versions.length > 1 && !isGenerating && message.status !== "streaming" ? (
+          {showVersions && versions ? (
             <div className="message-bubble__versions" aria-label="消息版本">
               <button type="button" aria-label="上一个版本" disabled={!onVersionChange || versions.indexOf(message.branchVersion ?? 1) <= 0} onClick={() => onVersionChange?.(versions[versions.indexOf(message.branchVersion ?? 1) - 1]!)}><ChevronLeft size={13} /></button>
               <span>{versions.indexOf(message.branchVersion ?? 1) + 1} / {versions.length}</span>
               <button type="button" aria-label="下一个版本" disabled={!onVersionChange || versions.indexOf(message.branchVersion ?? 1) >= versions.length - 1} onClick={() => onVersionChange?.(versions[versions.indexOf(message.branchVersion ?? 1) + 1]!)}><ChevronRight size={13} /></button>
             </div>
           ) : null}
-          {hasText ? (
+          {showCopy ? (
             <button type="button" onClick={handleCopy} title={copyFor(locale).copyText} aria-label={copyFor(locale).copyText}>
               <Copy size={13} />
             </button>
           ) : null}
           {onEdit ? <button type="button" title="编辑消息" aria-label="编辑消息" onClick={() => { setEditText(message.text); setEditing(true); }}><Pencil size={13} /></button> : null}
-          {onRegenerate && message.status !== "streaming" ? (
+          {showRegenerate ? (
             <button type="button" onClick={handleRegenerateAction} title={copyFor(locale).regenerate} aria-label={copyFor(locale).regenerate}>
               <RotateCw size={13} />
             </button>
@@ -330,7 +336,7 @@ export const MessageBubble = memo(function MessageBubble({
           className={`message-bubble__context-menu message-bubble__context-menu--${message.role} message-bubble__context-menu--${placement}`}
           role="menu"
         >
-          {onRegenerate !== undefined ? (
+          {showRegenerate ? (
             <button
               aria-label={copyFor(locale).regenerate}
               className="message-bubble__context-item message-bubble__context-item--regenerate"
@@ -354,10 +360,10 @@ export const MessageBubble = memo(function MessageBubble({
               <span>{copyFor(locale).recall}</span>
             </button>
           ) : null}
-          {(onRegenerate !== undefined || onRecall !== undefined) && hasText ? (
+          {(showRegenerate || onRecall !== undefined) && showCopy ? (
             <span aria-hidden="true" className="message-bubble__context-divider" />
           ) : null}
-          {hasText ? (
+          {showCopy ? (
             <button
               aria-label={copyFor(locale).copyText}
               className="message-bubble__context-item"

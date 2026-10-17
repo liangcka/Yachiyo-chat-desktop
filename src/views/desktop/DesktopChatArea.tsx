@@ -336,19 +336,17 @@ export function DesktopChatArea({
 
     if (slashPickerOpen && slashPickerRef.current?.handleKeyDown(e)) return;
 
-    if (e.key === "Escape" && pendingPermission !== undefined) {
-      e.preventDefault();
-      void controller.approvePermission(pendingPermission.requestId, false);
-      return;
-    }
-
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
+      const hasContent = Boolean(composerValue.trim() || pendingImageDataUrl || attachments.length > 0);
       if (pendingPermission !== undefined) {
-        void controller.approvePermission(pendingPermission.requestId, true, false);
+        if (hasContent && !composerUnavailable) {
+          void controller.approvePermission(pendingPermission.requestId, false);
+          sendMessage(composerValue);
+        }
         return;
       }
-      if (!composerUnavailable && (composerValue.trim() || pendingImageDataUrl || attachments.length > 0)) {
+      if (!composerUnavailable && hasContent) {
         sendMessage(composerValue);
       }
     }
@@ -747,6 +745,7 @@ export function DesktopChatArea({
               key={controller.activeConversation?.id}
               locale={controller.locale}
               messages={controller.messages}
+              pendingPermission={pendingPermission ? { toolName: pendingPermission.toolName, argumentsJson: pendingPermission.argumentsJson } : undefined}
               pendingToolName={pendingPermission?.toolName}
               conversation={controller.activeConversation}
               onEdit={isOffline || isStreaming || isCompressing ? undefined : controller.editMessage}

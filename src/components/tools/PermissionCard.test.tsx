@@ -98,20 +98,79 @@ describe("PermissionCard", () => {
     expect(onApprove).toHaveBeenCalledWith(true);
   });
 
-  it("按下 Esc 键触发 onDeny", () => {
+  it("焦点在卡片内部时按下 Esc 键触发 onDeny", () => {
     const onDeny = vi.fn();
     render(<PermissionCard {...defaultProps} onDeny={onDeny} />);
 
+    const denyBtn = screen.getByRole("button", { name: /拒绝/ });
+    denyBtn.focus();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onDeny).toHaveBeenCalledTimes(1);
   });
 
-  it("按下 Enter 键直接单次允许本次操作", () => {
+  it("焦点在卡片内部（非特殊控件）时按下 Enter 键直接单次允许本次操作", () => {
     const onApprove = vi.fn();
     render(<PermissionCard {...defaultProps} onApprove={onApprove} />);
 
+    // 聚焦卡片内的复制按钮并在 window 上按 Enter
+    const copyBtn = screen.getByRole("button", { name: "复制命令" });
+    copyBtn.focus();
     fireEvent.keyDown(window, { key: "Enter" });
     expect(onApprove).toHaveBeenCalledWith(false);
+  });
+
+  it("焦点在输入框时按 Enter 不批准；打开命令面板后按 Esc 不拒绝", () => {
+    const onApprove = vi.fn();
+    const onDeny = vi.fn();
+    render(
+      <div>
+        <input data-testid="outside-input" type="text" />
+        <button data-testid="outside-palette" type="button" />
+        <PermissionCard {...defaultProps} onApprove={onApprove} onDeny={onDeny} />
+      </div>,
+    );
+
+    const outsideInput = screen.getByTestId("outside-input");
+    outsideInput.focus();
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onApprove).not.toHaveBeenCalled();
+
+    const outsidePalette = screen.getByTestId("outside-palette");
+    outsidePalette.focus();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onDeny).not.toHaveBeenCalled();
+
+    // 已经 defaultPrevented 的事件不处理
+    const denyBtn = screen.getByRole("button", { name: /拒绝/ });
+    denyBtn.focus();
+    const escEvent = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    escEvent.preventDefault();
+    window.dispatchEvent(escEvent);
+    expect(onDeny).not.toHaveBeenCalled();
+  });
+
+  it("点击或按键之后立即禁用三个按钮，防止重复提交", () => {
+    const onApprove = vi.fn();
+    render(<PermissionCard {...defaultProps} onApprove={onApprove} />);
+
+    const onceBtn = screen.getByRole("button", { name: /允许一次/ });
+    const sessionBtn = screen.getByRole("button", { name: /本会话允许/ });
+    const denyBtn = screen.getByRole("button", { name: /拒绝/ });
+
+    expect(onceBtn).not.toBeDisabled();
+    expect(sessionBtn).not.toBeDisabled();
+    expect(denyBtn).not.toBeDisabled();
+
+    fireEvent.click(onceBtn);
+    expect(onApprove).toHaveBeenCalledTimes(1);
+
+    expect(onceBtn).toBeDisabled();
+    expect(sessionBtn).toBeDisabled();
+    expect(denyBtn).toBeDisabled();
+
+    // 再次点击无效
+    fireEvent.click(onceBtn);
+    expect(onApprove).toHaveBeenCalledTimes(1);
   });
 
   it("支持日文本地化呈现", () => {

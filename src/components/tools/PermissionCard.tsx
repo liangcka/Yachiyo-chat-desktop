@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy, FileCode2, ShieldAlert, Terminal, X } from "lucide-react";
 import type { Locale } from "../../domain/chat";
 
@@ -106,7 +106,11 @@ export function PermissionCard({
   onDeny,
   locale = "zh-CN",
 }: PermissionCardProps) {
+  const cardRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  const currentKey = `${toolName}:${argumentsJson}`;
+  const [submittedKey, setSubmittedKey] = useState<string | null>(null);
+  const isSubmitting = submittedKey === currentKey;
   const info = parsePermissionArguments(toolName, argumentsJson, locale);
   const isJa = locale === "ja-JP";
 
@@ -122,13 +126,29 @@ export function PermissionCard({
     }
   }, [copyContent]);
 
-  // 支持键盘快捷键：Esc 拒绝，Enter 允许一次
+  const handleDeny = useCallback(() => {
+    if (isSubmitting) return;
+    setSubmittedKey(currentKey);
+    onDeny();
+  }, [currentKey, isSubmitting, onDeny]);
+
+  const handleApprove = useCallback((sessionScope: boolean) => {
+    if (isSubmitting) return;
+    setSubmittedKey(currentKey);
+    onApprove(sessionScope);
+  }, [currentKey, isSubmitting, onApprove]);
+
+  // 快捷键仅在焦点位于权限卡内部且未被 defaultPrevented 时响应，避免全局拦截
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.isComposing) return;
+      if (e.defaultPrevented || e.isComposing) return;
+      const card = cardRef.current;
+      if (!card || !card.contains(document.activeElement)) return;
+      if (isSubmitting) return;
+
       if (e.key === "Escape") {
         e.preventDefault();
-        onDeny();
+        handleDeny();
         return;
       }
       if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
@@ -143,15 +163,16 @@ export function PermissionCard({
           return;
         }
         e.preventDefault();
-        onApprove(false);
+        handleApprove(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onApprove, onDeny]);
+  }, [handleApprove, handleDeny, isSubmitting]);
 
   return (
     <div
+      ref={cardRef}
       aria-label={isJa ? "ツールの実行許可" : "工具执行授权"}
       className="permission-card permission-card--sub-container"
       role="alertdialog"
@@ -255,7 +276,8 @@ export function PermissionCard({
       <div className="permission-card__actions">
         <button
           className="permission-card__btn permission-card__btn--deny"
-          onClick={onDeny}
+          onClick={handleDeny}
+          disabled={isSubmitting}
           type="button"
           title={isJa ? "拒否 (Esc)" : "拒绝 (Esc)"}
         >
@@ -265,7 +287,8 @@ export function PermissionCard({
         </button>
         <button
           className="permission-card__btn permission-card__btn--secondary"
-          onClick={() => onApprove(true)}
+          onClick={() => handleApprove(true)}
+          disabled={isSubmitting}
           type="button"
           title={isJa ? "このセッション中許可" : "本会话允许"}
         >
@@ -273,7 +296,8 @@ export function PermissionCard({
         </button>
         <button
           className="permission-card__btn permission-card__btn--primary"
-          onClick={() => onApprove(false)}
+          onClick={() => handleApprove(false)}
+          disabled={isSubmitting}
           type="button"
           title={isJa ? "1回のみ許可 (Enter)" : "允许一次 (Enter)"}
         >

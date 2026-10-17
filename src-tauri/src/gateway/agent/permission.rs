@@ -196,6 +196,23 @@ pub fn approval_key(
             let target = crate::tools::fs::resolve_tool_path(path, &root)?;
             format!("file:{}", target.to_string_lossy())
         }
+        "read_file" if workspace.is_none() => {
+            let path = args
+                .get("path")
+                .and_then(|v| v.as_str())
+                .ok_or("缺少文件路径")?;
+            let target = crate::tools::fs::resolve_unbound_read_path(path)?;
+            let parent = target.parent().unwrap_or(&target);
+            format!("directory:{}", parent.to_string_lossy())
+        }
+        "list_directory" if workspace.is_none() => {
+            let path = args
+                .get("path")
+                .and_then(|v| v.as_str())
+                .ok_or("缺少目录路径")?;
+            let target = crate::tools::fs::resolve_unbound_read_path(path)?;
+            format!("directory:{}", target.to_string_lossy())
+        }
         _ => format!("tool:{}:{}", name, args),
     };
     Ok(format!("{}\n{}", root.to_string_lossy(), category))

@@ -162,3 +162,44 @@ fn agent_prompts_keep_file_io_in_native_tools_in_both_locales() {
         }
     }
 }
+
+#[test]
+fn unbound_approval_key_scopes_to_directory_for_read_and_list() {
+    use yachiyo_desktop_lib::gateway::agent::permission::approval_key;
+    let directory = tempfile::tempdir().unwrap();
+    let file_a = directory.path().join("a.txt");
+    let file_b = directory.path().join("b.txt");
+    std::fs::write(&file_a, "A").unwrap();
+    std::fs::write(&file_b, "B").unwrap();
+
+    let key_read_a = approval_key(
+        "read_file",
+        &serde_json::json!({"path": file_a}),
+        None,
+    ).unwrap();
+
+    let key_read_b = approval_key(
+        "read_file",
+        &serde_json::json!({"path": file_b}),
+        None,
+    ).unwrap();
+
+    let key_list = approval_key(
+        "list_directory",
+        &serde_json::json!({"path": directory.path()}),
+        None,
+    ).unwrap();
+
+    assert_eq!(key_read_a, key_read_b);
+    assert_eq!(key_read_a, key_list);
+
+    let other_dir = tempfile::tempdir().unwrap();
+    let other_file = other_dir.path().join("other.txt");
+    std::fs::write(&other_file, "O").unwrap();
+    let key_other = approval_key(
+        "read_file",
+        &serde_json::json!({"path": other_file}),
+        None,
+    ).unwrap();
+    assert_ne!(key_read_a, key_other);
+}
