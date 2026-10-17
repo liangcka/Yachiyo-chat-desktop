@@ -310,6 +310,7 @@ export function DesktopLayout(props: SharedViewProps) {
 
   // 监测 AI 是否正在控制电脑（执行 Windows MCP / 系统控制工具）
   const activeControlStep = useMemo(() => {
+    if (props.controller.pendingPermission) return null;
     const isStreaming = props.controller.streaming !== undefined || props.controller.phase === "streaming";
     if (!isStreaming) return null;
     const msgs = props.controller.messages;
@@ -332,7 +333,7 @@ export function DesktopLayout(props: SharedViewProps) {
       };
     }
     return null;
-  }, [props.controller.streaming, props.controller.phase, props.controller.messages]);
+  }, [props.controller.streaming, props.controller.phase, props.controller.messages, props.controller.pendingPermission]);
 
   // 监听来自系统级全屏 Overlay 或全局广播的紧急接管停止事件
   useEffect(() => {

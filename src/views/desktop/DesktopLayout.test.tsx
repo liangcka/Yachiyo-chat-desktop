@@ -433,4 +433,86 @@ describe("DesktopLayout", () => {
     await user.click(closeBtn);
     expect(screen.queryByRole("complementary", { name: "成果与多功能审阅面板" })).not.toBeInTheDocument();
   });
+
+  it("does not render ComputerControlOverlay when pendingPermission exists", () => {
+    const props = createMockProps();
+    props.controller.phase = "streaming";
+    props.controller.pendingPermission = {
+      toolName: "mcp__windows_mcp__click",
+      toolArgs: { x: 100, y: 100 },
+      reason: "模拟点击屏幕",
+    } as never;
+    props.controller.messages = [
+      {
+        id: "msg-1",
+        conversationId: "conv-1",
+        role: "assistant",
+        text: "正在执行点击...",
+        status: "streaming",
+        createdAt: Date.now(),
+        toolSteps: [
+          {
+            id: "step-1",
+            name: "mcp__windows_mcp__click",
+            argumentsJson: JSON.stringify({ x: 100, y: 100 }),
+          },
+        ],
+      },
+    ];
+
+    render(<DesktopLayout {...props} />);
+    expect(screen.queryByRole("alert", { name: /正在控制你的电脑/i })).not.toBeInTheDocument();
+  });
+
+  it("renders ComputerControlOverlay when control tool is streaming without pendingPermission", () => {
+    const props = createMockProps();
+    props.controller.phase = "streaming";
+    props.controller.pendingPermission = undefined;
+    props.controller.messages = [
+      {
+        id: "msg-1",
+        conversationId: "conv-1",
+        role: "assistant",
+        text: "正在执行点击...",
+        status: "streaming",
+        createdAt: Date.now(),
+        toolSteps: [
+          {
+            id: "step-1",
+            name: "mcp__windows_mcp__click",
+            argumentsJson: JSON.stringify({ x: 100, y: 100 }),
+          },
+        ],
+      },
+    ];
+
+    render(<DesktopLayout {...props} />);
+    expect(screen.getByRole("alert", { name: /正在控制你的电脑/i })).toBeInTheDocument();
+  });
+
+  it("does not render ComputerControlOverlay for run_command during streaming", () => {
+    const props = createMockProps();
+    props.controller.phase = "streaming";
+    props.controller.pendingPermission = undefined;
+    props.controller.messages = [
+      {
+        id: "msg-1",
+        conversationId: "conv-1",
+        role: "assistant",
+        text: "正在执行终端命令...",
+        status: "streaming",
+        createdAt: Date.now(),
+        toolSteps: [
+          {
+            id: "step-1",
+            name: "run_command",
+            argumentsJson: JSON.stringify({ command: "dir" }),
+          },
+        ],
+      },
+    ];
+
+    render(<DesktopLayout {...props} />);
+    expect(screen.queryByRole("alert", { name: /正在控制你的电脑/i })).not.toBeInTheDocument();
+  });
 });

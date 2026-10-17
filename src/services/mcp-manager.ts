@@ -56,33 +56,28 @@ export interface McpPreset {
 
 /** 判定给定工具是否属于电脑/桌面控制类行为 */
 export function isComputerControlTool(toolName: string): boolean {
-  const normalized = toolName.toLowerCase().replace(/^(?:mcp_)?(?:windows[-_])?/, "");
+  const parsed = parseMcpToolName(toolName);
+  const base = parsed.isMcp && parsed.originalToolName ? parsed.originalToolName : toolName;
+  const normalized = base.toLowerCase().replace(/^(?:mcp_)?(?:windows[-_])?/, "");
   const controlNames = new Set([
     "click",
     "type",
     "move",
     "scroll",
     "shortcut",
-    "screenshot",
-    "snapshot",
-    "app",
-    "process",
-    "powershell",
-    "shell",
     "clipboard",
     "multiselect",
     "multiedit",
-    "displayinventory",
-    "run_command",
-    "wait",
-    "waitfor",
+    "app",
   ]);
-  return controlNames.has(normalized) || toolName.toLowerCase().includes("windows");
+  return controlNames.has(normalized);
 }
 
 /** 格式化电脑控制动作名称，向用户直观展示当前操作 */
 export function formatComputerControlAction(toolName: string, args?: Record<string, unknown>): string {
-  const normalized = toolName.toLowerCase().replace(/^(?:mcp_)?(?:windows[-_])?/, "");
+  const parsed = parseMcpToolName(toolName);
+  const base = parsed.isMcp && parsed.originalToolName ? parsed.originalToolName : toolName;
+  const normalized = base.toLowerCase().replace(/^(?:mcp_)?(?:windows[-_])?/, "");
   switch (normalized) {
     case "click":
       if (args && (args.x !== undefined || args.y !== undefined)) {
@@ -97,20 +92,14 @@ export function formatComputerControlAction(toolName: string, args?: Record<stri
       return "正在滚动页面视口";
     case "shortcut":
       return args?.shortcut ? `正在触发系统快捷键 [${args.shortcut}]` : "正在触发快捷键组合";
-    case "screenshot":
-      return "正在截取桌面屏幕画面";
-    case "snapshot":
-      return "正在获取窗口状态快照";
     case "app":
       return args?.name ? `正在切换/启动应用 [${args.name}]` : "正在管理应用程序窗口";
-    case "powershell":
-    case "shell":
-    case "run_command":
-      return "正在执行系统终端指令";
-    case "process":
-      return "正在调度系统后台进程";
     case "clipboard":
       return "正在操作系统剪贴板";
+    case "multiselect":
+      return "正在进行多项选择";
+    case "multiedit":
+      return "正在进行批量编辑";
     default:
       return `正在执行操作：${toolName}`;
   }
