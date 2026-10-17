@@ -375,9 +375,12 @@ export function DesktopLayout(props: SharedViewProps) {
     <div className="desktop-shell-root">
       {/* 统一沉浸式桌面顶栏：融合窗口控制、应用品牌与视图控制器 */}
       <DesktopTopBar
+        activeConversationId={props.controller.activeConversation?.id}
         activeView={centerView}
+        conversationTitle={props.controller.activeConversation?.title}
         copy={props.copy}
         onNewChat={props.onNewChat}
+        onRenameConversation={props.onRename}
         onSwitchView={switchCenterView}
         onToggleSidebar={() => setUserSidebarCollapsed((current) => !current)}
         onToggleRightPane={toggleRightPane}

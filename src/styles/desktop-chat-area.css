@@ -13,6 +13,11 @@
   gap: 2px;
 }
 
+.dsh-composer-card__tools-left .dsh-model-select__menu {
+  left: 0;
+  right: auto;
+}
+
 .dsh-composer-card .desktop-header-pill,
 .dsh-composer-card .dsh-model-select__trigger,
 .dsh-composer-card .project-selector__composer-trigger {
@@ -261,7 +266,9 @@
 .dsh-add-menu { display: grid; gap: 3px; padding: 7px; min-width: 220px; }
 .dsh-add-menu > button { display: flex; align-items: center; gap: 8px; padding: 9px; border: 0; border-radius: 6px; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
 .dsh-add-menu > button:hover { background: var(--interactive-hover); }
-.desktop-mode-select { position: relative; display: inline-flex; align-items: center; gap: 5px; width: 63px; justify-content: center; }
+.dsh-add-menu > button.dsh-add-menu__item--checkable { justify-content: space-between; }
+.dsh-add-menu__item-main { display: flex; align-items: center; gap: 8px; }
+.desktop-mode-select { position: relative; display: inline-flex; align-items: center; gap: 5px; min-width: 58px; width: auto; white-space: nowrap; justify-content: center; }
 .desktop-mode-select select { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
 .desktop-mode-select:has(select:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .desktop-mode-select--readonly { background: transparent; color: var(--text-muted); }
@@ -496,3 +503,23 @@
   transform: scale(0.96);
 }
 
+/* 输入框卡片：1px 边框、8px 圆角、无阴影，获得焦点时边框变深 */
+.dsh-composer-card {
+  border: 1px solid var(--border-l2);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.dsh-composer-card:focus-within {
+  border-color: var(--composer-border-focus);
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dsh-composer-card,
+  .context-meter-fill,
+  .dsh-model-select__menu {
+    transition: none !important;
+    animation: none !important;
+  }
+}

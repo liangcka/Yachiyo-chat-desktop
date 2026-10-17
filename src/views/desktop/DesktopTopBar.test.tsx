@@ -65,11 +65,11 @@ describe("DesktopTopBar", () => {
     expect(screen.getByTitle("展开侧边栏 (Ctrl+[)")).toBeInTheDocument();
   });
 
-  it("renders view switcher tabs and switches between chat and editor", async () => {
+  it("renders view switcher icon button and switches between chat and editor", async () => {
     const user = userEvent.setup();
     const onSwitchView = vi.fn();
 
-    render(
+    const { rerender } = render(
       <DesktopTopBar
         activeView="chat"
         copy={copy}
@@ -78,14 +78,60 @@ describe("DesktopTopBar", () => {
       />,
     );
 
-    const chatTab = screen.getByRole("tab", { name: /对话/i });
-    const editorTab = screen.getByRole("tab", { name: /编辑器/i });
+    const toggleBtn = screen.getByRole("button", { name: copy.editorTab });
+    expect(toggleBtn).toBeInTheDocument();
+    expect(toggleBtn).toHaveAttribute("title", `${copy.editorTab} (Ctrl+2)`);
 
-    expect(chatTab).toHaveAttribute("aria-selected", "true");
-    expect(editorTab).toHaveAttribute("aria-selected", "false");
-
-    await user.click(editorTab);
+    await user.click(toggleBtn);
     expect(onSwitchView).toHaveBeenCalledWith("editor");
+
+    rerender(
+      <DesktopTopBar
+        activeView="editor"
+        copy={copy}
+        onNewChat={vi.fn()}
+        onSwitchView={onSwitchView}
+      />,
+    );
+
+    const backToChatBtn = screen.getByRole("button", { name: copy.editorViewTab });
+    expect(backToChatBtn).toBeInTheDocument();
+    expect(backToChatBtn).toHaveAttribute("title", `${copy.editorViewTab} (Ctrl+1)`);
+
+    await user.click(backToChatBtn);
+    expect(onSwitchView).toHaveBeenCalledWith("chat");
+  });
+
+  it("renders conversation title and project name, supporting inline rename", async () => {
+    const user = userEvent.setup();
+    const onRename = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <DesktopTopBar
+        activeConversationId="conv-test-1"
+        activeView="chat"
+        conversationTitle="当前对话标题"
+        copy={copy}
+        onNewChat={vi.fn()}
+        onRenameConversation={onRename}
+        onSwitchView={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("当前对话标题")).toBeInTheDocument();
+    expect(screen.getByText("无项目")).toBeInTheDocument();
+
+    const editBtn = screen.getByTitle("重命名会话");
+    await user.click(editBtn);
+
+    const input = screen.getByLabelText("重命名当前会话");
+    expect(input).toBeInTheDocument();
+    expect(input).toHaveValue("当前对话标题");
+
+    await user.clear(input);
+    await user.type(input, "新对话标题{Enter}");
+
+    expect(onRename).toHaveBeenCalledWith("conv-test-1", "新对话标题");
   });
 
   it("renders window controls in desktop mode and triggers bridge functions", async () => {

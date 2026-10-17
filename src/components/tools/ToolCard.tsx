@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Check, ChevronDown, ChevronRight, Copy, FileCode, Globe, Play, Server, Terminal, XCircle } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, FileCode, Globe, Play, Server, Terminal } from "lucide-react";
 import type { Locale } from "../../domain/chat";
+import { formatToolDescription } from "./tool-description";
 
 export interface ToolCardProps {
   toolName: string;
@@ -17,58 +18,24 @@ export function ToolCard({ toolName, args, output, isError, isRunning, locale = 
 
   const getToolIcon = () => {
     if (toolName.startsWith("mcp__")) {
-      return <Server size={14} className="tool-card__icon" />;
+      return <Server size={14} className="tool-card__icon" aria-hidden="true" />;
     }
     switch (toolName) {
       case "run_command":
-        return <Terminal size={14} className="tool-card__icon" />;
+        return <Terminal size={14} className="tool-card__icon" aria-hidden="true" />;
       case "read_file":
       case "write_file":
       case "list_directory":
-        return <FileCode size={14} className="tool-card__icon" />;
+        return <FileCode size={14} className="tool-card__icon" aria-hidden="true" />;
       case "web_fetch":
-        return <Globe size={14} className="tool-card__icon" />;
+        return <Globe size={14} className="tool-card__icon" aria-hidden="true" />;
       default:
-        return <Play size={14} className="tool-card__icon" />;
+        return <Play size={14} className="tool-card__icon" aria-hidden="true" />;
     }
   };
 
-  const getStatusBadge = () => {
-    if (isRunning) {
-      return (
-        <span className="tool-card__status tool-card__status--running">
-          <span className="tool-card__spinner" />
-          <span>{locale === "ja-JP" ? "実行中" : "执行中"}</span>
-        </span>
-      );
-    }
-    if (isError) {
-      return (
-        <span className="tool-card__status tool-card__status--error">
-          <XCircle size={11} />
-          <span>{locale === "ja-JP" ? "失敗" : "失败"}</span>
-        </span>
-      );
-    }
-    return null;
-  };
-
-  const getArgPreview = (): string | null => {
-    if (!args) return null;
-    if (typeof args.path === "string") return args.path;
-    if (typeof args.command === "string") return `$ ${args.command}`;
-    if (typeof args.query === "string") return `"${args.query}"`;
-    if (typeof args.pattern === "string") return `"${args.pattern}"`;
-    if (typeof args.url === "string") return args.url;
-    const keys = Object.keys(args);
-    if (keys.length === 1 && typeof args[keys[0]] === "string") {
-      return String(args[keys[0]]);
-    }
-    const json = JSON.stringify(args);
-    return json.length > 28 ? `${json.slice(0, 25)}...` : json;
-  };
-
-  const argPreview = getArgPreview();
+  const description = formatToolDescription(toolName, args, locale);
+  const hasArgs = Boolean(args && Object.keys(args).length > 0);
 
   return (
     <div className={`tool-card ${isError ? "tool-card--error" : ""}`}>
@@ -79,45 +46,25 @@ export function ToolCard({ toolName, args, output, isError, isRunning, locale = 
         aria-expanded={expanded}
       >
         <div className="tool-card__title-group">
-          <span className="tool-card__chevron">{expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</span>
+          <span className="tool-card__chevron" aria-hidden="true">
+            {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          </span>
           {getToolIcon()}
-          {toolName.startsWith("mcp__") ? (
-            <>
-              <span
-                style={{
-                  fontSize: "10.5px",
-                  padding: "1px 5px",
-                  borderRadius: "3px",
-                  background: "rgba(59, 130, 246, 0.15)",
-                  color: "var(--accent-brand, #3b82f6)",
-                  fontWeight: 600,
-                  fontFamily: "monospace",
-                }}
-              >
-                MCP: {toolName.split("__")[1] || "mcp"}
-              </span>
-              <span className="tool-card__name">{toolName.split("__").slice(2).join("__") || toolName}</span>
-            </>
-          ) : (
-            <span className="tool-card__name">{toolName}</span>
-          )}
-          {argPreview ? <span className="tool-card__arg-pill">{argPreview}</span> : null}
+          <span className="tool-card__description">{description}</span>
         </div>
-        {getStatusBadge()}
+        {isRunning ? (
+          <span className="tool-card__spinner" aria-hidden="true" />
+        ) : null}
       </button>
 
       {expanded ? (
         <div className="tool-card__content">
-          {args ? (
-            <div className="tool-card__section">
-              <span className="tool-card__section-label">参数:</span>
-              <pre className="tool-card__code">{JSON.stringify(args, null, 2)}</pre>
-            </div>
-          ) : null}
           {output ? (
             <div className="tool-card__section">
               <div className="tool-card__section-header">
-                <span className="tool-card__section-label">输出:</span>
+                <span className="tool-card__section-label">
+                  {locale === "ja-JP" ? "出力" : "输出"}
+                </span>
                 <button
                   type="button"
                   className="tool-card__copy-btn"
@@ -126,14 +73,26 @@ export function ToolCard({ toolName, args, output, isError, isRunning, locale = 
                     setCopied(true);
                     setTimeout(() => setCopied(false), 2000);
                   }}
-                  title={copied ? "已复制" : "复制输出"}
+                  title={copied ? (locale === "ja-JP" ? "コピー完了" : "已复制") : (locale === "ja-JP" ? "出力をコピー" : "复制输出")}
                 >
-                  {copied ? <Check size={11} /> : <Copy size={11} />}
-                  <span>{copied ? "已复制" : "复制"}</span>
+                  {copied ? <Check size={11} aria-hidden="true" /> : <Copy size={11} aria-hidden="true" />}
+                  <span>{copied ? (locale === "ja-JP" ? "コピー完了" : "已复制") : (locale === "ja-JP" ? "コピー" : "复制")}</span>
                 </button>
               </div>
               <pre className="tool-card__code tool-card__output">{output}</pre>
             </div>
+          ) : null}
+
+          {hasArgs ? (
+            <details className="tool-card__details">
+              <summary className="tool-card__details-summary">
+                <ChevronRight size={12} className="tool-card__details-chevron" aria-hidden="true" />
+                <span>{locale === "ja-JP" ? "詳細" : "详情"}</span>
+              </summary>
+              <pre className="tool-card__code tool-card__args">
+                {JSON.stringify(args, null, 2)}
+              </pre>
+            </details>
           ) : null}
         </div>
       ) : null}

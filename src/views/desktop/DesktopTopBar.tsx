@@ -1,16 +1,20 @@
 import {
+  Check,
+  CodeXml,
   Copy,
+  MessageSquare,
   Minus,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
+  Pencil,
   Sparkles,
   Square,
   X,
 } from "lucide-react";
-import type { MouseEvent } from "react";
-import { useCallback, useEffect, useState } from "react";
+import type { FormEvent, MouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { UiCopy } from "../../i18n/messages";
 import { isDesktopApp } from "../../services/app-platform";
 import {
@@ -19,11 +23,18 @@ import {
   minimizeDesktopWindow,
   toggleMaximizeDesktopWindow,
 } from "../../services/desktop-bridge";
+import {
+  getProjectDisplayName,
+  useProjectState,
+} from "../../services/project-manager";
 
 export interface DesktopTopBarProps {
+  activeConversationId?: string;
   activeView: "chat" | "editor";
+  conversationTitle?: string;
   copy: UiCopy;
   onNewChat: () => Promise<void>;
+  onRenameConversation?: (id: string, title: string) => Promise<void>;
   onSwitchView: (view: "chat" | "editor") => void;
   onToggleSidebar?: () => void;
   onToggleRightPane?: () => void;
@@ -32,9 +43,12 @@ export interface DesktopTopBarProps {
 }
 
 export function DesktopTopBar({
+  activeConversationId,
   activeView,
+  conversationTitle,
   copy,
   onNewChat,
+  onRenameConversation,
   onSwitchView,
   onToggleSidebar,
   onToggleRightPane,
@@ -43,6 +57,52 @@ export function DesktopTopBar({
 }: DesktopTopBarProps) {
   const isDesktop = isDesktopApp();
   const [isMaximized, setIsMaximized] = useState(false);
+
+  // 项目与标题重命名状态
+  const { activeProject } = useProjectState();
+  const projectDisplayName = getProjectDisplayName(activeProject);
+  const currentTitle = conversationTitle || copy.newChat;
+
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editingTitleDraft, setEditingTitleDraft] = useState("");
+  const [isSavingTitle, setIsSavingTitle] = useState(false);
+  const savingTitleRef = useRef(false);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isEditingTitle) {
+      titleInputRef.current?.focus();
+      titleInputRef.current?.select();
+    }
+  }, [isEditingTitle]);
+
+  const handleStartEditTitle = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!activeConversationId) return;
+    setEditingTitleDraft(currentTitle);
+    setIsEditingTitle(true);
+  }, [activeConversationId, currentTitle]);
+
+  const handleSaveTitle = useCallback(async (e?: FormEvent) => {
+    if (e) e.preventDefault();
+    if (savingTitleRef.current) return;
+    const title = editingTitleDraft.trim();
+    if (!activeConversationId || !title || title === currentTitle) {
+      setIsEditingTitle(false);
+      return;
+    }
+    savingTitleRef.current = true;
+    setIsSavingTitle(true);
+    try {
+      await onRenameConversation?.(activeConversationId, title);
+      setIsEditingTitle(false);
+    } catch {
+      /* 静默降级 */
+    } finally {
+      savingTitleRef.current = false;
+      setIsSavingTitle(false);
+    }
+  }, [activeConversationId, currentTitle, editingTitleDraft, onRenameConversation]);
 
   // 初始化与监听桌面窗口最大化/还原状态
   useEffect(() => {
@@ -101,9 +161,15 @@ export function DesktopTopBar({
   const handleDoubleClick = useCallback(
     (e: MouseEvent<HTMLElement>) => {
       if (!isDesktop) return;
-      // 避免在按钮等交互元素上双击触发窗口缩放
+      // 避免在按钮、输入框等交互元素上双击触发窗口缩放
       const target = e.target as HTMLElement;
-      if (target.closest("button") || target.closest("[role='tab']") || target.closest("a")) {
+      if (
+        target.closest("button") ||
+        target.closest("[role='tab']") ||
+        target.closest("a") ||
+        target.closest("input") ||
+        target.closest("form")
+      ) {
         return;
       }
       void handleToggleMaximize();
@@ -118,7 +184,7 @@ export function DesktopTopBar({
       onDoubleClick={handleDoubleClick}
       aria-label="应用顶栏"
     >
-      {/* 1. 左侧：应用品牌徽章与侧栏折叠开关 */}
+      {/* 1. 左侧：应用品牌徽章与侧栏折叠开关 + 会话标题与当前项目名 */}
       <div className="desktop-topbar__left" data-tauri-drag-region>
         <button
           type="button"
@@ -144,36 +210,95 @@ export function DesktopTopBar({
             {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
         ) : null}
+
+        {/* 会话标题（保留点击重命名）与当前项目名 */}
+        {isEditingTitle ? (
+          <form onSubmit={(e) => void handleSaveTitle(e)} className="desktop-topbar__rename-form">
+            <input
+              ref={titleInputRef}
+              type="text"
+              value={editingTitleDraft}
+              onChange={(e) => setEditingTitleDraft(e.target.value)}
+              disabled={isSavingTitle}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing || event.keyCode === 229) {
+                  if (event.key === "Enter") event.preventDefault();
+                  return;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setIsEditingTitle(false);
+                }
+              }}
+              className="desktop-topbar__rename-input"
+              aria-label="重命名当前会话"
+            />
+            <button
+              type="submit"
+              className="desktop-topbar__rename-btn"
+              title={copy.confirm}
+              disabled={isSavingTitle}
+            >
+              <Check size={13} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsEditingTitle(false)}
+              className="desktop-topbar__rename-btn"
+              title={copy.cancel}
+              disabled={isSavingTitle}
+            >
+              <X size={13} />
+            </button>
+          </form>
+        ) : (
+          <div className="desktop-topbar__title-wrapper">
+            <button
+              type="button"
+              className="desktop-topbar__title-btn"
+              title={`${currentTitle} (点击重命名)`}
+              onClick={handleStartEditTitle}
+            >
+              <span className="desktop-topbar__title">{currentTitle}</span>
+            </button>
+            {activeConversationId ? (
+              <button
+                type="button"
+                className="desktop-topbar__title-edit-btn"
+                onClick={handleStartEditTitle}
+                title="重命名会话"
+                aria-label="重命名会话"
+              >
+                <Pencil size={12} />
+              </button>
+            ) : null}
+            <span
+              className="desktop-topbar__project-name"
+              title={`当前项目：${projectDisplayName}`}
+            >
+              {projectDisplayName}
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* 2. 居中：视图切换胶囊控制器 */}
-      <div className="desktop-topbar__center" data-tauri-drag-region>
-        <div className="center-view-switcher" role="tablist" aria-label="中栏视图切换">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeView === "chat"}
-            className={`center-view-switcher__btn ${activeView === "chat" ? "center-view-switcher__btn--active" : ""}`}
-            onClick={() => onSwitchView("chat")}
-            title={`${copy.editorViewTab} (Ctrl+1)`}
-          >
-            {copy.editorViewTab}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeView === "editor"}
-            className={`center-view-switcher__btn ${activeView === "editor" ? "center-view-switcher__btn--active" : ""}`}
-            onClick={() => onSwitchView("editor")}
-            title={`${copy.editorTab} (Ctrl+2)`}
-          >
-            {copy.editorTab}
-          </button>
-        </div>
-      </div>
-
-      {/* 3. 弹性空白区域：充当窗口拖拽手柄 */}
+      {/* 2. 弹性空白区域：充当窗口拖拽手柄 */}
       <div className="desktop-topbar__spacer" data-tauri-drag-region />
+
+      {/* 3. 右侧小图标视图切换按钮（保留 Ctrl+1 / Ctrl+2） */}
+      <button
+        type="button"
+        className={`desktop-topbar__view-toggle-btn ${activeView === "editor" ? "desktop-topbar__view-toggle-btn--active" : ""}`}
+        onClick={() => onSwitchView(activeView === "chat" ? "editor" : "chat")}
+        title={
+          activeView === "chat"
+            ? `${copy.editorTab} (Ctrl+2)`
+            : `${copy.editorViewTab} (Ctrl+1)`
+        }
+        aria-label={activeView === "chat" ? copy.editorTab : copy.editorViewTab}
+      >
+        {activeView === "chat" ? <CodeXml size={15} /> : <MessageSquare size={15} />}
+      </button>
 
       {/* 右侧面板展开/收起按钮 */}
       {onToggleRightPane ? (
@@ -188,7 +313,7 @@ export function DesktopTopBar({
         </button>
       ) : null}
 
-      {/* 4. 右侧：原生感桌面窗口控制三件套（仅在桌面环境下渲染） */}
+      {/* 4. 原生感桌面窗口控制三件套（仅在桌面环境下渲染） */}
       {isDesktop ? (
         <div className="desktop-window-controls" role="group" aria-label="窗口控制">
           <button

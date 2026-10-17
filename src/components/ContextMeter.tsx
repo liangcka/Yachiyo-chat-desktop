@@ -1,6 +1,6 @@
 import { contextCharacters, REQUEST_CHARACTER_BUDGET } from "../domain/context-budget";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChatMessage } from "../domain/chat";
+import type { ChatMessage, Locale } from "../domain/chat";
 
 export interface ContextMeterProps {
   messages: ChatMessage[];
@@ -8,6 +8,7 @@ export interface ContextMeterProps {
   summary?: string;
   /** 估计 Token 预算，默认由应用请求字符上限换算。 */
   contextLimit?: number;
+  locale?: Locale;
 }
 
 const RADIUS = 5.5;
@@ -19,9 +20,16 @@ function formatTokens(num: number): string {
   return `${num}`;
 }
 
-export function ContextMeter({ messages, compressedUpTo, summary, contextLimit = 1800 + Math.ceil(REQUEST_CHARACTER_BUDGET / 2.2) }: ContextMeterProps) {
+export function ContextMeter({
+  messages,
+  compressedUpTo,
+  summary,
+  contextLimit = 1800 + Math.ceil(REQUEST_CHARACTER_BUDGET / 2.2),
+  locale,
+}: ContextMeterProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLSpanElement | null>(null);
+  const isJapanese = locale === "ja-JP";
 
   // 估算 Token 用量（中文 ~1.5 字符/token，英文代码 ~3.5 字符/token，平均约 2.2 字符/token）
   const breakdown = useMemo(() => {
@@ -71,7 +79,7 @@ export function ContextMeter({ messages, compressedUpTo, summary, contextLimit =
         aria-label={`上下文已用 ${percent}%`}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title={`上下文估算 ${percent}% (~${formatTokens(breakdown.usedTokens)} / ${formatTokens(breakdown.contextWindow)})`}
+        title={`${isJapanese ? "コンテキスト推定量" : "上下文估算"} ${percent}% (~${formatTokens(breakdown.usedTokens)} / ${formatTokens(breakdown.contextWindow)})`}
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
         onClick={() => setOpen(!open)}
@@ -90,9 +98,9 @@ export function ContextMeter({ messages, compressedUpTo, summary, contextLimit =
       </button>
 
       {open && (
-        <div className="context-meter-panel" role="dialog" aria-label="上下文用量详情">
+        <div className="context-meter-panel" role="dialog" aria-label={isJapanese ? "コンテキスト使用状況の詳細" : "上下文用量详情"}>
           <div className="context-meter-panel__header">
-            <span className="context-meter-panel__title">上下文估算</span>
+            <span className="context-meter-panel__title">{isJapanese ? "コンテキスト推定量" : "上下文估算"}</span>
             <span className="context-meter-panel__percent">{percent}%</span>
             <span className="context-meter-panel__figures">
               {`~${formatTokens(breakdown.usedTokens)} / ${formatTokens(breakdown.contextWindow)}`}
@@ -103,17 +111,17 @@ export function ContextMeter({ messages, compressedUpTo, summary, contextLimit =
             <div
               className="context-meter-panel__segment context-meter-panel__segment--system"
               style={{ width: `${(breakdown.systemTokens / breakdown.usedTokens) * percent}%` }}
-              title={`系统设定: ~${formatTokens(breakdown.systemTokens)}`}
+              title={`${isJapanese ? "システム設定" : "系统设定"}: ~${formatTokens(breakdown.systemTokens)}`}
             />
             <div
               className="context-meter-panel__segment context-meter-panel__segment--tools"
               style={{ width: `${(breakdown.toolsTokens / breakdown.usedTokens) * percent}%` }}
-              title={`工具与技能: ~${formatTokens(breakdown.toolsTokens)}`}
+              title={`${isJapanese ? "ツール・スキル" : "工具与技能"}: ~${formatTokens(breakdown.toolsTokens)}`}
             />
             <div
               className="context-meter-panel__segment context-meter-panel__segment--messages"
               style={{ width: `${(breakdown.messageTokens / breakdown.usedTokens) * percent}%` }}
-              title={`对话消息: ~${formatTokens(breakdown.messageTokens)}`}
+              title={`${isJapanese ? "会話履歴" : "对话消息"}: ~${formatTokens(breakdown.messageTokens)}`}
             />
           </div>
 
@@ -121,21 +129,21 @@ export function ContextMeter({ messages, compressedUpTo, summary, contextLimit =
             <div className="context-meter-panel__row">
               <span className="context-meter-panel__label">
                 <span className="context-meter-panel__swatch context-meter-panel__swatch--system" />
-                系统提示词
+                {isJapanese ? "システムプロンプト" : "系统提示词"}
               </span>
               <span className="context-meter-panel__val">~{formatTokens(breakdown.systemTokens)}</span>
             </div>
             <div className="context-meter-panel__row">
               <span className="context-meter-panel__label">
                 <span className="context-meter-panel__swatch context-meter-panel__swatch--tools" />
-                工具与插件
+                {isJapanese ? "ツールとプラグイン" : "工具与插件"}
               </span>
               <span className="context-meter-panel__val">~{formatTokens(breakdown.toolsTokens)}</span>
             </div>
             <div className="context-meter-panel__row">
               <span className="context-meter-panel__label">
                 <span className="context-meter-panel__swatch context-meter-panel__swatch--messages" />
-                对话历史
+                {isJapanese ? "会話履歴" : "对话历史"}
               </span>
               <span className="context-meter-panel__val">~{formatTokens(breakdown.messageTokens)}</span>
             </div>

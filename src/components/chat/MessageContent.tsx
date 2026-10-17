@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import type { ChatMessage, Locale, MessageContentSegment, ToolStep } from "../../domain/chat";
 import { ToolCard } from "../tools/ToolCard";
@@ -18,13 +19,29 @@ function ToolGroup({ steps, streaming, locale }: {
   steps: ReadonlyArray<ToolStep>; streaming: boolean; locale: Locale;
 }) {
   const running = streaming && steps.some((step) => step.result === undefined);
+  const [isOpen, setIsOpen] = useState(running);
+  const prevRunningRef = useRef(running);
+
+  useEffect(() => {
+    if (running && !prevRunningRef.current) {
+      setIsOpen(true);
+    } else if (!running && prevRunningRef.current) {
+      setIsOpen(false);
+    }
+    prevRunningRef.current = running;
+  }, [running]);
+
   const failed = steps.filter((step) => step.result?.isError).length;
-  const commandsOnly = steps.every((step) => step.name === "run_command");
   const label = locale === "ja-JP"
-    ? `${commandsOnly ? "コマンド" : "ツール"} ${steps.length} 件${running ? "を実行中" : "を実行"}`
-    : `${running ? "正在运行" : "运行了"} ${steps.length} ${commandsOnly ? "条命令" : "项工具"}`;
+    ? `${steps.length} ステップを実行`
+    : `已运行 ${steps.length} 步`;
+
   return (
-    <details className="message-tool-group">
+    <details
+      className="message-tool-group"
+      open={isOpen}
+      onToggle={(e) => setIsOpen(e.currentTarget.open)}
+    >
       <summary className="message-tool-group__summary">
         <span>{label}</span>
         {failed > 0 ? <span className="message-tool-group__error">{locale === "ja-JP" ? `${failed} 件失敗` : `${failed} 项失败`}</span> : null}

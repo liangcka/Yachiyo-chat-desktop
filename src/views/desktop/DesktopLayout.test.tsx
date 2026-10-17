@@ -263,10 +263,10 @@ describe("DesktopLayout", () => {
 
     // 快捷键中栏视图切换 Ctrl+2 (编辑器) / Ctrl+1 (对话)
     await user.keyboard("{Control>}2{/Control}");
-    expect(screen.getByRole("tab", { name: /编辑器/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: copy.editorViewTab })).toBeInTheDocument();
 
     await user.keyboard("{Control>}1{/Control}");
-    expect(screen.getByRole("tab", { name: /对话/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: copy.editorTab })).toBeInTheDocument();
 
     // 快捷键打开设置中心 Ctrl+,
     await user.keyboard("{Control>},{/Control}");
@@ -387,18 +387,21 @@ describe("DesktopLayout", () => {
     expect(screen.getByText("技能扩展")).toBeInTheDocument();
   });
 
-  it("does not render capture or settings buttons in top chat header", () => {
+  it("does not render capture or settings buttons in top bar and removes desktop-chat-header", () => {
     const props = createMockProps();
     const { container } = render(<DesktopLayout {...props} />);
 
     // 验证纯双栏架构：右侧多功能工具面板不存在
     expect(screen.queryByRole("complementary", { name: "桌面多功能工具面板" })).not.toBeInTheDocument();
 
+    // 验证中栏已移除旧的 desktop-chat-header
+    expect(container.querySelector(".desktop-chat-header")).not.toBeInTheDocument();
+
     // 验证顶栏不再渲染设置与拍摄按钮
-    const header = container.querySelector(".desktop-chat-header");
-    expect(header).toBeInTheDocument();
-    expect(within(header as HTMLElement).queryByRole("button", { name: "设置与偏好" })).not.toBeInTheDocument();
-    expect(within(header as HTMLElement).queryByRole("button", { name: "拍摄" })).not.toBeInTheDocument();
+    const topbar = screen.getByRole("banner", { name: "应用顶栏" });
+    expect(topbar).toBeInTheDocument();
+    expect(within(topbar).queryByRole("button", { name: "设置与偏好" })).not.toBeInTheDocument();
+    expect(within(topbar).queryByRole("button", { name: "拍摄" })).not.toBeInTheDocument();
   });
 
   it("toggles right artifacts and review pane via Ctrl+B and header button", async () => {

@@ -1,65 +1,70 @@
 /* ═══════════════════════════════════════════════════════════════
    Yachiyo Chat — 核心设计 Tokens
-   主题色：全面采用原版 Yachiyo 经典深海蓝（#10366d / #194b8d / #4b8bf5）
-   背景系统：桌面端支持实体明暗背景（白底 / 暗底），不强行覆盖流星
+   目标风格：中性灰阶（参考 Codex 桌面版、Antigravity、Claude 桌面版）
+   平铺布局、弱阴影、无毛玻璃，紧凑信息密度，强调色仅用于焦点、选中态和发送按钮
    ═══════════════════════════════════════════════════════════════ */
 
 :root {
-  /* ─── Yachiyo 核心色板 ─── */
-  --space-0: #040713;
-  --space-1: #071436;
-  --space-2: #10366d;
-  --space-3: #194b8d;
+  /* ─── 核心中性灰阶色板（默认深色基准） ─── */
+  --space-0: #1a1a1a;
+  --space-1: #212121;
+  --space-2: #282828;
+  --space-3: #303030;
 
-  --glass: rgb(177 197 229 / 29%);
-  --glass-soft: rgb(154 181 220 / 22%);
-  --glass-strong: rgb(226 232 244 / 84%);
-  --glass-border: rgb(255 255 255 / 20%);
+  --glass: #212121;
+  --glass-soft: #282828;
+  --glass-strong: #212121;
+  --glass-border: rgba(255, 255, 255, 0.08);
 
-  --text-primary: #f7f8fc;
-  --text-muted: #d3d9e7;
-  --text-dim: #aebbd2;
-  --danger: #bf1323;
+  --text-primary: #ececec;
+  --text-muted: #9b9b9b;
+  --text-dim: #707070;
+  --danger: #e05252;
 
-  --interactive-hover: rgba(255, 255, 255, 0.06);
-  --interactive-active: rgba(255, 255, 255, 0.10);
+  --interactive-hover: rgba(255, 255, 255, 0.05);
+  --interactive-active: rgba(255, 255, 255, 0.08);
   --border-l1: rgba(255, 255, 255, 0.08);
-  --border-l2: rgba(135, 172, 238, 0.14);
+  --border-l2: rgba(255, 255, 255, 0.12);
+  --composer-border: var(--border-l2);
+  --composer-border-focus: rgba(255, 255, 255, 0.24);
+  --context-meter-system: var(--text-dim);
+  --context-meter-tools: var(--text-muted);
+  --context-meter-messages: var(--text-primary);
 
-  --surface-sidebar: #17191d;
-  --surface-card: var(--glass);
-  --surface-input: var(--glass);
-  --shadow-elevated: 0 4px 24px rgba(0, 0, 0, 0.35);
+  --surface-sidebar: #1e1e1e;
+  --surface-card: #212121;
+  --surface-input: #1e1e1e;
+  --shadow-elevated: 0 4px 12px rgba(0, 0, 0, 0.18);
 
-  --bubble-user-bg: #2a2d32;
-  --bubble-user-border: rgba(255, 255, 255, 0.16);
-  --bubble-assistant-bg: rgba(14, 25, 48, 0.65);
-  --bubble-assistant-border: rgba(255, 255, 255, 0.09);
+  --bubble-user-bg: #2a2a2a;
+  --bubble-user-border: rgba(255, 255, 255, 0.08);
+  --bubble-assistant-bg: transparent;
+  --bubble-assistant-border: transparent;
 
-  /* Yachiyo 核心主题品牌色 */
+  /* 强调色：品牌蓝 #4b8bf5，仅用于焦点、选中态和发送按钮 */
   --accent-brand: #4b8bf5;
-  --accent-brand-soft: rgba(75, 139, 245, 0.18);
+  --accent-brand-soft: rgba(75, 139, 245, 0.12);
 
-  --focus-ring: #c4c4c8;
+  --focus-ring: #4b8bf5;
 
-  /* Yachiyo 角色动作与专属视觉 Tokens */
-  --yachiyo-emote-bg: rgba(168, 85, 247, 0.12);
-  --yachiyo-emote-color: #c084fc;
-  --yachiyo-emote-border: rgba(168, 85, 247, 0.25);
-  --yachiyo-brand-glow: 0 0 20px rgba(75, 139, 245, 0.35);
-  --yachiyo-card-blur: blur(20px);
+  /* 角色动作与专属视觉 Tokens */
+  --yachiyo-emote-bg: rgba(168, 85, 247, 0.14);
+  --yachiyo-emote-color: #d8b4fe;
+  --yachiyo-emote-border: rgba(168, 85, 247, 0.28);
+  --yachiyo-brand-glow: none;
+  --yachiyo-card-blur: none;
 
-  /* ─── 布局、圆角与安全区 ─── */
-  --radius-card: 1.5rem;
-  --radius-control: 999px;
-  --yx-radius-lg: 22px;
-  --yx-radius-md: 14px;
-  --yx-radius-sm: 10px;
+  /* ─── 布局、圆角与安全区（收缩到 6–10px） ─── */
+  --radius-card: 8px;
+  --radius-control: 6px;
+  --yx-radius-lg: 10px;
+  --yx-radius-md: 8px;
+  --yx-radius-sm: 6px;
   --app-width: 26.875rem;
   --safe-bottom: max(0.75rem, env(safe-area-inset-bottom));
   --safe-top: max(1rem, env(safe-area-inset-top));
 
-  /* ─── Emil Kowalski 权威缓动 Tokens ─── */
+  /* ─── 权威缓动 Tokens ─── */
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
@@ -103,87 +108,91 @@
   --dsh-composer-text-max-height: 336px;
 }
 
-/* ─── 深色主题（Dark） ─── */
+/* ─── 深色主题（Dark）中性灰阶 ─── */
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --space-0: #040713;
-  --space-1: #071436;
-  --space-2: #10366d;
-  --space-3: #194b8d;
+  --space-0: #1a1a1a;
+  --space-1: #212121;
+  --space-2: #282828;
+  --space-3: #303030;
 
-  --glass: rgba(16, 54, 109, 0.25);
-  --glass-soft: rgba(7, 20, 54, 0.45);
-  --glass-strong: rgba(16, 54, 109, 0.65);
-  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass: #212121;
+  --glass-soft: #282828;
+  --glass-strong: #212121;
+  --glass-border: rgba(255, 255, 255, 0.08);
 
-  --text-primary: #f7f8fc;
-  --text-muted: #d3d9e7;
-  --text-dim: #aebbd2;
-  --danger: #bf1323;
+  --text-primary: #ececec;
+  --text-muted: #9b9b9b;
+  --text-dim: #707070;
+  --danger: #e05252;
 
-  --interactive-hover: rgba(255, 255, 255, 0.06);
-  --interactive-active: rgba(255, 255, 255, 0.10);
+  --interactive-hover: rgba(255, 255, 255, 0.05);
+  --interactive-active: rgba(255, 255, 255, 0.08);
   --border-l1: rgba(255, 255, 255, 0.08);
-  --border-l2: rgba(135, 172, 238, 0.14);
+  --border-l2: rgba(255, 255, 255, 0.12);
+  --composer-border: var(--border-l2);
+  --composer-border-focus: rgba(255, 255, 255, 0.24);
+  --context-meter-system: var(--text-dim);
+  --context-meter-tools: var(--text-muted);
+  --context-meter-messages: var(--text-primary);
 
-  --surface-sidebar: #17191d;
-  --surface-card: #0b1a42;
-  --surface-input: #0b1a42;
-  --shadow-elevated: 0 4px 24px rgba(0, 0, 0, 0.35);
+  --surface-sidebar: #1e1e1e;
+  --surface-card: #212121;
+  --surface-input: #1e1e1e;
+  --shadow-elevated: 0 4px 12px rgba(0, 0, 0, 0.18);
 
-  /* 用户胶囊：Yachiyo 蓝（原版 rgb(80 125 187 / 45%) 毛玻璃）在深蓝背景上的实底等效色 */
-  --bubble-user-bg: #2a2d32;
-  --bubble-user-border: rgba(255, 255, 255, 0.14);
-  --bubble-assistant-bg: #071436;
-  --bubble-assistant-border: rgba(255, 255, 255, 0.09);
+  --bubble-user-bg: #2a2a2a;
+  --bubble-user-border: rgba(255, 255, 255, 0.08);
+  --bubble-assistant-bg: transparent;
+  --bubble-assistant-border: transparent;
 
   --accent-brand: #4b8bf5;
-  --accent-brand-soft: rgba(75, 139, 245, 0.18);
+  --accent-brand-soft: rgba(75, 139, 245, 0.12);
 
-  --focus-ring: #c4c4c8;
+  --focus-ring: #4b8bf5;
 
   /* 角色情绪与动作高亮色（深色） */
-  --yachiyo-emote-bg: rgba(168, 85, 247, 0.18);
+  --yachiyo-emote-bg: rgba(168, 85, 247, 0.14);
   --yachiyo-emote-color: #d8b4fe;
-  --yachiyo-emote-border: rgba(168, 85, 247, 0.32);
+  --yachiyo-emote-border: rgba(168, 85, 247, 0.28);
 
   /* ─── dsh 融合语义层：alias（深色） ─── */
-  --yx-alias-bg-base: var(--space-0);
-  --yx-alias-bg-layer-1: var(--space-1);
-  --yx-alias-bg-layer-2: #0b1a42;
-  --yx-alias-bg-layer-3: var(--space-2);
-  --yx-alias-bg-overlay: #071436;
-  --yx-alias-bg-mask: rgba(2, 6, 18, 0.65);
+  --yx-alias-bg-base: #1a1a1a;
+  --yx-alias-bg-layer-1: #212121;
+  --yx-alias-bg-layer-2: #282828;
+  --yx-alias-bg-layer-3: #2d2d2d;
+  --yx-alias-bg-overlay: #212121;
+  --yx-alias-bg-mask: rgba(0, 0, 0, 0.65);
 
-  --yx-alias-border-l1: var(--border-l1);
-  --yx-alias-border-l2: var(--border-l2);
+  --yx-alias-border-l1: rgba(255, 255, 255, 0.08);
+  --yx-alias-border-l2: rgba(255, 255, 255, 0.12);
   --yx-alias-border-l3: rgba(255, 255, 255, 0.16);
   --yx-alias-border-l4: rgba(255, 255, 255, 0.20);
 
-  --yx-alias-label-primary: var(--text-primary);
-  --yx-alias-label-secondary: var(--text-muted);
-  --yx-alias-label-tertiary: var(--text-dim);
+  --yx-alias-label-primary: #ececec;
+  --yx-alias-label-secondary: #9b9b9b;
+  --yx-alias-label-tertiary: #707070;
 
-  --yx-alias-interactive-bg-hover: var(--interactive-hover);
-  --yx-alias-interactive-bg-active: var(--interactive-active);
-  --yx-alias-interactive-bg-hover-accent: var(--accent-brand-soft);
+  --yx-alias-interactive-bg-hover: rgba(255, 255, 255, 0.05);
+  --yx-alias-interactive-bg-active: rgba(255, 255, 255, 0.08);
+  --yx-alias-interactive-bg-hover-accent: rgba(75, 139, 245, 0.12);
 
   --yx-alias-button-primary-fill: var(--accent-brand);
-  --yx-alias-button-primary-hover: #5e9bf7;
+  --yx-alias-button-primary-hover: #3b7ce6;
   --yx-alias-button-ghost-fill: transparent;
-  --yx-alias-button-floating-fill: var(--glass-strong);
-  --yx-alias-button-floating-hover: var(--interactive-hover);
+  --yx-alias-button-floating-fill: #262626;
+  --yx-alias-button-floating-hover: rgba(255, 255, 255, 0.08);
 
-  --yx-alias-markdown-code-block: rgb(4 7 19 / 62%);
-  --yx-alias-markdown-code-banner: rgb(4 7 19 / 78%);
-  --yx-alias-markdown-inline-code: rgb(135 172 238 / 16%);
+  --yx-alias-markdown-code-block: #151515;
+  --yx-alias-markdown-code-banner: #1c1c1c;
+  --yx-alias-markdown-inline-code: rgba(255, 255, 255, 0.08);
 
-  --yx-alias-scrollbar-bg: rgb(177 197 229 / 22%);
-  --yx-alias-scrollbar-hover: rgb(177 197 229 / 36%);
+  --yx-alias-scrollbar-bg: rgba(255, 255, 255, 0.15);
+  --yx-alias-scrollbar-hover: rgba(255, 255, 255, 0.25);
 
   --yx-alias-state-error: var(--danger);
-  --yx-alias-shadow-floating: 0 8px 32px rgb(2 6 18 / 45%);
+  --yx-alias-shadow-floating: 0 4px 12px rgba(0, 0, 0, 0.22);
 
   /* ─── dsh 融合语义层：specific（深色） ─── */
   --yx-specific-bubble-user: var(--bubble-user-bg);
@@ -195,134 +204,137 @@
   --yx-specific-sidebar-nav-item-hover: var(--interactive-hover);
   --yx-specific-sidebar-nav-item-active: var(--accent-brand-soft);
 
-  /* ─── deepseek-harness 规范别名（Dark + Yachiyo 主题色） ─── */
-  --dsw-alias-bg-base: var(--space-0);
-  --dsw-alias-bg-layer-1: var(--space-1);
-  --dsw-alias-bg-layer-2: #0b1a42;
-  --dsw-alias-bg-layer-3: var(--space-2);
-  --dsw-alias-bg-overlay: #071436;
+  /* ─── deepseek-harness 规范别名（Dark 中性灰阶） ─── */
+  --dsw-alias-bg-base: #1a1a1a;
+  --dsw-alias-bg-layer-1: #212121;
+  --dsw-alias-bg-layer-2: #282828;
+  --dsw-alias-bg-layer-3: #2d2d2d;
+  --dsw-alias-bg-overlay: #212121;
   --dsw-alias-bg-mask-1: rgba(0, 0, 0, 0.65);
   --dsw-alias-border-inverted: rgba(255, 255, 255, 0.12);
-  --dsw-alias-border-l1: var(--border-l1);
-  --dsw-alias-border-l2: var(--border-l2);
-  --dsw-alias-border-l2-darkmode-thin: rgba(255, 255, 255, 0.08);
+  --dsw-alias-border-l1: rgba(255, 255, 255, 0.08);
+  --dsw-alias-border-l2: rgba(255, 255, 255, 0.12);
+  --dsw-alias-border-l2-darkmode-thin: rgba(255, 255, 255, 0.06);
   --dsw-alias-border-l3: rgba(255, 255, 255, 0.16);
-  --dsw-alias-border-l4: rgba(255, 255, 255, 0.22);
-  --dsw-alias-label-primary: var(--text-primary);
-  --dsw-alias-label-primary-bluish: #93c5fd;
-  --dsw-alias-label-secondary: var(--text-muted);
-  --dsw-alias-label-tertiary: var(--text-dim);
-  --dsw-alias-label-caption: #8fa0c0;
-  --dsw-alias-label-dimmed: #617293;
-  --dsw-alias-interactive-bg-hover: var(--interactive-hover);
-  --dsw-alias-interactive-bg-active: var(--interactive-active);
-  --dsw-alias-interactive-bg-hover-accent: var(--accent-brand-soft);
-  --dsw-alias-interactive-bg-hover-solid: rgba(255, 255, 255, 0.12);
-  --dsw-alias-interactive-bg-hover-danger: rgba(191, 19, 35, 0.2);
+  --dsw-alias-border-l4: rgba(255, 255, 255, 0.20);
+  --dsw-alias-label-primary: #ececec;
+  --dsw-alias-label-primary-bluish: #ececec;
+  --dsw-alias-label-secondary: #9b9b9b;
+  --dsw-alias-label-tertiary: #707070;
+  --dsw-alias-label-caption: #808080;
+  --dsw-alias-label-dimmed: #606060;
+  --dsw-alias-interactive-bg-hover: rgba(255, 255, 255, 0.05);
+  --dsw-alias-interactive-bg-active: rgba(255, 255, 255, 0.08);
+  --dsw-alias-interactive-bg-hover-accent: rgba(75, 139, 245, 0.12);
+  --dsw-alias-interactive-bg-hover-solid: #2e2e2e;
+  --dsw-alias-interactive-bg-hover-danger: rgba(224, 82, 82, 0.15);
   --dsw-alias-button-info-fill: #4b8bf5;
-  --dsw-alias-button-info-hover: #679efe;
-  --dsw-alias-button-elevated-fill: #0b1a42;
-  --dsw-alias-button-floating-fill: #10366d;
-  --dsw-alias-button-floating-hover: var(--interactive-hover);
+  --dsw-alias-button-info-hover: #3b7ce6;
+  --dsw-alias-button-elevated-fill: #262626;
+  --dsw-alias-button-floating-fill: #262626;
+  --dsw-alias-button-floating-hover: rgba(255, 255, 255, 0.08);
   --dsw-alias-state-business-primary: #4b8bf5;
-  --dsw-alias-state-business-tertiary: rgba(75, 139, 245, 0.16);
-  --dsw-alias-state-warn-label: #f7ad31;
-  --dsw-alias-state-error-primary: #bf1323;
-  --dsw-alias-scrollbar-bg-l2: rgb(177 197 229 / 22%);
-  --dsw-alias-scrollbar-hover-l2: rgb(177 197 229 / 36%);
-  --dsw-shadow-lv1: 0 1px 3px rgba(0, 0, 0, 0.25);
-  --dsw-shadow-lv2: 0 4px 16px rgba(0, 0, 0, 0.35);
-  --dsw-shadow-lv3: 0 12px 40px rgba(0, 0, 0, 0.5);
-  --dsw-specific-sidebar-fill: var(--surface-sidebar);
-  --dsw-specific-input-major: var(--surface-input);
-  --dsw-specific-selector: #0b1a42;
-  --dsw-specific-menu: #071436;
-  --dsw-mask-blur: blur(20px);
+  --dsw-alias-state-business-tertiary: rgba(75, 139, 245, 0.12);
+  --dsw-alias-state-warn-label: #e09f3e;
+  --dsw-alias-state-error-primary: #e05252;
+  --dsw-alias-scrollbar-bg-l2: rgba(255, 255, 255, 0.15);
+  --dsw-alias-scrollbar-hover-l2: rgba(255, 255, 255, 0.25);
+  --dsw-shadow-lv1: 0 1px 3px rgba(0, 0, 0, 0.16);
+  --dsw-shadow-lv2: 0 4px 12px rgba(0, 0, 0, 0.22);
+  --dsw-shadow-lv3: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --dsw-specific-sidebar-fill: #1e1e1e;
+  --dsw-specific-input-major: #1e1e1e;
+  --dsw-specific-selector: #262626;
+  --dsw-specific-menu: #212121;
+  --dsw-mask-blur: none;
 }
 
-/* ─── 浅色主题（Light + Yachiyo 主题蓝） ─── */
+/* ─── 浅色主题（Light）中性灰阶 ─── */
 [data-theme="light"] {
   color-scheme: light;
 
-  /* 桌面端经典白底与浅灰背景：融入极浅天青暮色，提升通透感与层次 */
-  --space-0: #f7f9fd;
+  --space-0: #f9f9f9;
   --space-1: #ffffff;
-  --space-2: #f0f4fa;
-  --space-3: #e2e8f2;
+  --space-2: #f2f2f2;
+  --space-3: #e8e8e8;
 
-  --glass: rgba(255, 255, 255, 0.88);
-  --glass-soft: rgba(240, 244, 250, 0.75);
-  --glass-strong: rgba(255, 255, 255, 0.98);
-  --glass-border: rgba(16, 54, 109, 0.08);
+  --glass: #ffffff;
+  --glass-soft: #f5f5f5;
+  --glass-strong: #ffffff;
+  --glass-border: rgba(0, 0, 0, 0.08);
 
-  --text-primary: #0f172a;
-  --text-muted: #475569;
-  --text-dim: #64748b;
-  --danger: #bf1323;
+  --text-primary: #1f1f1f;
+  --text-muted: #6b6b6b;
+  --text-dim: #8c8c8c;
+  --danger: #d9383a;
 
-  --interactive-hover: rgba(16, 54, 109, 0.05);
-  --interactive-active: rgba(16, 54, 109, 0.09);
-  --border-l1: rgba(16, 54, 109, 0.06);
-  --border-l2: rgba(16, 54, 109, 0.11);
+  --interactive-hover: rgba(0, 0, 0, 0.04);
+  --interactive-active: rgba(0, 0, 0, 0.07);
+  --border-l1: rgba(0, 0, 0, 0.08);
+  --border-l2: rgba(0, 0, 0, 0.12);
+  --composer-border: var(--border-l2);
+  --composer-border-focus: rgba(0, 0, 0, 0.24);
+  --context-meter-system: var(--text-dim);
+  --context-meter-tools: var(--text-muted);
+  --context-meter-messages: var(--text-primary);
 
-  --surface-sidebar: #f7f7f7;
+  --surface-sidebar: #f4f4f4;
   --surface-card: #ffffff;
   --surface-input: #ffffff;
-  --shadow-elevated: 0 4px 20px rgba(16, 54, 109, 0.07);
+  --shadow-elevated: 0 2px 8px rgba(0, 0, 0, 0.06);
 
-  /* 用户消息使用中性色，正文与气泡保持清晰对比。 */
-  --bubble-user-bg: #f1f1ef;
-  --bubble-user-border: transparent;
-  --bubble-assistant-bg: rgba(255, 255, 255, 0.95);
-  --bubble-assistant-border: rgba(16, 54, 109, 0.08);
+  --bubble-user-bg: #ececec;
+  --bubble-user-border: rgba(0, 0, 0, 0.06);
+  --bubble-assistant-bg: transparent;
+  --bubble-assistant-border: transparent;
 
-  /* Yachiyo 核心主题品牌蓝（#10366d 深海蓝） */
-  --accent-brand: #10366d;
-  --accent-brand-soft: rgba(16, 54, 109, 0.08);
+  /* 强调色：品牌蓝 #4b8bf5，仅用于焦点、选中态和发送按钮 */
+  --accent-brand: #4b8bf5;
+  --accent-brand-soft: rgba(75, 139, 245, 0.10);
 
-  --focus-ring: #c4c4c8;
+  --focus-ring: #4b8bf5;
 
   /* 角色情绪与动作高亮色（浅色） */
   --yachiyo-emote-bg: rgba(147, 51, 234, 0.08);
   --yachiyo-emote-color: #7e22ce;
-  --yachiyo-emote-border: rgba(147, 51, 234, 0.2);
+  --yachiyo-emote-border: rgba(147, 51, 234, 0.18);
 
   /* ─── dsh 融合语义层：alias（浅色） ─── */
-  --yx-alias-bg-base: #ffffff;
-  --yx-alias-bg-layer-1: #f8fafc;
-  --yx-alias-bg-layer-2: #f1f5f9;
+  --yx-alias-bg-base: #f9f9f9;
+  --yx-alias-bg-layer-1: #ffffff;
+  --yx-alias-bg-layer-2: #f2f2f2;
   --yx-alias-bg-layer-3: #ffffff;
   --yx-alias-bg-overlay: #ffffff;
-  --yx-alias-bg-mask: rgba(15, 23, 42, 0.45);
+  --yx-alias-bg-mask: rgba(0, 0, 0, 0.45);
 
-  --yx-alias-border-l1: var(--border-l1);
-  --yx-alias-border-l2: var(--border-l2);
-  --yx-alias-border-l3: rgba(16, 54, 109, 0.14);
-  --yx-alias-border-l4: rgba(16, 54, 109, 0.18);
+  --yx-alias-border-l1: rgba(0, 0, 0, 0.08);
+  --yx-alias-border-l2: rgba(0, 0, 0, 0.12);
+  --yx-alias-border-l3: rgba(0, 0, 0, 0.16);
+  --yx-alias-border-l4: rgba(0, 0, 0, 0.20);
 
-  --yx-alias-label-primary: var(--text-primary);
-  --yx-alias-label-secondary: var(--text-muted);
-  --yx-alias-label-tertiary: var(--text-dim);
+  --yx-alias-label-primary: #1f1f1f;
+  --yx-alias-label-secondary: #6b6b6b;
+  --yx-alias-label-tertiary: #8c8c8c;
 
-  --yx-alias-interactive-bg-hover: var(--interactive-hover);
-  --yx-alias-interactive-bg-active: var(--interactive-active);
-  --yx-alias-interactive-bg-hover-accent: var(--accent-brand-soft);
+  --yx-alias-interactive-bg-hover: rgba(0, 0, 0, 0.04);
+  --yx-alias-interactive-bg-active: rgba(0, 0, 0, 0.07);
+  --yx-alias-interactive-bg-hover-accent: rgba(75, 139, 245, 0.10);
 
   --yx-alias-button-primary-fill: var(--accent-brand);
-  --yx-alias-button-primary-hover: #194b8d;
+  --yx-alias-button-primary-hover: #3b7ce6;
   --yx-alias-button-ghost-fill: transparent;
   --yx-alias-button-floating-fill: #ffffff;
-  --yx-alias-button-floating-hover: var(--interactive-hover);
+  --yx-alias-button-floating-hover: rgba(0, 0, 0, 0.04);
 
-  --yx-alias-markdown-code-block: #f1f5f9;
-  --yx-alias-markdown-code-banner: #e2e8f0;
-  --yx-alias-markdown-inline-code: #e2e8f0;
+  --yx-alias-markdown-code-block: #f2f2f2;
+  --yx-alias-markdown-code-banner: #e8e8e8;
+  --yx-alias-markdown-inline-code: #e8e8e8;
 
-  --yx-alias-scrollbar-bg: rgb(203 213 225);
-  --yx-alias-scrollbar-hover: rgb(148 163 184);
+  --yx-alias-scrollbar-bg: rgba(0, 0, 0, 0.16);
+  --yx-alias-scrollbar-hover: rgba(0, 0, 0, 0.28);
 
   --yx-alias-state-error: var(--danger);
-  --yx-alias-shadow-floating: 0 8px 28px rgba(15, 23, 42, 0.10);
+  --yx-alias-shadow-floating: 0 4px 12px rgba(0, 0, 0, 0.08);
 
   /* ─── dsh 融合语义层：specific（浅色） ─── */
   --yx-specific-bubble-user: var(--bubble-user-bg);
@@ -334,49 +346,47 @@
   --yx-specific-sidebar-nav-item-hover: var(--interactive-hover);
   --yx-specific-sidebar-nav-item-active: var(--accent-brand-soft);
 
-  /* ─── deepseek-harness 规范别名（Light + Yachiyo 主题蓝） ─── */
-  --dsw-alias-bg-base: #ffffff;
+  /* ─── deepseek-harness 规范别名（Light 中性灰阶） ─── */
+  --dsw-alias-bg-base: #f9f9f9;
   --dsw-alias-bg-layer-1: #ffffff;
-  --dsw-alias-bg-layer-2: #f8fafc;
+  --dsw-alias-bg-layer-2: #f2f2f2;
   --dsw-alias-bg-layer-3: #ffffff;
   --dsw-alias-bg-overlay: #ffffff;
   --dsw-alias-bg-mask-1: rgba(0, 0, 0, 0.24);
-  --dsw-alias-border-inverted: rgba(16, 54, 109, 0.08);
-  --dsw-alias-border-l1: rgba(16, 54, 109, 0.08);
-  --dsw-alias-border-l2: rgba(16, 54, 109, 0.12);
-  --dsw-alias-border-l2-darkmode-thin: rgba(16, 54, 109, 0.10);
-  --dsw-alias-border-l3: rgba(16, 54, 109, 0.16);
-  --dsw-alias-border-l4: rgba(16, 54, 109, 0.20);
-  --dsw-alias-label-primary: #0f172a;
-  --dsw-alias-label-primary-bluish: #10366d;
-  --dsw-alias-label-secondary: #475569;
-  --dsw-alias-label-tertiary: #64748b;
-  --dsw-alias-label-caption: #81858c;
-  --dsw-alias-label-dimmed: #a2a4a6;
-  --dsw-alias-interactive-bg-hover: rgba(16, 54, 109, 0.05);
-  --dsw-alias-interactive-bg-active: rgba(16, 54, 109, 0.09);
-  --dsw-alias-interactive-bg-hover-accent: #e5efff;
-  --dsw-alias-interactive-bg-hover-solid: #f1f5f9;
-  --dsw-alias-interactive-bg-hover-danger: rgba(191, 19, 35, 0.08);
-  --dsw-alias-button-info-fill: #10366d;
-  --dsw-alias-button-info-hover: #194b8d;
+  --dsw-alias-border-inverted: rgba(0, 0, 0, 0.08);
+  --dsw-alias-border-l1: rgba(0, 0, 0, 0.08);
+  --dsw-alias-border-l2: rgba(0, 0, 0, 0.12);
+  --dsw-alias-border-l2-darkmode-thin: rgba(0, 0, 0, 0.08);
+  --dsw-alias-border-l3: rgba(0, 0, 0, 0.16);
+  --dsw-alias-border-l4: rgba(0, 0, 0, 0.20);
+  --dsw-alias-label-primary: #1f1f1f;
+  --dsw-alias-label-primary-bluish: #1f1f1f;
+  --dsw-alias-label-secondary: #6b6b6b;
+  --dsw-alias-label-tertiary: #8c8c8c;
+  --dsw-alias-label-caption: #767676;
+  --dsw-alias-label-dimmed: #9e9e9e;
+  --dsw-alias-interactive-bg-hover: rgba(0, 0, 0, 0.04);
+  --dsw-alias-interactive-bg-active: rgba(0, 0, 0, 0.07);
+  --dsw-alias-interactive-bg-hover-accent: rgba(75, 139, 245, 0.10);
+  --dsw-alias-interactive-bg-hover-solid: #ebebeb;
+  --dsw-alias-interactive-bg-hover-danger: rgba(217, 56, 58, 0.08);
+  --dsw-alias-button-info-fill: #4b8bf5;
+  --dsw-alias-button-info-hover: #3b7ce6;
   --dsw-alias-button-elevated-fill: #ffffff;
   --dsw-alias-button-floating-fill: #ffffff;
-  --dsw-alias-button-floating-hover: #f1f5f9;
-  --dsw-alias-state-business-primary: #10366d;
-  --dsw-alias-state-business-tertiary: rgba(16, 54, 109, 0.08);
-  --dsw-alias-state-warn-label: #dd8629;
-  --dsw-alias-state-error-primary: #bf1323;
-  --dsw-alias-scrollbar-bg-l2: rgb(203 213 225);
-  --dsw-alias-scrollbar-hover-l2: rgb(148 163 184);
-  --dsw-shadow-lv1: 0 1px 2px rgba(16, 54, 109, 0.04);
-  --dsw-shadow-lv2: 0 4px 12px rgba(16, 54, 109, 0.07);
-  --dsw-shadow-lv3: 0 12px 32px rgba(16, 54, 109, 0.10);
-  --dsw-specific-sidebar-fill: var(--surface-sidebar);
+  --dsw-alias-button-floating-hover: #f0f0f0;
+  --dsw-alias-state-business-primary: #4b8bf5;
+  --dsw-alias-state-business-tertiary: rgba(75, 139, 245, 0.10);
+  --dsw-alias-state-warn-label: #d97706;
+  --dsw-alias-state-error-primary: #d9383a;
+  --dsw-alias-scrollbar-bg-l2: rgba(0, 0, 0, 0.16);
+  --dsw-alias-scrollbar-hover-l2: rgba(0, 0, 0, 0.28);
+  --dsw-shadow-lv1: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --dsw-shadow-lv2: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --dsw-shadow-lv3: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --dsw-specific-sidebar-fill: #f4f4f4;
   --dsw-specific-input-major: #ffffff;
-  --dsw-specific-selector: #f1f5f9;
+  --dsw-specific-selector: #f2f2f2;
   --dsw-specific-menu: #ffffff;
-  --dsw-mask-blur: blur(20px);
+  --dsw-mask-blur: none;
 }
-
-

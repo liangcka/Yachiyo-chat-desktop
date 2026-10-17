@@ -118,7 +118,7 @@ describe("reference chat components", () => {
       ],
     });
     render(<MessageBubble locale="zh-CN" message={message} />);
-    expect(screen.getByText("read_file")).toBeInTheDocument();
+    expect(screen.getByText("读取 a.ts")).toBeInTheDocument();
   });
 
   it("旧格式 tool_call 文本不再解析为卡片（按纯文本渲染）", () => {
@@ -187,8 +187,8 @@ describe("reference chat components", () => {
     const content = screen.getByRole("article", { name: "八千代的回复" });
     const children = [...content.children].filter((node) => !node.classList.contains("message-bubble__actions"));
     expect(children.map((node) => node.textContent)).toEqual([
-      "执行之前。", "思考了 6 秒", expect.stringContaining("运行了 2 条命令"),
-      "执行之后。", expect.stringContaining("运行了 1 条命令"), "最终结果。",
+      "执行之前。", "思考了 6 秒", expect.stringContaining("已运行 2 步"),
+      "执行之后。", expect.stringContaining("已运行 1 步"), "最终结果。",
     ]);
     const groups = container.querySelectorAll(".message-tool-group");
     expect(groups).toHaveLength(2);
@@ -199,6 +199,35 @@ describe("reference chat components", () => {
     expect(screen.getByText("1 项失败")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "思考了 6 秒" }));
     expect(screen.getByText("需要检查配置。")).toBeVisible();
+  });
+
+  it("ToolGroup 在流式运行中自动展开，完成后自动折叠", () => {
+    const streamingMessage: ChatMessage = makeAssistantMessage({
+      status: "streaming",
+      text: "",
+      toolSteps: [
+        { id: "step1", name: "read_file", argumentsJson: JSON.stringify({ path: "test.txt" }) },
+      ],
+      contentSegments: [{ type: "tool", toolId: "step1" }],
+    });
+    const { container, rerender } = render(<MessageBubble locale="zh-CN" message={streamingMessage} />);
+    const group = container.querySelector(".message-tool-group");
+    expect(group).toHaveAttribute("open");
+
+    const completedMessage: ChatMessage = {
+      ...streamingMessage,
+      status: "complete",
+      toolSteps: [
+        {
+          id: "step1",
+          name: "read_file",
+          argumentsJson: JSON.stringify({ path: "test.txt" }),
+          result: { output: "content", isError: false, durationMs: 12 },
+        },
+      ],
+    };
+    rerender(<MessageBubble locale="zh-CN" message={completedMessage} />);
+    expect(group).not.toHaveAttribute("open");
   });
 
   it("ConversationView 展示已加载技能卡片", () => {

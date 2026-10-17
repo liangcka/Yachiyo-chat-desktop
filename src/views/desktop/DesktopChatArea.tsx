@@ -3,15 +3,12 @@ import {
   Bot,
   Check,
   Globe,
-  PanelLeft,
-  PanelLeftOpen,
-  Pencil,
   Plus,
   Sparkles,
   Square,
   X,
 } from "lucide-react";
-import type { FormEvent, KeyboardEvent } from "react";
+import type { KeyboardEvent } from "react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ContextMeter } from "../../components/ContextMeter";
 import { ConversationView } from "../../components/ConversationView";
@@ -64,20 +61,16 @@ export function DesktopChatArea({
   onOpenSettings,
   onRecall,
   onRegenerate,
-  onRenameConversation,
   onSend,
   onSkillToggle,
-  onToggleSidebar,
   onWebSearchSettingsChange,
   pendingImageDataUrl,
   processImage,
   setComposerValue,
   setPendingImageDataUrl,
   showToast,
-  sidebarCollapsed = false,
   webSearchSettings,
 }: DesktopChatAreaProps) {
-  const currentTitle = controller.activeConversation?.title || copy.newChat;
   const pendingPermission = controller.pendingPermission;
   const isLoading = controller.phase === "loading";
   const isStreaming = controller.phase === "streaming";
@@ -92,15 +85,6 @@ export function DesktopChatArea({
     () => extractLatestTodos(controller.messages),
     [controller.messages],
   );
-
-
-  // 顶栏标题即地编辑状态
-
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [editingTitleDraft, setEditingTitleDraft] = useState("");
-  const [isSavingTitle, setIsSavingTitle] = useState(false);
-  const savingTitleRef = useRef(false);
-  const titleInputRef = useRef<HTMLInputElement>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -142,13 +126,6 @@ export function DesktopChatArea({
       document.removeEventListener("keydown", handleKeyDownDoc);
     };
   }, [skillPopoverOpen, addMenuOpen]);
-
-  useEffect(() => {
-    if (isEditingTitle) {
-      titleInputRef.current?.focus();
-      titleInputRef.current?.select();
-    }
-  }, [isEditingTitle]);
 
   // 自动调整输入框高度
   useLayoutEffect(() => {
@@ -257,14 +234,20 @@ export function DesktopChatArea({
     {
       id: "action:agent",
       type: "action",
-      name: "切换 Agent 模式",
+      name: isJapanese ? "Agentモード切り替え" : "切换 Agent 模式",
       command: "/agent",
-      description: `当前模式：${controller.agentMode === "readonly" ? "只读" : controller.agentMode === "confirm" ? "需确认" : "全自动"} (点击切换)`,
+      description: isJapanese
+        ? `現在のモード：${controller.agentMode === "readonly" ? "読み取り" : controller.agentMode === "confirm" ? "自動" : "完全アクセス"} (クリックで切り替え)`
+        : `当前模式：${controller.agentMode === "readonly" ? "只读" : controller.agentMode === "confirm" ? "自动" : "完全访问"} (点击切换)`,
       icon: "bot",
       onExecute: () => {
         controller.toggleAgent();
-        const nextMode = controller.agentMode === "readonly" ? "需确认" : controller.agentMode === "confirm" ? "全自动" : "只读";
-        showToast(`已切换 Agent 模式为：${nextMode}`);
+        const nextMode = controller.agentMode === "readonly"
+          ? (isJapanese ? "自動" : "自动")
+          : controller.agentMode === "confirm"
+            ? (isJapanese ? "完全アクセス" : "完全访问")
+            : (isJapanese ? "読み取り" : "只读");
+        showToast(isJapanese ? `Agentモードを「${nextMode}」に切り替えました` : `已切换 Agent 模式为：${nextMode}`);
       },
     },
     {
@@ -290,7 +273,7 @@ export function DesktopChatArea({
         void onNewChat();
       },
     },
-  ], [controller, onNewChat, onWebSearchSettingsChange, showToast, webSearchSettings.enabled]);
+  ], [controller, isJapanese, onNewChat, onWebSearchSettingsChange, showToast, webSearchSettings.enabled]);
 
   const handleSelectSlashItem = (item: SlashItem) => {
     if (item.type === "action") {
@@ -353,40 +336,24 @@ export function DesktopChatArea({
 
     if (slashPickerOpen && slashPickerRef.current?.handleKeyDown(e)) return;
 
+    if (e.key === "Escape" && pendingPermission !== undefined) {
+      e.preventDefault();
+      void controller.approvePermission(pendingPermission.requestId, false);
+      return;
+    }
+
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
+      if (pendingPermission !== undefined) {
+        void controller.approvePermission(pendingPermission.requestId, true, false);
+        return;
+      }
       if (!composerUnavailable && (composerValue.trim() || pendingImageDataUrl || attachments.length > 0)) {
         sendMessage(composerValue);
       }
     }
   };
 
-  const handleStartEditTitle = () => {
-    if (!controller.activeConversation) return;
-    setEditingTitleDraft(currentTitle);
-    setIsEditingTitle(true);
-  };
-
-  const handleSaveTitle = async (e?: FormEvent) => {
-    if (e) e.preventDefault();
-    if (savingTitleRef.current) return;
-    const title = editingTitleDraft.trim();
-    if (!controller.activeConversation || !title || title === currentTitle) {
-      setIsEditingTitle(false);
-      return;
-    }
-    savingTitleRef.current = true;
-    setIsSavingTitle(true);
-    try {
-      await onRenameConversation?.(controller.activeConversation.id, title);
-      setIsEditingTitle(false);
-    } catch {
-      showToast(copy.genericFailure, "error");
-    } finally {
-      savingTitleRef.current = false;
-      setIsSavingTitle(false);
-    }
-  };
 
   const attachFiles = async (files: File[]): Promise<void> => {
     let addedCharacters = [...appendAttachments("", attachments)].length;
@@ -438,6 +405,7 @@ export function DesktopChatArea({
         <PermissionCard
           argumentsJson={pendingPermission.argumentsJson}
           toolName={pendingPermission.toolName}
+          locale={controller.locale}
           onApprove={(sessionScope) => {
             void controller.approvePermission(pendingPermission.requestId, true, sessionScope);
           }}
@@ -560,35 +528,100 @@ export function DesktopChatArea({
 
         {/* 控制入口集中在输入区，弹层向上展开。 */}
         <div className="dsh-composer-card__toolbar" role="group" aria-label={isJapanese ? "会話ツールバー" : "对话工具栏"}>
-          <div className="dsh-composer-card__tools-left" ref={skillPopoverRef}>
-            <div className="dsh-skill-trigger-wrapper">
-              <button type="button" className="dsh-composer-card__add-btn" title="添加文件、项目或技能" aria-label="添加文件、项目或技能" aria-expanded={addMenuOpen || skillPopoverOpen} disabled={composerUnavailable} onClick={() => { setAddMenuOpen(!addMenuOpen); setSkillPopoverOpen(false); }}><Plus size={15} /></button>
-              {addMenuOpen && !skillPopoverOpen ? <div className="dsh-skill-popover dsh-add-menu" role="dialog" aria-label="添加内容">
-                <button type="button" onClick={() => { fileInputRef.current?.click(); setAddMenuOpen(false); }}>添加文件或图片</button>
-                <ProjectSelector variant="composer" onNewChat={onNewChat} />
-                <button type="button" onClick={() => { setSkillPopoverOpen(true); setAddMenuOpen(false); }}><Sparkles size={14} />加载技能</button>
-              </div> : null}
-              {skillPopoverOpen ? <div className="dsh-skill-popover" role="dialog" aria-label="快捷加载技能">
-                <ul className="dsh-skill-popover__list">{SKILLS.map((skill) => {
-                  const isActive = activeSkillIds.includes(skill.id);
-                  return <li key={skill.id} className="dsh-skill-popover__item"><button type="button" role="checkbox" aria-checked={isActive} className="dsh-skill-popover__btn" onClick={() => void onSkillToggle?.(skill.id, !isActive)}>
-                    <span className={`dsh-skill-popover__checkbox-custom ${isActive ? "dsh-skill-popover__checkbox-custom--checked" : ""}`}>{isActive ? <Check size={11} /> : null}</span>
-                    <span className="dsh-skill-popover__item-meta"><span className="dsh-skill-popover__item-name">{skill.name}</span><span className="dsh-skill-popover__item-desc">{skill.description}</span></span>
-                  </button></li>;
-                })}</ul>
-                <div className="dsh-skill-popover__footer"><button type="button" className="dsh-skill-popover__more-btn" onClick={() => { setSkillPopoverOpen(false); onOpenSettings?.("custom"); }}>管理全部技能 →</button></div>
-              </div> : null}
+          <div className="dsh-composer-card__tools-left">
+            <div className="dsh-skill-trigger-wrapper" ref={skillPopoverRef}>
+              <button
+                type="button"
+                className="dsh-composer-card__add-btn"
+                title={isJapanese ? "ファイル、プロジェクト、スキルを追加" : "添加文件、项目或技能"}
+                aria-label={isJapanese ? "ファイル、プロジェクト、スキルを追加" : "添加文件、项目或技能"}
+                aria-expanded={addMenuOpen || skillPopoverOpen}
+                disabled={composerUnavailable}
+                onClick={() => {
+                  setAddMenuOpen(!addMenuOpen);
+                  setSkillPopoverOpen(false);
+                }}
+              >
+                <Plus size={15} />
+              </button>
+              {addMenuOpen && !skillPopoverOpen ? (
+                <div className="dsh-skill-popover dsh-add-menu" role="dialog" aria-label={isJapanese ? "コンテンツを追加" : "添加内容"}>
+                  <button type="button" onClick={() => { fileInputRef.current?.click(); setAddMenuOpen(false); }}>
+                    {isJapanese ? "ファイルまたは画像を追加" : "添加文件或图片"}
+                  </button>
+                  <ProjectSelector variant="composer" onNewChat={onNewChat} />
+                  <button type="button" onClick={() => { setSkillPopoverOpen(true); setAddMenuOpen(false); }}>
+                    <Sparkles size={14} />{isJapanese ? "スキルを読み込む" : "加载技能"}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={webSearchSettings.enabled}
+                    className="dsh-add-menu__item--checkable"
+                    onClick={() => {
+                      onWebSearchSettingsChange?.({ enabled: !webSearchSettings.enabled });
+                    }}
+                  >
+                    <span className="dsh-add-menu__item-main">
+                      <Globe size={14} />
+                      <span>{isJapanese ? "ウェブ検索" : "联网搜索"}</span>
+                    </span>
+                    <span
+                      className={`dsh-skill-popover__checkbox-custom ${
+                        webSearchSettings.enabled ? "dsh-skill-popover__checkbox-custom--checked" : ""
+                      }`}
+                    >
+                      {webSearchSettings.enabled ? <Check size={11} /> : null}
+                    </span>
+                  </button>
+                </div>
+              ) : null}
+              {skillPopoverOpen ? (
+                <div className="dsh-skill-popover" role="dialog" aria-label={isJapanese ? "スキルを素早く読み込む" : "快捷加载技能"}>
+                  <ul className="dsh-skill-popover__list">
+                    {SKILLS.map((skill) => {
+                      const isActive = activeSkillIds.includes(skill.id);
+                      return (
+                        <li key={skill.id} className="dsh-skill-popover__item">
+                          <button
+                            type="button"
+                            role="checkbox"
+                            aria-checked={isActive}
+                            className="dsh-skill-popover__btn"
+                            onClick={() => void onSkillToggle?.(skill.id, !isActive)}
+                          >
+                            <span
+                              className={`dsh-skill-popover__checkbox-custom ${
+                                isActive ? "dsh-skill-popover__checkbox-custom--checked" : ""
+                              }`}
+                            >
+                              {isActive ? <Check size={11} /> : null}
+                            </span>
+                            <span className="dsh-skill-popover__item-meta">
+                              <span className="dsh-skill-popover__item-name">{skill.name}</span>
+                              <span className="dsh-skill-popover__item-desc">{skill.description}</span>
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <div className="dsh-skill-popover__footer">
+                    <button
+                      type="button"
+                      className="dsh-skill-popover__more-btn"
+                      onClick={() => {
+                        setSkillPopoverOpen(false);
+                        onOpenSettings?.("custom");
+                      }}
+                    >
+                      {isJapanese ? "全スキルを管理 →" : "管理全部技能 →"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
-            <label className={`desktop-mode-select desktop-header-pill desktop-mode-select--${controller.agentMode}`} title={`执行模式：${controller.agentMode === "readonly" ? "只读" : controller.agentMode === "confirm" ? "需确认" : "全自动"}`}>
-              <Bot size={13} /><span>模式</span>
-              <select aria-label="执行模式" disabled={isStreaming} value={controller.agentMode} onChange={(event) => controller.setExecutionMode(event.target.value as "readonly" | "confirm" | "full_auto")}>
-                <option value="readonly">只读</option><option value="confirm">需确认</option><option value="full_auto">全自动</option>
-              </select>
-            </label>
-            <button type="button" className={`desktop-toggle desktop-header-pill ${webSearchSettings.enabled ? "desktop-toggle--active desktop-header-pill--active" : ""}`} onClick={() => onWebSearchSettingsChange?.({ enabled: !webSearchSettings.enabled })} title={webSearchSettings.enabled ? "关闭联网搜索" : "开启联网搜索"} aria-label="联网搜索快捷切换" aria-pressed={webSearchSettings.enabled}><Globe size={13} /><span>联网</span></button>
-          </div>
 
-          <div className="dsh-composer-card__tools-right">
             {/* 模型选择器 */}
             <ModelSelect
               activeProvider={llmActiveProvider}
@@ -602,8 +635,46 @@ export function DesktopChatArea({
               disabled={composerUnavailable || isStreaming}
             />
 
+            {/* 执行模式 */}
+            <label
+              className={`desktop-mode-select desktop-header-pill desktop-mode-select--${controller.agentMode}`}
+              title={`${isJapanese ? "実行モード" : "执行模式"}：${
+                controller.agentMode === "readonly"
+                  ? (isJapanese ? "読み取り" : "只读")
+                  : controller.agentMode === "confirm"
+                    ? (isJapanese ? "自動" : "自动")
+                    : (isJapanese ? "完全アクセス" : "完全访问")
+              }`}
+            >
+              <Bot size={13} />
+              <span>
+                {controller.agentMode === "readonly"
+                  ? (isJapanese ? "読み取り" : "只读")
+                  : controller.agentMode === "confirm"
+                    ? (isJapanese ? "自動" : "自动")
+                    : (isJapanese ? "完全アクセス" : "完全访问")}
+              </span>
+              <select
+                aria-label={isJapanese ? "実行モード" : "执行模式"}
+                disabled={isStreaming}
+                value={controller.agentMode}
+                onChange={(event) => controller.setExecutionMode(event.target.value as "readonly" | "confirm" | "full_auto")}
+              >
+                <option value="readonly">{isJapanese ? "読み取り" : "只读"}</option>
+                <option value="confirm">{isJapanese ? "自動" : "自动"}</option>
+                <option value="full_auto">{isJapanese ? "完全アクセス" : "完全访问"}</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="dsh-composer-card__tools-right">
             {/* 上下文用量指示器 */}
-            <ContextMeter messages={controller.messages} compressedUpTo={controller.activeConversation?.compressedUpTo} summary={controller.activeConversation?.summary} />
+            <ContextMeter
+              messages={controller.messages}
+              compressedUpTo={controller.activeConversation?.compressedUpTo}
+              summary={controller.activeConversation?.summary}
+              locale={controller.locale}
+            />
 
             {/* 生成期间保留停止入口。 */}
             {isStreaming && !composerValue.trim() && attachments.length === 0 && !pendingImageDataUrl ? (
@@ -645,83 +716,6 @@ export function DesktopChatArea({
 
   return (
     <main className="desktop-main-chat" aria-label="核心对话工作台">
-      {/* 标题支持就地重命名。 */}
-      <header className="desktop-chat-header">
-        <div className="desktop-chat-header__lead">
-          {onToggleSidebar ? (
-            <button
-              type="button"
-              className="desktop-chat-header__icon-btn"
-              onClick={onToggleSidebar}
-              title="切换侧边栏 (Ctrl+[)"
-              aria-label="切换侧边栏"
-            >
-              {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeft size={18} />}
-            </button>
-          ) : null}
-
-          {/* 会话标题（支持点击即地编辑重命名） */}
-          {isEditingTitle ? (
-            <form onSubmit={(e) => void handleSaveTitle(e)} className="desktop-chat-header__rename-form">
-              <input
-                ref={titleInputRef}
-                type="text"
-                value={editingTitleDraft}
-                onChange={(e) => setEditingTitleDraft(e.target.value)}
-                disabled={isSavingTitle}
-                onKeyDown={(event) => {
-                  if (event.nativeEvent.isComposing || event.keyCode === 229) {
-                    if (event.key === "Enter") event.preventDefault();
-                    return;
-                  }
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    setIsEditingTitle(false);
-                  }
-                }}
-                className="desktop-chat-header__rename-input"
-                aria-label="重命名当前会话"
-              />
-              <button type="submit" className="desktop-chat-header__rename-btn" title={copy.confirm} disabled={isSavingTitle}>
-                <Check size={14} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsEditingTitle(false)}
-                className="desktop-chat-header__rename-btn"
-                title={copy.cancel}
-                disabled={isSavingTitle}
-              >
-                <X size={14} />
-              </button>
-            </form>
-          ) : (
-            <div className="desktop-chat-header__title-wrapper">
-              <button
-                type="button"
-                className="desktop-chat-header__title-btn"
-                title={`${currentTitle} (点击重命名)`}
-                onClick={handleStartEditTitle}
-              >
-                <h2 className="desktop-chat-header__title">{currentTitle}</h2>
-              </button>
-              {controller.activeConversation ? (
-                <button
-                  type="button"
-                  className="desktop-chat-header__title-edit-btn"
-                  onClick={handleStartEditTitle}
-                  title="重命名会话"
-                  aria-label="重命名会话"
-                >
-                  <Pencil size={12} />
-                </button>
-              ) : null}
-            </div>
-          )}
-
-        </div>
-      </header>
-
       {/* 消息流与 Hero 区域 */}
       <div className={`desktop-chat-body ${isBlank ? "desktop-chat-body--welcome" : ""}`}>
         {isBlank ? (
