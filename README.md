@@ -62,12 +62,12 @@ Tauri v2 与 Rust 提供原生桌面窗口、本地网关和工作区工具；PC
 
 | 分组 | 厂商 | 模型支持 | 视觉模型 |
 | ---- | ---- | -------- | -------- |
-| 国内 | 阶跃星辰 StepFun | step-3.7-flash, step-plan 等 | 支持 |
-| 国内 | DeepSeek | deepseek-chat, deepseek-reasoner | 支持（实验性） |
-| 国内 | 智谱 GLM | glm-4-plus, glm-4v-flash 等 | 支持 |
-| 国际 | OpenAI | gpt-4o, gpt-4o-mini 等 | 支持 |
-| 国际 | Anthropic | claude-3-7-sonnet, claude-3-5-sonnet 等 | 支持 |
-| 国际 | Google Gemini | gemini-2.5-pro, gemini-2.5-flash 等 | 支持 |
+| 国内 | 阶跃星辰 StepFun | step-5-flash, step-plan 等 | 支持 |
+| 国内 | DeepSeek | deepseek-v4, | 支持 |
+| 国内 | 智谱 GLM | glm-5.3, glm-4.7v-flash 等 | 支持 |
+| 国际 | OpenAI | gpt-6, gpt-6.1-sol 等 | 支持 |
+| 国际 | Anthropic | claude-5-5-sonnet, claude-5-5-sonnet 等 | 支持 |
+| 国际 | Google Gemini | gemini-3.1-pro, gemini-3.8-flash 等 | 支持 |
 
 ### 5. DSH 联网搜索管道 (WebRuntime Router)
 
