@@ -245,7 +245,12 @@ pub async fn run_command(
     #[cfg(target_os = "windows")]
     let mut cmd = {
         let mut c = Command::new("powershell");
-        c.args(["-NoProfile", "-NonInteractive", "-Command", command_str]);
+        // 同时设置管道输入和控制台输出编码，让原生命令与 PowerShell 共用 UTF-8。
+        let script = format!(
+            "[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new($false);\n{}",
+            command_str
+        );
+        c.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
         c
     };
 

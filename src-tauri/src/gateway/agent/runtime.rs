@@ -11,7 +11,8 @@ use crate::gateway::providers::registry::get_provider_config;
 use crate::gateway::stream::{encode_client_event, encode_ping};
 use crate::tools::{
     authorize_tool, execute_tool_with_context, preview_tool_output, process_tool_output, tool_risk,
-    FsObservationTracker, ToolAuthorization, ToolRisk, WorkspaceManager,
+    is_unbound_file_read, FsObservationTracker, ToolAuthorization, ToolRisk, WorkspaceManager,
+    PROJECT_REQUIRED_FOR_WRITE,
 };
 use crate::types::{AgentExecutionMode, ClientChatRequest, ClientStreamEvent, ProviderId, TokenUsage, ToolInvocation};
 
@@ -160,12 +161,22 @@ pub async fn run_agent_loop_ext(
                 arguments: call.arguments.clone(),
             }));
 
+            // 无效路径不进入批准等待；执行边界仍会重新校验实际读取的路径。
+            let read_path_error = if is_unbound_file_read(&call.name, workspace_root) {
+                crate::tools::fs::resolve_unbound_read_path(
+                    call.arguments.get("path").and_then(|value| value.as_str()).unwrap_or(".")
+                ).err()
+            } else {
+                None
+            };
             let approved = match tool_risk(&call.name) {
-                Some(ToolRisk::Read) | None => true,
+                _ if read_path_error.is_some() => false,
+                Some(ToolRisk::Read) if !is_unbound_file_read(&call.name, workspace_root) => true,
+                None => true,
                 Some(ToolRisk::Write) if config.execution_mode == AgentExecutionMode::Readonly => false,
                 Some(ToolRisk::Write) if workspace_root.is_none() && call.name == "write_file" => false,
-                Some(ToolRisk::Write) if config.execution_mode == AgentExecutionMode::FullAuto => true,
-                Some(ToolRisk::Write) => {
+                _ if config.execution_mode == AgentExecutionMode::FullAuto => true,
+                _ => {
                     let key = approval_key(&call.name, &call.arguments, workspace_root)?;
                     if gate.is_allowed(&key) {
                         true
@@ -262,10 +273,12 @@ pub async fn run_agent_loop_ext(
                     }
                 }
             } else {
-                (if config.execution_mode == AgentExecutionMode::Readonly {
-                    "当前为只读模式，该操作不会执行。请用户显式切换执行模式后再操作。"
+                (if let Some(error) = read_path_error.as_deref() {
+                    error
                 } else if call.name == "write_file" && workspace_root.is_none() {
-                    "当前未选择工作区项目，无法写入文件。请先在界面选择或打开一个项目工作区。"
+                    PROJECT_REQUIRED_FOR_WRITE
+                } else if config.execution_mode == AgentExecutionMode::Readonly && tool_risk(&call.name) == Some(ToolRisk::Write) {
+                    "当前为只读模式，该操作不会执行。请用户显式切换执行模式后再操作。"
                 } else {
                     DENIED_TOOL_RESULT
                 }.to_string(), true)

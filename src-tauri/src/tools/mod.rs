@@ -11,11 +11,17 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex, RwLock};
 use crate::types::AgentExecutionMode;
 
-/// 工具风险分级：读类自动放行，写类需用户批准
+/// 工具风险分级；无项目的本地读取还需要路径级授权。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolRisk {
     Read,
     Write,
+}
+
+pub const PROJECT_REQUIRED_FOR_WRITE: &str = "当前未选择项目，无法写入。请让用户在侧栏选择项目。";
+
+pub fn is_unbound_file_read(name: &str, workspace_root: Option<&Path>) -> bool {
+    workspace_root.is_none() && matches!(name, "read_file" | "list_directory")
 }
 
 /// 工具执行的授权来源：把「谁授权了这次执行」写成类型上显式的契约，
@@ -138,7 +144,7 @@ pub fn process_tool_output(name: &str, output: &str, workspace_root: Option<&Pat
         let omitted = output.len().saturating_sub(head_cut + (output.len() - tail_start));
 
         format!(
-            "{}\n\n[... 工具输出过长，已省略中间 {} 字节 ...]\n\n{}\n\n[提示：原始完整输出共 {} 字节，已保存至工作区: .yachiyo/spill/{}。若需查阅中间内容，请使用 read_file 查看该文件，或使用 run_command 针对该文件执行 grep。]",
+            "{}\n\n[... 工具输出过长，已省略中间 {} 字节 ...]\n\n{}\n\n[提示：原始完整输出共 {} 字节，已保存至工作区: .yachiyo/spill/{}。若需查阅中间内容，请使用 read_file 查看该文件。]",
             head, omitted, tail, output.len(), filename
         )
     } else {
@@ -263,11 +269,11 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
             "type": "function",
             "function": {
                 "name": "read_file",
-                "description": "Read content of a file within the workspace boundary. 读取工作区中的文件内容。在了解项目概况（如读取 README.md、package.json、Cargo.toml、配置文件）、查看源代码或分析代码逻辑时使用。",
+                "description": "读取文件内容。已选择项目时限于工作区；未选择项目时可读取用户消息中给出的绝对路径，需权限批准，完全访问模式直接放行。查看 README.md、配置或源代码时使用，禁止改用 run_command 读取。",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": "Relative or absolute file path within workspace" }
+                        "path": { "type": "string", "description": "工作区内的相对或绝对文件路径；未选择项目时必须为用户提供的绝对路径" }
                     },
                     "required": ["path"]
                 }
@@ -277,7 +283,7 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
             "type": "function",
             "function": {
                 "name": "write_file",
-                "description": "Write or overwrite content of a file within the workspace boundary (requires user approval). 写入或覆盖工作区中的文件内容（需彩叶批准）。创建新文件或修改现有代码时使用。",
+                "description": "写入或覆盖工作区中的文件内容（需彩叶批准）。创建新文件或修改现有代码必须使用此工具，以生成检查点和代码审阅记录。必须先选择项目，不得改用 run_command 写入。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -292,11 +298,11 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
             "type": "function",
             "function": {
                 "name": "list_directory",
-                "description": "List files and subdirectories within a workspace directory. 列出工作区目录中的文件与子目录。查看项目结构、探索工作区文件布局、寻找特定文件或初次感知项目时使用。path 为空或 '.' 表示工作区根目录。",
+                "description": "列出目录中的文件与子目录。已选择项目时限于工作区，path 为空或 '.' 表示工作区根目录；未选择项目时必须使用用户消息给出的绝对路径，需权限批准，完全访问模式直接放行。",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": "Directory path to list (empty or . for workspace root)" }
+                        "path": { "type": "string", "description": "目录路径（空值或 . 表示工作区根目录）；未选择项目时必须为用户提供的绝对路径" }
                     }
                 }
             }
@@ -305,7 +311,7 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
             "type": "function",
             "function": {
                 "name": "run_command",
-                "description": "Execute a terminal shell command (PowerShell on Windows, sh on Unix) (requires user approval). 在终端执行命令（需彩叶批准）。用于运行构建、测试、包安装、系统环境检测、磁盘查询（如通过 PowerShell 获取盘符与文件信息）或执行诊断脚本。若未打开特定工作区，将在默认用户环境中执行。（宿主探查准则：遇到存疑、溢出或冲突数据必须多步交叉求证；Windows 下查询显存请使用 nvidia-smi 或注册表 HardwareInformation.qwMemorySize，避免使用有 4GB 截断限制的 Win32_VideoController.AdapterRAM）。",
+                "description": "在终端执行命令（Windows 使用 PowerShell，Unix 使用 sh，需彩叶批准）。只用于构建、测试、git 和查询系统信息；禁止用 Get-Content、Set-Content、cat、echo > 等命令读写文件，必须使用 read_file / write_file。未选择项目时在默认用户环境中执行。（宿主探查准则：遇到存疑、溢出或冲突数据必须多步交叉求证；Windows 下查询显存请使用 nvidia-smi 或注册表 HardwareInformation.qwMemorySize，避免使用有 4GB 截断限制的 Win32_VideoController.AdapterRAM）。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -388,24 +394,45 @@ pub async fn execute_tool_with_context(
 ) -> Result<String, String> {
     // 执行边界自带授权判定：写类工具须有人类发起凭据或模型侧的获批标记，
     // 调用方漏判也不会落地破坏性动作
+    if name == "write_file" && workspace_root.is_none() {
+        return Err(PROJECT_REQUIRED_FOR_WRITE.to_string());
+    }
     authorize_tool(name, auth)?;
+    if is_unbound_file_read(name, workspace_root) {
+        let approved = matches!(auth, ToolAuthorization::HumanInitiated
+            | ToolAuthorization::ModelInitiated { approved: true }
+            | ToolAuthorization::Agent { mode: AgentExecutionMode::FullAuto, .. }
+            | ToolAuthorization::Agent { approved: true, .. });
+        if !approved {
+            return Err("本次无项目文件读取未获得用户授权，已拒绝执行。".to_string());
+        }
+    }
 
     match name {
         "read_file" => {
-            let root = workspace_root.ok_or("当前未打开项目工作区，无法读取文件。若彩叶需要查看本地代码，请提醒彩叶在界面上方选择或打开工作区文件夹。")?;
             let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path' argument")?;
-            fs::read_file_guarded(path, root, fs_tracker)
+            if let Some(root) = workspace_root {
+                fs::read_file_guarded(path, root, fs_tracker)
+            } else {
+                let target = fs::resolve_unbound_read_path(path)?;
+                let root = target.parent().ok_or("无效文件路径")?;
+                fs::read_file_guarded(&target.to_string_lossy(), root, fs_tracker)
+            }
         }
         "write_file" => {
-            let root = workspace_root.ok_or("当前未打开项目工作区，无法写入文件。若彩叶需要修改或创建代码，请提醒彩叶在界面上方选择或打开工作区文件夹。")?;
+            let root = workspace_root.ok_or(PROJECT_REQUIRED_FOR_WRITE)?;
             let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path' argument")?;
             let content = args.get("content").and_then(|v| v.as_str()).ok_or("Missing 'content' argument")?;
             fs::write_file_guarded(path, content, root, fs_tracker)
         }
         "list_directory" => {
-            let root = workspace_root.ok_or("当前未打开项目工作区，无法查看工程目录结构。若彩叶需要探索项目代码，请提醒彩叶在界面上方选择或打开工作区文件夹。")?;
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-            let entries = fs::list_directory(path, root)?;
+            let entries = if let Some(root) = workspace_root {
+                fs::list_directory(path, root)?
+            } else {
+                let target = fs::resolve_unbound_read_path(path)?;
+                fs::list_directory(".", &target)?
+            };
             serde_json::to_string_pretty(&entries).map_err(|e| e.to_string())
         }
         "run_command" => {

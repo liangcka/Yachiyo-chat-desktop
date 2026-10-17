@@ -97,6 +97,26 @@ fn is_checkpoint_path(relative: &Path) -> bool {
         && components.next().as_deref() == Some("checkpoints")
 }
 
+/// 未绑定项目的读取仅接受显式绝对路径，且不放开检查点私有存储。
+pub fn resolve_unbound_read_path(path_str: &str) -> Result<PathBuf, String> {
+    let path = Path::new(path_str);
+    if !path.is_absolute() || path.components().any(|part| matches!(part, std::path::Component::ParentDir)) {
+        return Err("当前未打开项目工作区，请使用用户提供的绝对路径读取文件或目录。".to_string());
+    }
+    let canonical = path.canonicalize().map_err(|error| format!("无法读取路径 '{}': {}", path_str, error))?;
+    let contains_checkpoint = |target: &Path| target.ancestors().any(|ancestor| {
+        ancestor.file_name().is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("checkpoints"))
+            && ancestor.parent().and_then(Path::file_name)
+                .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case(".yachiyo"))
+    });
+    if contains_checkpoint(path) || contains_checkpoint(&canonical)
+        || crate::gateway::agent::checkpoint::is_private_storage_path(&canonical)
+    {
+        return Err("Access denied: 检查点存储仅允许通过恢复接口访问".to_string());
+    }
+    Ok(canonical)
+}
+
 /// 对齐 DSH fs-observation-policy 规约：
 /// 追踪会话内文件读取版本，在写入时强制“编辑前先读 (Read-before-edit)”与 CAS 乐观锁防篡改。
 #[derive(Debug, Default, Clone)]
