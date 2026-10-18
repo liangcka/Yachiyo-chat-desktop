@@ -17,10 +17,15 @@ import { DesktopSidebar } from "./sidebar";
 import { DesktopTopBar } from "./DesktopTopBar";
 import { DesktopRightPane } from "./DesktopRightPane";
 import type { DesktopRightTab } from "./sidebar/types";
-import { SettingsModal, type SettingsTabKey } from "../../components/settings/SettingsModal";
+import type { SettingsTabKey } from "../../components/settings/SettingsModal";
 
 const EditorView = lazy(() =>
   import("../../components/editor/EditorView").then((m) => ({ default: m.EditorView })),
+);
+
+// 设置中心连同 MCP / 模型管理等面板只在打开时加载，不计入首屏主包
+const SettingsModal = lazy(() =>
+  import("../../components/settings/SettingsModal").then((m) => ({ default: m.SettingsModal })),
 );
 
 /* ── 列宽约束与持久化 Key ─────────────────────────────── */
@@ -505,15 +510,19 @@ export function DesktopLayout(props: SharedViewProps) {
 
       {paletteOpen ? <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} /> : null}
       {/* 现代化双栏设置中心 Modal */}
-      <SettingsModal
-        open={settingsOpen}
-        initialTab={settingsTab}
-        onClose={() => setSettingsOpen(false)}
-        onCompress={handleCompress}
-        onToggleTheme={handleToggleTheme}
-        resolvedTheme={resolved}
-        shared={props}
-      />
+      {settingsOpen ? (
+        <Suspense fallback={null}>
+          <SettingsModal
+            open
+            initialTab={settingsTab}
+            onClose={() => setSettingsOpen(false)}
+            onCompress={handleCompress}
+            onToggleTheme={handleToggleTheme}
+            resolvedTheme={resolved}
+            shared={props}
+          />
+        </Suspense>
+      ) : null}
 
       {/* AI 控制电脑时的全局发光边框与控制状态悬浮弹窗 (类似 Codex) */}
       <ComputerControlOverlay

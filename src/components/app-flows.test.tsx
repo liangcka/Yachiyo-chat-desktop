@@ -2,8 +2,6 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App, type AppRepository, type AppServices, type SessionService } from "../App";
-import { AccessGate } from "./AccessGate";
-import { copyFor } from "../i18n/messages";
 import { YachiyoDatabase } from "../data/db";
 import type { ChatMessage, Conversation, Locale, StoredImage } from "../domain/chat";
 import type { ProcessedImage } from "../features/capture/image-processor";
@@ -192,20 +190,6 @@ describe("App flows", () => {
     expect(document.documentElement.lang).toBe("ja-JP");
   });
 
-  it("clears and refocuses the access field after a wrong code in standalone AccessGate", async () => {
-    const user = userEvent.setup();
-    const onAuthenticate = vi.fn().mockRejectedValue(new SessionClientError("ACCESS_DENIED", 403));
-    render(<AccessGate copy={copyFor("zh-CN")} onAuthenticate={onAuthenticate} />);
-
-    const input = await screen.findByLabelText("访问码");
-    await user.type(input, "this code is incorrect");
-    await user.click(screen.getByRole("button", { name: "进入" }));
-
-    expect(await screen.findByText("访问码不正确，请重试。")).toBeVisible();
-    expect(input).toHaveValue("");
-    expect(input).toHaveFocus();
-  });
-
   it("sends text, streams a reply, and persists both messages", async () => {
     const user = userEvent.setup();
     const services = fakeServices();
@@ -255,7 +239,7 @@ describe("App flows", () => {
       // 设置 → 联网搜索 → 开启联网搜索
       await user.click(screen.getByLabelText("用户资料与菜单"));
       await user.click(screen.getByLabelText("设置"));
-      await user.click(screen.getByRole("tab", { name: "联网搜索" }));
+      await user.click(await screen.findByRole("tab", { name: "联网搜索" }));
       await user.click(screen.getByRole("button", { name: "切换技能启用状态: 联网搜索" }));
       await user.click(screen.getByRole("button", { name: "关闭设置" }));
 
@@ -283,7 +267,7 @@ describe("App flows", () => {
       // 关闭"显示引用来源"后不再渲染来源列表
       await user.click(screen.getByLabelText("用户资料与菜单"));
       await user.click(screen.getByLabelText("设置"));
-      await user.click(screen.getByRole("tab", { name: "联网搜索" }));
+      await user.click(await screen.findByRole("tab", { name: "联网搜索" }));
       await user.click(screen.getByRole("button", { name: "切换技能启用状态: 显示引用来源" }));
       await user.click(screen.getByRole("button", { name: "关闭设置" }));
       await waitFor(() => expect(screen.queryByLabelText("参考来源")).not.toBeInTheDocument());

@@ -119,22 +119,6 @@ button {
   background: linear-gradient(180deg, var(--space-1), var(--space-0));
 }
 
-.app-shell__backdrop {
-  position: absolute;
-  z-index: -1;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 18% 24%, rgb(247 248 252 / 70%) 0 1px, transparent 2px),
-    radial-gradient(circle at 78% 18%, rgb(211 217 231 / 55%) 0 1px, transparent 2px),
-    radial-gradient(circle at 68% 66%, rgb(247 248 252 / 45%) 0 1px, transparent 2px);
-  background-size: 11rem 13rem, 15rem 17rem, 19rem 23rem;
-}
-
-[data-theme="light"] .app-shell__backdrop {
-  display: none;
-}
-
 /* 渲染异常兜底页：独立于桌面布局，只依赖主题 Token */
 .app-error-boundary {
   display: grid;
