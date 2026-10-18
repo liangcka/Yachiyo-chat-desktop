@@ -52,7 +52,7 @@ Tauri v2 与 Rust 提供原生桌面窗口、本地网关和工作区工具；PC
 ### 3. 月见八千代 角色交互与情感陪伴
 
 - **人设还原与流式交互**：八千代拥有贯通岁月长河的记忆人设，回复带括号动作心理描写，支持随时中断生成并保留已生成内容。
-- **深度思考可视化 (ThinkingBlock)**：全面支持 DeepSeek R1、Claude、Gemini 等模型的推理思维链（`reasoning_content` / thinking），提供折叠展示、思考耗时统计与平滑流式展开。
+- **深度思考可视化 (ThinkingBlock)**：全面支持 DeepSeek、Claude、Gemini 等模型的推理思维链（`reasoning_content` / thinking），提供折叠展示、思考耗时统计与平滑流式展开。
 - **两阶平滑智能会话命名**：
   首轮对话完成后立即采用启发式零延迟命名更新界面；随后在后台异步调度大模型进行主题提炼，概括讨论核心并过滤客套前缀，实现平滑升级与历史孤儿会话全链路自愈。
 - **本地个性化资料与圆形头像裁剪**：
@@ -66,12 +66,12 @@ Tauri v2 与 Rust 提供原生桌面窗口、本地网关和工作区工具；PC
 
 | 分组 | 厂商 | 模型支持 | 视觉模型 |
 | ---- | ---- | -------- | -------- |
-| 国内 | 阶跃星辰 StepFun | step-3.7-flash, step-plan 等 | 支持 |
-| 国内 | DeepSeek | deepseek-v4-flash, deepseek-v4-pro 等 | 支持 |
-| 国内 | 智谱 GLM | glm-5.3, glm-4.6v-flash 等 | 支持 |
-| 国际 | OpenAI | gpt-5.6-sol, gpt-5.5 等 | 支持 |
+| 国内 | 阶跃星辰 StepFun | step-5-flash, step-3.7-flash 等 | 支持 |
+| 国内 | DeepSeek | deepseek-v4.1-flash, deepseek-v4-pro 等 | 支持 |
+| 国内 | 智谱 GLM | glm-5.3, glm-4.7-flash 等 | 支持 |
+| 国际 | OpenAI | gpt-6.1-sol, gpt-6 等 | 支持 |
 | 国际 | Anthropic | claude-opus-5-5, claude-sonnet-5-5 等 | 支持 |
-| 国际 | Google Gemini | gemini-3.1-pro, gemini-3.7-flash 等 | 支持 |
+| 国际 | Google Gemini | gemini-3.1-pro, gemini-3.8-flash 等 | 支持 |
 
 ### 5. DSH 联网搜索管道 (WebRuntime Router)
 
