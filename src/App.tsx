@@ -176,6 +176,7 @@ export function App({ services, autoAiTitle }: AppProps) {
   const showSessionFailure = useEffectEvent(() => showToast(copy.genericFailure, "error"));
 
   const readLlmSettings = useCallback(async () => {
+    await llmService.migrateKeysToKeystore().catch(() => undefined);
     const [records, active] = await Promise.all([
       llmService.list(),
       llmService.getActiveProvider(),

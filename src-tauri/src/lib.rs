@@ -455,6 +455,12 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
+        // 记住主窗口位置与尺寸；全屏控制遮罩窗口每次按需显示，不参与记忆
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_denylist(&["control_overlay"])
+                .build(),
+        )
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();

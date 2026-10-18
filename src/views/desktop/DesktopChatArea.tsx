@@ -31,6 +31,7 @@ import {
   type SlashActionItem,
   type SlashItem,
 } from "../../components/chat/SlashCommandPicker";
+import { isDesktopApp } from "../../services/app-platform";
 import { searchWorkspaceFiles } from "../../services/desktop-bridge";
 import "../../styles/desktop-chat-area.css";
 import { DesktopWelcome } from "./DesktopWelcome";
@@ -81,6 +82,8 @@ export function DesktopChatArea({
   const isJapanese = controller.locale === "ja-JP";
   const loadingLabel = isJapanese ? "会話を読み込み中…" : "正在加载对话…";
   const isBlank = controller.messages.length === 0 && !controller.activeConversation?.summary;
+  // 桌面端没有服务端兜底模型：未配置时直接引导到设置，而不是发出必然失败的请求
+  const needsModelSetup = isDesktopApp() && llmActiveProvider === undefined;
 
   const latestTodos = useMemo(
     () => extractLatestTodos(controller.messages),
@@ -142,6 +145,11 @@ export function DesktopChatArea({
   );
 
   const sendMessage = (text: string): void => {
+    if (needsModelSetup) {
+      showToast(copy.desktopKeyRequired, "error");
+      onOpenSettings?.("models");
+      return;
+    }
     const content = appendAttachments(text, attachments);
     if (attachments.length > 0 && [...content].length > COMPOSER_CHARACTER_LIMIT) {
       showToast("正文与附件合计超过 20000 字，请移除部分内容后发送", "error");
@@ -735,7 +743,9 @@ export function DesktopChatArea({
           <DesktopWelcome
             disabled={composerUnavailable || isStreaming}
             locale={controller.locale}
+            needsModelSetup={needsModelSetup}
             onPrompt={handleHeroPrompt}
+            onSetupModel={() => onOpenSettings?.("models")}
           />
         ) : (
           <div className="desktop-conversation-region">

@@ -1,6 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { YachiyoDatabase } from "../data/db";
+import { KEYSTORE_MANAGED_API_KEY } from "../domain/llm";
+import { apiFetch } from "./api-origins";
+import { isDesktopApp } from "./app-platform";
 import { LlmSettingsService } from "./llm-settings";
+
+vi.mock("./app-platform", () => ({ isDesktopApp: vi.fn(() => false) }));
+vi.mock("./api-origins", () => ({ apiFetch: vi.fn(async () => new Response("{}")) }));
 
 const VALID_KEY = "sk-test-abcdefghijklmnopqrstuvwxyz0123";
 
@@ -172,5 +178,57 @@ describe("LlmSettingsService", () => {
     await service.clearAll();
 
     expect(await db.settings.get("locale")).toEqual({ key: "locale", value: "ja-JP" });
+  });
+});
+
+describe("LlmSettingsService on desktop", () => {
+  let db: YachiyoDatabase;
+  let service: LlmSettingsService;
+
+  beforeEach(() => {
+    vi.mocked(isDesktopApp).mockReturnValue(true);
+    vi.mocked(apiFetch).mockClear();
+    vi.mocked(apiFetch).mockResolvedValue(new Response("{}"));
+    db = new YachiyoDatabase(`yachiyo-llm-desktop-test-${crypto.randomUUID()}`);
+    service = new LlmSettingsService(db);
+  });
+
+  afterEach(async () => {
+    vi.mocked(isDesktopApp).mockReturnValue(false);
+    db.close();
+    await db.delete();
+  });
+
+  it("stores the key in the gateway keystore and keeps only a placeholder locally", async () => {
+    await service.saveProvider("claude", VALID_KEY, "claude-sonnet-5-5");
+
+    expect(apiFetch).toHaveBeenCalledWith(
+      "/api/keys",
+      expect.objectContaining({ body: JSON.stringify({ provider: "claude", key: VALID_KEY }) }),
+    );
+    expect(await service.get("claude")).toMatchObject({ apiKey: KEYSTORE_MANAGED_API_KEY });
+  });
+
+  it("keeps the stored key when saving with the placeholder", async () => {
+    await service.saveProvider("claude", KEYSTORE_MANAGED_API_KEY, "claude-opus-5-5");
+
+    expect(apiFetch).not.toHaveBeenCalled();
+    expect(await service.get("claude")).toMatchObject({ model: "claude-opus-5-5" });
+  });
+
+  it("does not persist the config when the keystore rejects the key", async () => {
+    vi.mocked(apiFetch).mockResolvedValue(new Response("{}", { status: 500 }));
+
+    await expect(service.saveProvider("claude", VALID_KEY, "claude-sonnet-5-5")).rejects.toThrow();
+    expect(await service.get("claude")).toBeUndefined();
+  });
+
+  it("migrates plaintext keys from older versions into the keystore", async () => {
+    await db.llmSettings.put({ provider: "deepseek", apiKey: VALID_KEY, model: "deepseek-v4-flash", updatedAt: 1 });
+
+    await service.migrateKeysToKeystore();
+
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    expect(await service.get("deepseek")).toMatchObject({ apiKey: KEYSTORE_MANAGED_API_KEY });
   });
 });

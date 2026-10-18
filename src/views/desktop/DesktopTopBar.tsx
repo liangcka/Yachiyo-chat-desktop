@@ -9,7 +9,6 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Pencil,
-  Sparkles,
   Square,
   X,
 } from "lucide-react";
@@ -193,9 +192,7 @@ export function DesktopTopBar({
           title="月见八千代 (Tsukimi Yachiyo)"
           aria-label="月见八千代"
         >
-          <span className="desktop-topbar__brand-icon-wrap" aria-hidden="true">
-            <Sparkles size={13} className="desktop-topbar__brand-icon" />
-          </span>
+          <img className="desktop-topbar__brand-mark" src="/yachiyo-mark.svg" alt="" aria-hidden="true" />
           <span className="desktop-topbar__brand-title">月见八千代</span>
         </button>
 

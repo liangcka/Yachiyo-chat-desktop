@@ -3,6 +3,7 @@ import {
   type ActiveLlmConfig,
   type LlmSettingsRecord,
   type ProviderId,
+  KEYSTORE_MANAGED_API_KEY,
   PROVIDER_METADATA,
   getProviderMeta,
   isProviderId,
@@ -92,9 +93,29 @@ export class LlmSettingsService {
   }
 
   /**
+   * 桌面端：把旧版本以明文存于 IndexedDB 的 Key 迁入网关的系统加密存储，本地只保留占位符。
+   * 单条迁移失败时保留原记录，下次启动重试。
+   */
+  async migrateKeysToKeystore(): Promise<void> {
+    if (!isDesktopApp()) return;
+    const records = await this.db.llmSettings.toArray();
+    for (const record of records) {
+      if (record.apiKey === KEYSTORE_MANAGED_API_KEY || !isValidApiKey(record.apiKey)) continue;
+      const stored = await storeKeyInKeystore(record.provider, record.apiKey.trim()).then(
+        () => true,
+        () => false,
+      );
+      if (stored) {
+        await this.db.llmSettings.put({ ...record, apiKey: KEYSTORE_MANAGED_API_KEY });
+      }
+    }
+  }
+
+  /**
    * 保存某厂商配置并（可选）将其设为激活。
    * 若当前没有任何激活厂商且未显式指定 activate，则自动激活以便用户立即生效。
    * 带 baseUrl（自定义 OpenAI 兼容端点）时跳过模型白名单，模型名交由上游校验。
+   * 桌面端 Key 先写入系统加密存储，成功后 IndexedDB 只记录占位符；传入占位符表示沿用已保存的 Key。
    */
   async saveProvider(
     provider: ProviderId,
@@ -102,17 +123,16 @@ export class LlmSettingsService {
     model: string,
     options: { activate?: boolean; baseUrl?: string } = {},
   ): Promise<LlmSettingsRecord> {
-    const trimmedKey = apiKey.trim();
-    if (isDesktopApp()) {
-      void apiFetch("/api/keys", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ provider, key: trimmedKey }),
-      }).catch(() => undefined);
-    }
     const baseUrl = options.baseUrl?.trim() || undefined;
     if (baseUrl !== undefined && !isValidBaseUrl(baseUrl)) {
       throw new Error("Invalid base URL");
+    }
+    let trimmedKey = apiKey.trim();
+    if (isDesktopApp()) {
+      if (trimmedKey !== KEYSTORE_MANAGED_API_KEY) {
+        await storeKeyInKeystore(provider, trimmedKey);
+      }
+      trimmedKey = KEYSTORE_MANAGED_API_KEY;
     }
     const meta = getProviderMeta(provider);
     const trimmedModel = model.trim();
@@ -141,4 +161,15 @@ export class LlmSettingsService {
 /** 供 UI 在没有数据库实例时使用的静态模型列表查询 */
 export function modelsFor(provider: ProviderId): readonly string[] {
   return PROVIDER_METADATA[provider].models;
+}
+
+async function storeKeyInKeystore(provider: ProviderId, key: string): Promise<void> {
+  const response = await apiFetch("/api/keys", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ provider, key }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to store API key (${response.status})`);
+  }
 }

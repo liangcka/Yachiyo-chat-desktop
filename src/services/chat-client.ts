@@ -1,5 +1,5 @@
 import type { ChatSource, Locale, TokenUsage } from "../domain/chat";
-import type { ProviderId } from "../domain/llm";
+import { KEYSTORE_MANAGED_API_KEY, type ProviderId } from "../domain/llm";
 import { apiCredentials } from "./app-platform";
 import { apiFetch } from "./api-origins";
 
@@ -199,12 +199,15 @@ export async function streamChat(
   options: StreamChatOptions,
 ): Promise<StreamChatResult> {
   const fetcher = options.fetcher ?? globalThis.fetch.bind(globalThis);
+  // 占位符代表 Key 保存在桌面网关的系统加密存储中，请求体不携带，由网关按厂商读取
+  const payload =
+    request.apiKey === KEYSTORE_MANAGED_API_KEY ? { ...request, apiKey: undefined } : request;
   let response: Response;
   try {
     response = await apiFetch(
       "/api/chat",
       {
-        body: JSON.stringify(request),
+        body: JSON.stringify(payload),
         credentials: apiCredentials(),
         headers: { accept: "text/event-stream", "content-type": "application/json" },
         method: "POST",

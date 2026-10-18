@@ -132,6 +132,12 @@ export function getProviderMeta(id: ProviderId): LlmProviderMeta {
   return PROVIDER_METADATA[id];
 }
 
+/**
+ * 桌面端 IndexedDB 中的 API Key 占位符：真实 Key 只保存在本地网关的系统加密存储里，
+ * 请求体遇到占位符时不携带 apiKey，由网关按厂商读取。满足 isValidApiKey 以复用既有校验。
+ */
+export const KEYSTORE_MANAGED_API_KEY = "yachiyo-desktop-keystore-managed";
+
 /** IndexedDB llmSettings 表中每家厂商的配置记录 */
 export interface LlmSettingsRecord {
   readonly provider: ProviderId;

@@ -68,16 +68,12 @@
   background: var(--interactive-hover);
 }
 
-.desktop-topbar__brand-icon-wrap {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: var(--accent-brand-soft);
-  color: var(--accent-brand);
+.desktop-topbar__brand-mark {
+  display: block;
   flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
 }
 
 .desktop-topbar__brand-title {
@@ -2039,6 +2035,72 @@
   color: var(--text-muted);
   font-size: 14px;
   line-height: 1.8;
+}
+
+.desktop-hero__avatar {
+  display: block;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 14px;
+  border-radius: 14px;
+  box-shadow: 0 6px 18px rgba(7, 16, 45, 0.18);
+}
+
+.desktop-hero__intro .desktop-hero__subtitle {
+  margin-top: 4px;
+}
+
+/* 未配置模型的首启引导：与输入框同宽，品牌色仅用于图标与主按钮 */
+.desktop-hero__setup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 12px 12px 12px 16px;
+  border: 1px solid var(--border-l2);
+  border-radius: var(--yx-radius-lg);
+  background: var(--surface-card);
+  text-align: left;
+}
+
+.desktop-hero__setup-icon {
+  flex: none;
+  color: var(--accent-brand);
+}
+
+.desktop-hero__setup-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.desktop-hero__setup-text strong {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.desktop-hero__setup-action {
+  flex: none;
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: #ffffff;
+  background: var(--accent-brand);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter var(--motion-duration-fast) var(--ease-hover);
+}
+
+.desktop-hero__setup-action:hover {
+  filter: brightness(1.06);
 }
 
 .desktop-chat-body--welcome .desktop-composer-dock {

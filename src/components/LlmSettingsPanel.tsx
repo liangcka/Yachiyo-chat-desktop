@@ -15,6 +15,7 @@ import { useClosing } from "../app/use-closing";
 import {
   DOMESTIC_PROVIDERS,
   INTERNATIONAL_PROVIDERS,
+  KEYSTORE_MANAGED_API_KEY,
   MODEL_VENDORS,
   PROVIDER_METADATA,
   getProviderMeta,
@@ -41,6 +42,11 @@ export interface LlmSettingsPanelProps {
   onSave: (provider: ProviderId, apiKey: string, model: string, baseUrl?: string) => Promise<void>;
   onClear: (provider: ProviderId) => Promise<void>;
   onActivate: (provider: ProviderId) => Promise<void>;
+}
+
+/** 桌面端已存入系统加密存储的 Key 不回显到输入框，留空保存即沿用 */
+function keyInputFor(entry: LlmProviderEntry | undefined): string {
+  return entry?.apiKey === KEYSTORE_MANAGED_API_KEY ? "" : entry?.apiKey ?? "";
 }
 
 interface Feedback {
@@ -85,7 +91,7 @@ export function LlmSettingsPanel({
       setSelectedProvider(newProvider);
       const entry = entries.find((item) => item.provider === newProvider);
       const meta = getProviderMeta(newProvider);
-      setApiKeyInput(entry?.apiKey ?? "");
+      setApiKeyInput(keyInputFor(entry));
       setModelInput(entry?.model ?? meta.defaultModel);
       setFeedback(undefined);
       setShowKey(false);
@@ -102,7 +108,7 @@ export function LlmSettingsPanel({
     if (modalMode === null) {
       const entry = entries.find((item) => item.provider === selectedProvider);
       const meta = getProviderMeta(selectedProvider);
-      setApiKeyInput(entry?.apiKey ?? "");
+      setApiKeyInput(keyInputFor(entry));
       setModelInput(entry?.model ?? meta.defaultModel);
       setFeedback(undefined);
     }
@@ -139,7 +145,7 @@ export function LlmSettingsPanel({
     setSelectedProvider(vendor.mappedProvider);
     setPrevSyncKey({ provider: vendor.mappedProvider, entries });
     const entry = entries.find((item) => item.provider === vendor.mappedProvider);
-    setApiKeyInput(entry?.apiKey ?? "");
+    setApiKeyInput(keyInputFor(entry));
     setModelInput(entry?.model || vendor.defaultModel);
     setCustomBaseUrl(entry?.baseUrl ?? vendor.defaultBaseUrl ?? "");
     setModalMode("config");
@@ -151,7 +157,7 @@ export function LlmSettingsPanel({
     setSelectedProvider("openai");
     setPrevSyncKey({ provider: "openai", entries });
     const entry = entries.find((item) => item.provider === "openai");
-    setApiKeyInput(entry?.apiKey ?? "");
+    setApiKeyInput(keyInputFor(entry));
     setCustomModelName("ox-alpha");
     setModelInput("ox-alpha");
     setCustomBaseUrl("https://api.openai.com/v1");
@@ -166,7 +172,7 @@ export function LlmSettingsPanel({
     setSelectedProvider(providerId);
     setPrevSyncKey({ provider: providerId, entries });
     const entry = entries.find((item) => item.provider === providerId);
-    setApiKeyInput(entry?.apiKey ?? "");
+    setApiKeyInput(keyInputFor(entry));
     setModelInput(currentModelName || entry?.model || vendor.defaultModel);
     setCustomBaseUrl(entry?.baseUrl ?? vendor.defaultBaseUrl ?? "");
     setModalMode("config");
@@ -180,7 +186,7 @@ export function LlmSettingsPanel({
     const finalBaseUrl = customBaseUrl.trim() || undefined;
     await runAction(
       async () => {
-        await onSave(selectedProvider, apiKeyInput, finalModel, finalBaseUrl);
+        await onSave(selectedProvider, keyToSave, finalModel, finalBaseUrl);
         await onActivate(selectedProvider);
       },
       copy.llmSaved,
@@ -225,7 +231,10 @@ export function LlmSettingsPanel({
   }));
 
   const currentMeta = getProviderMeta(selectedProvider);
-  const isKeyValid = isValidApiKey(apiKeyInput);
+  const hasStoredKey =
+    entries.find((entry) => entry.provider === selectedProvider)?.apiKey === KEYSTORE_MANAGED_API_KEY;
+  const keyToSave = hasStoredKey && apiKeyInput.trim() === "" ? KEYSTORE_MANAGED_API_KEY : apiKeyInput;
+  const isKeyValid = isValidApiKey(keyToSave);
   // Base URL 允许留空（走厂商原生端点），填写时必须是合法 https 地址
   const trimmedBaseUrl = customBaseUrl.trim();
   const isBaseUrlValid = trimmedBaseUrl.length === 0 || isValidBaseUrl(trimmedBaseUrl);
@@ -303,7 +312,7 @@ export function LlmSettingsPanel({
           type="button"
           disabled={busy || !isKeyValid}
           onClick={() =>
-            void onSave(selectedProvider, apiKeyInput, modelInput, customBaseUrl.trim() || undefined)
+            void onSave(selectedProvider, keyToSave, modelInput, customBaseUrl.trim() || undefined)
           }
         >
           保存
@@ -542,7 +551,7 @@ export function LlmSettingsPanel({
                     id="model-cfg-api-key"
                     type={showKey ? "text" : "password"}
                     className="model-form-input"
-                    placeholder="请输入服务商 API Key"
+                    placeholder={hasStoredKey ? "已加密保存在本机，留空则保持不变" : "请输入服务商 API Key"}
                     value={apiKeyInput}
                     onChange={(e) => setApiKeyInput(e.target.value)}
                     autoComplete="off"
@@ -637,7 +646,7 @@ export function LlmSettingsPanel({
                 <button
                   type="button"
                   className="settings-btn settings-btn--primary"
-                  disabled={busy || !isValidApiKey(apiKeyInput) || !isBaseUrlValid}
+                  disabled={busy || !isKeyValid || !isBaseUrlValid}
                   title={
                     !isBaseUrlValid && trimmedBaseUrl.length > 0
                       ? "API 端点需为 https:// 开头且不含空格"
