@@ -1863,7 +1863,7 @@
   margin-top: 4px;
 }
 
-/* 未配置模型的首启引导：与输入框同宽，品牌色仅用于图标与主按钮 */
+/* 未配置模型的首启引导：与输入框同宽，主按钮沿用桌面壳层的单色强调 */
 .desktop-hero__setup {
   display: flex;
   align-items: center;
@@ -1904,7 +1904,7 @@
   padding: 0 14px;
   border: 0;
   border-radius: var(--radius-control);
-  color: #ffffff;
+  color: var(--surface-card);
   background: var(--accent-brand);
   font-size: 13px;
   font-weight: 600;
@@ -7305,7 +7305,7 @@
 
 .desktop-update-notice__icon {
   flex: none;
-  color: var(--accent-brand);
+  color: var(--text-primary);
 }
 
 .desktop-update-notice__text {
@@ -7319,8 +7319,8 @@
   padding: 0 12px;
   border: 0;
   border-radius: var(--radius-control);
-  color: #ffffff;
-  background: var(--accent-brand);
+  color: var(--surface-card);
+  background: var(--text-primary);
   font-weight: 600;
   cursor: pointer;
 }
