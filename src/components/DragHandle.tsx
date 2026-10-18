@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef } from "react";
+import { useLocale } from "../i18n/locale-context";
 
 interface DragHandleProps {
   position: "left" | "right";
@@ -16,6 +17,7 @@ const DragHandle = React.memo(function DragHandle({
   onDragEnd,
   disabled = false,
 }: DragHandleProps) {
+  const ja = useLocale() === "ja-JP";
   const baseXRef = useRef(0);
   const latestXRef = useRef(0);
   const rafIdRef = useRef(0);
@@ -95,7 +97,11 @@ const DragHandle = React.memo(function DragHandle({
       ref={handleRef}
       className={`drag-handle drag-handle--${position}`}
       role="separator"
-      aria-label={position === "left" ? "调整侧栏宽度" : "调整审阅面板宽度"}
+      aria-label={
+        position === "left"
+          ? ja ? "サイドバーの幅を調整" : "调整侧栏宽度"
+          : ja ? "パネルの幅を調整" : "调整审阅面板宽度"
+      }
       aria-orientation="vertical"
       tabIndex={disabled ? -1 : 0}
       onPointerDown={handlePointerDown}

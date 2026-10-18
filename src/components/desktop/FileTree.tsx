@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocale } from "../../i18n/locale-context";
 import { ChevronRight, File as FileIcon, Folder, FolderOpen, Loader2 } from "lucide-react";
 import type { UiCopy } from "../../i18n/messages";
 import { listWorkspaceEntries, type WorkspaceEntry } from "../../services/desktop-bridge";
@@ -138,6 +139,7 @@ function filterIgnoredEntries(entries: WorkspaceEntry[]): WorkspaceEntry[] {
 }
 
 export function FileTree({ copy, activePath, onOpenFile, onReferenceFile }: FileTreeProps) {
+  const ja = useLocale() === "ja-JP";
   const [rootEntries, setRootEntries] = useState<WorkspaceEntry[] | null>(null);
   const [entriesByDir, setEntriesByDir] = useState<ReadonlyMap<string, WorkspaceEntry[]>>(new Map());
   const [expandedDirs, setExpandedDirs] = useState<ReadonlySet<string>>(new Set());
@@ -194,7 +196,7 @@ export function FileTree({ copy, activePath, onOpenFile, onReferenceFile }: File
   );
 
   return (
-    <div className="file-tree" role="tree" aria-label="工作区文件树">
+    <div className="file-tree" role="tree" aria-label={ja ? "ワークスペースのファイルツリー" : "工作区文件树"}>
       {rootEntries === null ? (
         <p className="file-tree__empty">{copy?.treeLoading ?? "加载工作区…"}</p>
       ) : rootEntries.length === 0 ? (

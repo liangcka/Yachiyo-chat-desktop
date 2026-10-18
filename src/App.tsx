@@ -12,6 +12,7 @@ import {
   type ImageProcessingErrorCode,
   type ProcessedImage,
 } from "./features/capture/image-processor";
+import { LOCALE_MIRROR_KEY, LocaleContext } from "./i18n/locale-context";
 import { copyFor, type UiCopy } from "./i18n/messages";
 import { UpdatePrompt } from "./pwa/UpdatePrompt";
 import { useOnlineStatus } from "./pwa/use-online-status";
@@ -165,6 +166,11 @@ export function App({ services, autoAiTitle }: AppProps) {
   useEffect(() => {
     const previousLanguage = document.documentElement.lang;
     document.documentElement.lang = controller.locale;
+    try {
+      localStorage.setItem(LOCALE_MIRROR_KEY, controller.locale);
+    } catch {
+      // 存储不可用时遮罩窗口按中文显示
+    }
     return () => {
       document.documentElement.lang = previousLanguage;
     };
@@ -553,7 +559,7 @@ export function App({ services, autoAiTitle }: AppProps) {
   const handleSignOut = async () => {
     await controller.stop();
     await activeServices.session.signOut();
-    showToast("服务端凭据已清除", "info");
+    showToast(copy.serverCredentialsCleared, "info");
   };
 
   // 自定义端点或自定义指定的非内置模型图片能力交由上游判定，内置预设模型遵循白名单
@@ -677,43 +683,45 @@ export function App({ services, autoAiTitle }: AppProps) {
     );
 
   return (
-    <main
-      className="app-shell app-shell--desktop"
-      aria-label="Yachiyo Chat"
-    >
-      <div className="chat-stage chat-stage--desktop">
-        {authentication === "checking" ? (
-          <div aria-label={copy.verifying} className="chat-loading" role="status">
-            <span />
-            <span />
-            <span />
-          </div>
-        ) : (
-          <>
-            {authenticatedContent}
-            <UpdatePrompt
-              copy={copy}
-              needRefresh={pwa.needRefresh}
-              offlineReady={pwa.offlineReady}
-              onConfirmOfflineReady={() => pwa.setOfflineReady(false)}
-              onDismissUpdate={() => pwa.setNeedRefresh(false)}
-              onUpdate={() => void pwa.updateServiceWorker(true)}
-            />
-            {desktopUpdate !== undefined ? (
-              <DesktopUpdateNotice
+    <LocaleContext value={controller.locale}>
+      <main
+        className="app-shell app-shell--desktop"
+        aria-label="Yachiyo Chat"
+      >
+        <div className="chat-stage chat-stage--desktop">
+          {authentication === "checking" ? (
+            <div aria-label={copy.verifying} className="chat-loading" role="status">
+              <span />
+              <span />
+              <span />
+            </div>
+          ) : (
+            <>
+              {authenticatedContent}
+              <UpdatePrompt
                 copy={copy}
-                update={desktopUpdate}
-                onDismiss={() => setDesktopUpdate(undefined)}
+                needRefresh={pwa.needRefresh}
+                offlineReady={pwa.offlineReady}
+                onConfirmOfflineReady={() => pwa.setOfflineReady(false)}
+                onDismissUpdate={() => pwa.setNeedRefresh(false)}
+                onUpdate={() => void pwa.updateServiceWorker(true)}
               />
-            ) : null}
-          </>
-        )}
-        <ToastRegion
-          announcementId={toast?.id}
-          message={toast?.message}
-          tone={toast?.tone}
-        />
-      </div>
-    </main>
+              {desktopUpdate !== undefined ? (
+                <DesktopUpdateNotice
+                  copy={copy}
+                  update={desktopUpdate}
+                  onDismiss={() => setDesktopUpdate(undefined)}
+                />
+              ) : null}
+            </>
+          )}
+          <ToastRegion
+            announcementId={toast?.id}
+            message={toast?.message}
+            tone={toast?.tone}
+          />
+        </div>
+      </main>
+    </LocaleContext>
   );
 }

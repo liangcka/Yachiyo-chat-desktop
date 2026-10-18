@@ -16,6 +16,7 @@ import {
   Server,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import type { Locale } from "../../domain/chat";
 import { LlmSettingsPanel } from "../LlmSettingsPanel";
 import { SkillsPanel } from "../SkillsPanel";
 import { UserMemoryPanel } from "../UserMemoryPanel";
@@ -27,7 +28,9 @@ import {
   useLocalUserSettings,
 } from "../../services/user-settings";
 import { AvatarCropModal } from "./AvatarCropModal";
+import { isDesktopApp } from "../../services/app-platform";
 import { openExternalUrl } from "../../services/desktop-bridge";
+import { checkForUpdate, type UpdateCheckResult } from "../../services/update-check";
 import type { SharedViewProps } from "../../views/layout-types";
 
 export type SettingsTabKey =
@@ -53,6 +56,266 @@ export interface SettingsModalProps {
 
 const STORAGE_PRIVACY_MODE = "yachiyo-settings-privacy-mode";
 
+const zhCopy = {
+  defaultUsername: "酒寄彩叶",
+  usernameUpdated: (name: string) => `用户名已更新为「${name}」（本地保存）`,
+  usernameReset: "用户名已恢复默认（酒寄彩叶）",
+  badgeUpdated: (badge: string) => `身份称号已更新为「${badge}」（本地保存）`,
+  pickImage: "请选择图片格式文件",
+  readImageFailed: "读取图片文件失败",
+  avatarSaved: "头像已裁剪并保存至本地",
+  avatarReset: "已恢复默认头像",
+  defaultProvider: "系统默认 Provider (未单独配置)",
+  dialogLabel: "设置中心",
+  closeTitle: "关闭 (Esc)",
+  closeLabel: "关闭设置",
+  navLabel: "设置分类",
+  kicker: "设置",
+  navGeneralLabel: "常规概览",
+  navGeneral: "常规",
+  navAppLabel: "存储与维护",
+  navApp: "应用",
+  navAppearanceLabel: "外观与语言",
+  navAppearance: "外观",
+  navModelsLabel: "模型配置",
+  navModels: "模型",
+  navCustomLabel: "技能与记忆",
+  navCustom: "自定义",
+  navBrowser: "联网搜索",
+  navMcp: "MCP 服务",
+  shortcutsLink: "快捷键速查",
+  feedbackLink: "问题反馈",
+  userSettingsLabel: "用户设置",
+  userBarTitle: "用户设置（纯本地偏好）",
+  userAvatarAlt: "用户头像",
+  userBarSubtitle: "本地专属 · 个人资料",
+  generalDesc: "速览客户端运行环境、隐私保护策略与各项服务连接状态。",
+  privacyGroup: "隐私保护与数据策略",
+  privacyName: "本地隐私保护模式",
+  privacyDesc:
+    "启用后，您的对话内容、代码修改与工作区文件交互仅安全保存在当前设备的本地存储中，绝不上传至任何遥测分析或第三方日志服务器。",
+  privacyToggle: "切换隐私模式",
+  statusGroup: "核心系统状态",
+  llmName: "大语言模型服务 (LLM)",
+  llmActivePrefix: "当前活跃 Provider: ",
+  manageProviders: "管理模型供应商",
+  webSearchPrefix: "当前状态：",
+  webSearchOn: "已开启，搜索失败时会自动尝试其他来源",
+  webSearchOff: "已停用（纯离线模型知识）",
+  configureSearch: "配置搜索",
+  dbName: "本地数据库 (IndexedDB)",
+  dbDescBefore: "本地持久化数据库正常运行，当前共保存",
+  dbDescAfter: "组历史会话。",
+  dataManage: "数据管理",
+  appearanceTitle: "外观与语言",
+  appearanceDesc: "自定义界面色彩主题、明暗模式与多语言本地化。",
+  interfaceGroup: "界面偏好",
+  themeName: "色彩主题",
+  themeCurrent: (dark: boolean) => `当前主题：${dark ? "星空深色 (Dark)" : "皓月浅色 (Light)"}`,
+  toLight: "切换为浅色",
+  toDark: "切换为深色",
+  languageName: "界面多语言",
+  languageCurrent: "当前语言：简体中文",
+  switchLanguage: "日本語に切替",
+  modelsTitle: "大模型供应商与 Key 管理",
+  modelsDesc:
+    "配置各 LLM Provider 厂商 API Key 与默认模型（StepFun、DeepSeek、GLM、Claude、OpenAI、Gemini）。桌面端的 Key 由系统加密保存在本机。",
+  customTitle: "技能与个性化记忆",
+  customDesc: "配置智能体技能扩展与八千代的长期个性化设定记忆。",
+  memoryGroup: "八千代的长期记忆",
+  skillsGroup: "技能扩展",
+  browserDesc: "允许八千代搜索网页，并选择是否显示参考来源。",
+  appTitle: "数据管理与系统维护",
+  appDesc: "管理本地 IndexedDB 缓存、会话持久化、凭据清理与版本更新。",
+  cleanupGroup: "数据清理",
+  clearAllName: "清空本地全部会话",
+  clearAllDesc: "永久清除 IndexedDB 中存储的全部历史对话记录与图片附件缓存。",
+  confirmClear: "确认清空",
+  cancel: "取消",
+  clearData: "清空数据",
+  compressName: "上下文智能压缩",
+  compressDesc: "精炼多轮历史，节约 token 消耗。",
+  compressNow: "立即压缩",
+  signOutName: "清除服务端凭据",
+  signOutDesc: "清除当前设备在服务端保存的会话 Session Cookie。",
+  signOut: "清除凭据",
+  updateGroup: "版本与更新",
+  updateName: "检查更新",
+  updateIdle: "从 GitHub Releases 获取最新正式版。",
+  updateChecking: "检查中…",
+  updateLatest: (version: string) => `当前版本 v${version}，已是最新。`,
+  updateAvailable: (latest: string, current: string) => `发现新版本 v${latest}（当前 v${current}）。`,
+  updateFailed: "检查失败，请确认网络连接后重试。",
+  updateDownload: "前往下载",
+  shortcutsTitle: "键盘快捷键速查",
+  shortcutsDesc: "全键盘操作映射，帮助您快速掌控桌面端交互。",
+  globalGroup: "全局操作",
+  scNewChat: "新建会话",
+  scSwitchView: "对话 / 编辑器切换",
+  scToggleRightPane: "打开 / 收起成果面板",
+  scToggleSidebar: "折叠 / 展开侧边栏",
+  scPalette: "命令面板",
+  scOpenSettings: "打开系统设置中心",
+  scEscape: "关闭弹窗 / 取消对话",
+  inputGroup: "输入与发送",
+  scSend: "发送消息",
+  scNewline: "输入框内换行",
+  scSlash: "快捷唤起指令菜单",
+  userDesc: "管理您的本地个人资料、头像与用户名。本页所有数据仅安全保存在当前设备的本地存储中，绝不上传云端。",
+  avatarFileLabel: "上传头像文件",
+  profileGroup: "个人资料 (Profile)",
+  changeAvatarTitle: "点击更换头像",
+  changeAvatar: "更换头像",
+  removeAvatar: "移除头像",
+  usernameName: "用户名称",
+  usernameDesc: "设置您的个人展示名称。留空保存时将自动恢复为默认角色名称“酒寄彩叶”。",
+  usernameLabel: "用户名",
+  saved: "已保存",
+  saveName: "保存名称",
+  badgeName: "身份称号 (Badge)",
+  badgeDesc: "设置侧边栏展示的个人称号。可快速选择标准预设（Lite、Plus、Pro、Go）或键入个性称号。",
+  badgeLabel: "个性称号",
+  badgePlaceholder: "输入自定义称号 (如 VIP, Go)",
+  saveBadge: "保存称号",
+  storageGroup: "数据安全与本地存储",
+  storageName: "纯本地隔离存储",
+  storageDesc:
+    "您的头像图片与用户名称仅保存在当前设备的 LocalStorage 中。任何云端服务、网络接口均不会收集或存储该配置。",
+  localOnly: "仅本地有效",
+};
+
+type SettingsCopy = typeof zhCopy;
+
+const jaCopy: SettingsCopy = {
+  defaultUsername: "酒寄彩叶",
+  usernameUpdated: (name) => `ユーザー名を「${name}」に更新しました（ローカル保存）`,
+  usernameReset: "ユーザー名を既定値（酒寄彩叶）に戻しました",
+  badgeUpdated: (badge) => `称号を「${badge}」に更新しました（ローカル保存）`,
+  pickImage: "画像ファイルを選択してください",
+  readImageFailed: "画像ファイルを読み込めませんでした",
+  avatarSaved: "アバターを切り抜いてローカルに保存しました",
+  avatarReset: "既定のアバターに戻しました",
+  defaultProvider: "システム既定のプロバイダー（未設定）",
+  dialogLabel: "設定",
+  closeTitle: "閉じる (Esc)",
+  closeLabel: "設定を閉じる",
+  navLabel: "設定カテゴリ",
+  kicker: "設定",
+  navGeneralLabel: "一般の概要",
+  navGeneral: "一般",
+  navAppLabel: "ストレージとメンテナンス",
+  navApp: "アプリ",
+  navAppearanceLabel: "外観と言語",
+  navAppearance: "外観",
+  navModelsLabel: "モデル設定",
+  navModels: "モデル",
+  navCustomLabel: "スキルと記憶",
+  navCustom: "カスタマイズ",
+  navBrowser: "ウェブ検索",
+  navMcp: "MCP サーバー",
+  shortcutsLink: "ショートカット一覧",
+  feedbackLink: "フィードバック",
+  userSettingsLabel: "ユーザー設定",
+  userBarTitle: "ユーザー設定（ローカルのみ）",
+  userAvatarAlt: "ユーザーアバター",
+  userBarSubtitle: "ローカル専用 · プロフィール",
+  generalDesc: "クライアントの動作環境、プライバシー方針、各サービスの接続状況を確認できます。",
+  privacyGroup: "プライバシーとデータ方針",
+  privacyName: "ローカルプライバシーモード",
+  privacyDesc:
+    "有効にすると、会話内容・コードの変更・ワークスペースのファイル操作はこの端末のローカルストレージにのみ保存され、テレメトリやサードパーティのログサーバーへ送信されることはありません。",
+  privacyToggle: "プライバシーモードを切り替え",
+  statusGroup: "システム状態",
+  llmName: "大規模言語モデル (LLM)",
+  llmActivePrefix: "使用中のプロバイダー: ",
+  manageProviders: "プロバイダーを管理",
+  webSearchPrefix: "現在の状態：",
+  webSearchOn: "有効（検索に失敗した場合は別のソースを自動で試します）",
+  webSearchOff: "無効（モデルの知識のみ）",
+  configureSearch: "検索を設定",
+  dbName: "ローカルデータベース (IndexedDB)",
+  dbDescBefore: "ローカルデータベースは正常に動作しています。保存済みの会話：",
+  dbDescAfter: " 件",
+  dataManage: "データ管理",
+  appearanceTitle: "外観と言語",
+  appearanceDesc: "カラーテーマ、ライト／ダークモード、表示言語を設定します。",
+  interfaceGroup: "表示設定",
+  themeName: "カラーテーマ",
+  themeCurrent: (dark) => `現在のテーマ：${dark ? "星空ダーク (Dark)" : "月光ライト (Light)"}`,
+  toLight: "ライトに切り替え",
+  toDark: "ダークに切り替え",
+  languageName: "表示言語",
+  languageCurrent: "現在の言語：日本語",
+  switchLanguage: "切换为中文",
+  modelsTitle: "モデルプロバイダーと API キー",
+  modelsDesc:
+    "各 LLM プロバイダー（StepFun、DeepSeek、GLM、Claude、OpenAI、Gemini）の API キーと既定モデルを設定します。デスクトップ版のキーはこの PC に暗号化して保存されます。",
+  customTitle: "スキルと記憶",
+  customDesc: "エージェントのスキル拡張と、八千代が覚えておく長期記憶を設定します。",
+  memoryGroup: "八千代の長期記憶",
+  skillsGroup: "スキル拡張",
+  browserDesc: "八千代にウェブ検索を許可し、参照元を表示するかどうかを選べます。",
+  appTitle: "データ管理とメンテナンス",
+  appDesc: "ローカルの IndexedDB キャッシュ、会話の保存、認証情報の削除、バージョン更新を管理します。",
+  cleanupGroup: "データの削除",
+  clearAllName: "すべての会話を削除",
+  clearAllDesc: "IndexedDB に保存されたすべての会話履歴と画像添付のキャッシュを完全に削除します。",
+  confirmClear: "削除する",
+  cancel: "キャンセル",
+  clearData: "データを削除",
+  compressName: "コンテキストの圧縮",
+  compressDesc: "長い会話履歴を要約してトークン消費を抑えます。",
+  compressNow: "今すぐ圧縮",
+  signOutName: "サーバー側の認証情報を削除",
+  signOutDesc: "この端末がサーバーに保存しているセッション Cookie を削除します。",
+  signOut: "認証情報を削除",
+  updateGroup: "バージョンと更新",
+  updateName: "更新を確認",
+  updateIdle: "GitHub Releases から最新の正式版を取得します。",
+  updateChecking: "確認中…",
+  updateLatest: (version) => `現在のバージョン v${version} は最新です。`,
+  updateAvailable: (latest, current) => `新しいバージョン v${latest} があります（現在 v${current}）。`,
+  updateFailed: "確認できませんでした。ネットワーク接続を確認してから再試行してください。",
+  updateDownload: "ダウンロード",
+  shortcutsTitle: "キーボードショートカット",
+  shortcutsDesc: "キーボードだけでデスクトップ版を操作するためのショートカット一覧です。",
+  globalGroup: "全体操作",
+  scNewChat: "新しい会話",
+  scSwitchView: "会話 / エディターの切り替え",
+  scToggleRightPane: "成果パネルを開く / 閉じる",
+  scToggleSidebar: "サイドバーを折りたたむ / 展開",
+  scPalette: "コマンドパレット",
+  scOpenSettings: "設定を開く",
+  scEscape: "ダイアログを閉じる / 操作を取り消す",
+  inputGroup: "入力と送信",
+  scSend: "メッセージを送信",
+  scNewline: "入力欄で改行",
+  scSlash: "コマンドメニューを開く",
+  userDesc: "ローカルのプロフィール、アバター、ユーザー名を管理します。このページのデータはすべてこの端末のローカルストレージにのみ保存され、クラウドには送信されません。",
+  avatarFileLabel: "アバター画像をアップロード",
+  profileGroup: "プロフィール (Profile)",
+  changeAvatarTitle: "クリックしてアバターを変更",
+  changeAvatar: "アバターを変更",
+  removeAvatar: "アバターを削除",
+  usernameName: "ユーザー名",
+  usernameDesc: "表示名を設定します。空欄で保存すると既定のキャラクター名「酒寄彩叶」に戻ります。",
+  usernameLabel: "ユーザー名",
+  saved: "保存しました",
+  saveName: "名前を保存",
+  badgeName: "称号 (Badge)",
+  badgeDesc: "サイドバーに表示する称号を設定します。プリセット（Lite、Plus、Pro、Go）から選ぶか、自由に入力できます。",
+  badgeLabel: "カスタム称号",
+  badgePlaceholder: "称号を入力 (例: VIP, Go)",
+  saveBadge: "称号を保存",
+  storageGroup: "データの安全性とローカル保存",
+  storageName: "ローカル専用ストレージ",
+  storageDesc:
+    "アバター画像とユーザー名はこの端末の LocalStorage にのみ保存されます。クラウドサービスやネットワーク経由で収集・保存されることはありません。",
+  localOnly: "ローカルのみ",
+};
+
+const SETTINGS_COPY: Readonly<Record<Locale, SettingsCopy>> = { "zh-CN": zhCopy, "ja-JP": jaCopy };
+
 export function SettingsModal({
   initialTab = "general",
   onClose,
@@ -64,6 +327,14 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTabKey>(initialTab);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const t = SETTINGS_COPY[shared.controller.locale];
+  const desktop = isDesktopApp();
+  const [updateCheck, setUpdateCheck] = useState<"idle" | "checking" | "failed" | UpdateCheckResult>("idle");
+
+  const handleCheckUpdate = async () => {
+    setUpdateCheck("checking");
+    setUpdateCheck((await checkForUpdate()) ?? "failed");
+  };
 
   // 本地用户设置（纯本地 LocalStorage）
   const [userSettings, saveUserSettings] = useLocalUserSettings();
@@ -80,12 +351,9 @@ export function SettingsModal({
   const handleSaveUsername = () => {
     const trimmed = usernameDraft.trim();
     saveUserSettings({ username: trimmed });
-    setUsernameDraft(trimmed || "酒寄彩叶");
+    setUsernameDraft(trimmed || t.defaultUsername);
     setUsernameSavedToast(true);
-    shared.showToast(
-      trimmed ? `用户名已更新为「${trimmed}」（本地保存）` : "用户名已恢复默认（酒寄彩叶）",
-      "info",
-    );
+    shared.showToast(trimmed ? t.usernameUpdated(trimmed) : t.usernameReset, "info");
     setTimeout(() => setUsernameSavedToast(false), 2000);
   };
 
@@ -102,7 +370,7 @@ export function SettingsModal({
     const finalBadge = trimmed ? trimmed.slice(0, 10) : "Lite";
     saveUserSettings({ badge: finalBadge });
     setBadgeDraft(finalBadge);
-    shared.showToast(`身份称号已更新为「${finalBadge}」（本地保存）`, "info");
+    shared.showToast(t.badgeUpdated(finalBadge), "info");
   };
 
   const [cropModalOpen, setCropModalOpen] = useState(false);
@@ -112,7 +380,7 @@ export function SettingsModal({
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      shared.showToast("请选择图片格式文件", "error");
+      shared.showToast(t.pickImage, "error");
       if (avatarInputRef.current) avatarInputRef.current.value = "";
       return;
     }
@@ -123,7 +391,7 @@ export function SettingsModal({
       if (avatarInputRef.current) avatarInputRef.current.value = "";
     };
     reader.onerror = () => {
-      shared.showToast("读取图片文件失败", "error");
+      shared.showToast(t.readImageFailed, "error");
       if (avatarInputRef.current) avatarInputRef.current.value = "";
     };
     reader.readAsDataURL(file);
@@ -133,12 +401,12 @@ export function SettingsModal({
     setCropModalOpen(false);
     setRawAvatarSrc("");
     saveUserSettings({ avatar: croppedDataUrl });
-    shared.showToast("头像已裁剪并保存至本地", "info");
+    shared.showToast(t.avatarSaved, "info");
   };
 
   const handleRemoveAvatar = () => {
     saveUserSettings({ avatar: "" });
-    shared.showToast("已恢复默认头像", "info");
+    shared.showToast(t.avatarReset, "info");
   };
 
   // 隐私模式持久化
@@ -190,11 +458,11 @@ export function SettingsModal({
 
   const currentProviderLabel = shared.llmActiveProvider
     ? PROVIDER_METADATA[shared.llmActiveProvider]?.label ?? shared.llmActiveProvider
-    : "系统默认 Provider (未单独配置)";
+    : t.defaultProvider;
 
 
   return (
-    <div className="settings-modal-overlay" role="dialog" aria-modal="true" aria-label="设置中心">
+    <div className="settings-modal-overlay" role="dialog" aria-modal="true" aria-label={t.dialogLabel}>
       <button
         type="button"
         className="settings-modal-backdrop"
@@ -209,16 +477,16 @@ export function SettingsModal({
           type="button"
           className="settings-modal__close-btn"
           onClick={onClose}
-          title="关闭 (Esc)"
-          aria-label="关闭设置"
+          title={t.closeTitle}
+          aria-label={t.closeLabel}
         >
           <X size={18} />
         </button>
 
         {/* ─── 左侧导航栏 ─────────────────────────────── */}
-        <nav className="settings-modal__sidebar" aria-label="设置分类">
+        <nav className="settings-modal__sidebar" aria-label={t.navLabel}>
           <div className="settings-modal__sidebar-header">
-            <span className="settings-modal__sidebar-kicker">设置</span>
+            <span className="settings-modal__sidebar-kicker">{t.kicker}</span>
           </div>
 
           <div className="settings-modal__nav-list" role="tablist">
@@ -227,85 +495,85 @@ export function SettingsModal({
               <button
                 type="button"
                 role="tab"
-                aria-label="常规概览"
+                aria-label={t.navGeneralLabel}
                 aria-selected={activeTab === "general"}
                 className={`settings-modal__nav-item ${activeTab === "general" ? "settings-modal__nav-item--active" : ""}`}
                 onClick={() => setActiveTab("general")}
               >
                 <Sliders size={16} className="settings-modal__nav-icon" />
-                <span className="settings-modal__nav-item-text">常规</span>
+                <span className="settings-modal__nav-item-text">{t.navGeneral}</span>
               </button>
 
               <button
                 type="button"
                 role="tab"
-                aria-label="存储与维护"
+                aria-label={t.navAppLabel}
                 aria-selected={activeTab === "app"}
                 className={`settings-modal__nav-item ${activeTab === "app" ? "settings-modal__nav-item--active" : ""}`}
                 onClick={() => setActiveTab("app")}
               >
                 <Database size={16} className="settings-modal__nav-icon" />
-                <span className="settings-modal__nav-item-text">应用</span>
+                <span className="settings-modal__nav-item-text">{t.navApp}</span>
               </button>
 
               <button
                 type="button"
                 role="tab"
-                aria-label="外观与语言"
+                aria-label={t.navAppearanceLabel}
                 aria-selected={activeTab === "appearance"}
                 className={`settings-modal__nav-item ${activeTab === "appearance" ? "settings-modal__nav-item--active" : ""}`}
                 onClick={() => setActiveTab("appearance")}
               >
                 <Palette size={16} className="settings-modal__nav-icon" />
-                <span className="settings-modal__nav-item-text">外观</span>
+                <span className="settings-modal__nav-item-text">{t.navAppearance}</span>
               </button>
 
               <button
                 type="button"
                 role="tab"
-                aria-label="模型配置"
+                aria-label={t.navModelsLabel}
                 aria-selected={activeTab === "models"}
                 className={`settings-modal__nav-item ${activeTab === "models" ? "settings-modal__nav-item--active" : ""}`}
                 onClick={() => setActiveTab("models")}
               >
                 <Cpu size={16} className="settings-modal__nav-icon" />
-                <span className="settings-modal__nav-item-text">模型</span>
+                <span className="settings-modal__nav-item-text">{t.navModels}</span>
               </button>
 
               <button
                 type="button"
                 role="tab"
-                aria-label="技能与记忆"
+                aria-label={t.navCustomLabel}
                 aria-selected={activeTab === "custom"}
                 className={`settings-modal__nav-item ${activeTab === "custom" ? "settings-modal__nav-item--active" : ""}`}
                 onClick={() => setActiveTab("custom")}
               >
                 <Sparkles size={16} className="settings-modal__nav-icon" />
-                <span className="settings-modal__nav-item-text">自定义</span>
+                <span className="settings-modal__nav-item-text">{t.navCustom}</span>
               </button>
 
               <button
                 type="button"
                 role="tab"
-                aria-label="联网搜索"
+                aria-label={t.navBrowser}
                 aria-selected={activeTab === "browser"}
                 className={`settings-modal__nav-item ${activeTab === "browser" ? "settings-modal__nav-item--active" : ""}`}
                 onClick={() => setActiveTab("browser")}
               >
                 <Globe size={16} className="settings-modal__nav-icon" />
-                <span className="settings-modal__nav-item-text">联网搜索</span>
+                <span className="settings-modal__nav-item-text">{t.navBrowser}</span>
               </button>
 
               <button
                 type="button"
                 role="tab"
-                aria-label="MCP 服务"
+                aria-label={t.navMcp}
                 aria-selected={activeTab === "mcp"}
                 className={`settings-modal__nav-item ${activeTab === "mcp" ? "settings-modal__nav-item--active" : ""}`}
                 onClick={() => setActiveTab("mcp")}
               >
                 <Server size={16} className="settings-modal__nav-icon" />
-                <span className="settings-modal__nav-item-text">MCP 服务</span>
+                <span className="settings-modal__nav-item-text">{t.navMcp}</span>
               </button>
             </div>
 
@@ -321,7 +589,7 @@ export function SettingsModal({
               onClick={() => setActiveTab("shortcuts")}
             >
               <Keyboard size={14} />
-              <span>快捷键速查</span>
+              <span>{t.shortcutsLink}</span>
             </button>
 
             <button
@@ -332,24 +600,24 @@ export function SettingsModal({
               }}
             >
               <HelpCircle size={14} />
-              <span>问题反馈</span>
+              <span>{t.feedbackLink}</span>
             </button>
 
             {/* 左下角用户设置（纯本地保存） */}
             <button
               type="button"
               role="tab"
-              aria-label="用户设置"
+              aria-label={t.userSettingsLabel}
               aria-selected={activeTab === "user"}
               className={`settings-modal__client-bar settings-modal__user-bar ${activeTab === "user" ? "settings-modal__user-bar--active" : ""}`}
               onClick={() => setActiveTab("user")}
-              title="用户设置（纯本地偏好）"
+              title={t.userBarTitle}
             >
               <div className="settings-modal__client-icon settings-modal__user-icon">
                 {userSettings.avatar ? (
                   <img
                     src={userSettings.avatar}
-                    alt={userSettings.username || "用户头像"}
+                    alt={userSettings.username || t.userAvatarAlt}
                     className="settings-modal__user-avatar-thumb"
                   />
                 ) : (
@@ -358,10 +626,10 @@ export function SettingsModal({
               </div>
               <div className="settings-modal__client-info">
                 <span className="settings-modal__client-title">
-                  {userSettings.username || "酒寄彩叶"}
+                  {userSettings.username || t.defaultUsername}
                 </span>
                 <span className="settings-modal__client-subtitle">
-                  本地专属 · 个人资料
+                  {t.userBarSubtitle}
                 </span>
               </div>
             </button>
@@ -374,21 +642,17 @@ export function SettingsModal({
           {activeTab === "general" ? (
             <div className="settings-panel-view">
               <div className="settings-panel-view__header">
-                <h3 className="settings-panel-view__title">常规</h3>
-                <p className="settings-panel-view__desc">
-                  速览客户端运行环境、隐私保护策略与各项服务连接状态。
-                </p>
+                <h3 className="settings-panel-view__title">{t.navGeneral}</h3>
+                <p className="settings-panel-view__desc">{t.generalDesc}</p>
               </div>
 
               {/* 1. 隐私与数据安全 */}
               <div className="settings-card-group">
-                <h4 className="settings-card-group__title">隐私保护与数据策略</h4>
+                <h4 className="settings-card-group__title">{t.privacyGroup}</h4>
                 <div className="settings-item-card">
                   <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">本地隐私保护模式</strong>
-                    <span className="settings-item-card__desc">
-                      启用后，您的对话内容、代码修改与工作区文件交互仅安全保存在当前设备的本地存储中，绝不上传至任何遥测分析或第三方日志服务器。
-                    </span>
+                    <strong className="settings-item-card__name">{t.privacyName}</strong>
+                    <span className="settings-item-card__desc">{t.privacyDesc}</span>
                   </div>
                   <div className="settings-item-card__action">
                     <button
@@ -397,7 +661,7 @@ export function SettingsModal({
                       aria-checked={privacyMode}
                       className={`settings-toggle-switch ${privacyMode ? "settings-toggle-switch--active" : ""}`}
                       onClick={handleTogglePrivacyMode}
-                      aria-label="切换隐私模式"
+                      aria-label={t.privacyToggle}
                     >
                       <span className="settings-toggle-knob" />
                     </button>
@@ -407,12 +671,13 @@ export function SettingsModal({
 
               {/* 3. 系统运行状态速览 */}
               <div className="settings-card-group">
-                <h4 className="settings-card-group__title">核心系统状态</h4>
+                <h4 className="settings-card-group__title">{t.statusGroup}</h4>
                 <div className="settings-item-card">
                   <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">大语言模型服务 (LLM)</strong>
+                    <strong className="settings-item-card__name">{t.llmName}</strong>
                     <span className="settings-item-card__desc">
-                      当前活跃 Provider: <strong>{currentProviderLabel}</strong>
+                      {t.llmActivePrefix}
+                      <strong>{currentProviderLabel}</strong>
                     </span>
                   </div>
                   <div className="settings-item-card__action">
@@ -421,21 +686,17 @@ export function SettingsModal({
                       className="settings-btn"
                       onClick={() => setActiveTab("models")}
                     >
-                      管理模型供应商
+                      {t.manageProviders}
                     </button>
                   </div>
                 </div>
 
                 <div className="settings-item-card">
                   <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">联网搜索</strong>
+                    <strong className="settings-item-card__name">{t.navBrowser}</strong>
                     <span className="settings-item-card__desc">
-                      当前状态：
-                      <strong>
-                        {shared.webSearchSettings.enabled
-                          ? "已开启，搜索失败时会自动尝试其他来源"
-                          : "已停用（纯离线模型知识）"}
-                      </strong>
+                      {t.webSearchPrefix}
+                      <strong>{shared.webSearchSettings.enabled ? t.webSearchOn : t.webSearchOff}</strong>
                     </span>
                   </div>
                   <div className="settings-item-card__action">
@@ -444,17 +705,16 @@ export function SettingsModal({
                       className="settings-btn"
                       onClick={() => setActiveTab("browser")}
                     >
-                      配置搜索
+                      {t.configureSearch}
                     </button>
                   </div>
                 </div>
 
                 <div className="settings-item-card">
                   <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">本地数据库 (IndexedDB)</strong>
+                    <strong className="settings-item-card__name">{t.dbName}</strong>
                     <span className="settings-item-card__desc">
-                      本地持久化数据库正常运行，当前共保存{" "}
-                      <strong>{shared.conversations.length}</strong> 组历史会话。
+                      {t.dbDescBefore} <strong>{shared.conversations.length}</strong> {t.dbDescAfter}
                     </span>
                   </div>
                   <div className="settings-item-card__action">
@@ -463,7 +723,7 @@ export function SettingsModal({
                       className="settings-btn"
                       onClick={() => setActiveTab("app")}
                     >
-                      数据管理
+                      {t.dataManage}
                     </button>
                   </div>
                 </div>
@@ -475,18 +735,16 @@ export function SettingsModal({
           {activeTab === "appearance" ? (
             <div className="settings-panel-view">
               <div className="settings-panel-view__header">
-                <h3 className="settings-panel-view__title">外观与语言</h3>
-                <p className="settings-panel-view__desc">自定义界面色彩主题、明暗模式与多语言本地化。</p>
+                <h3 className="settings-panel-view__title">{t.appearanceTitle}</h3>
+                <p className="settings-panel-view__desc">{t.appearanceDesc}</p>
               </div>
 
               <div className="settings-card-group">
-                <h4 className="settings-card-group__title">界面偏好</h4>
+                <h4 className="settings-card-group__title">{t.interfaceGroup}</h4>
                 <div className="settings-item-card">
                   <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">色彩主题</strong>
-                    <span className="settings-item-card__desc">
-                      当前主题：{resolvedTheme === "dark" ? "星空深色 (Dark)" : "皓月浅色 (Light)"}
-                    </span>
+                    <strong className="settings-item-card__name">{t.themeName}</strong>
+                    <span className="settings-item-card__desc">{t.themeCurrent(resolvedTheme === "dark")}</span>
                   </div>
                   <div className="settings-item-card__action">
                     {onToggleTheme ? (
@@ -495,7 +753,7 @@ export function SettingsModal({
                         className="settings-btn"
                         onClick={onToggleTheme}
                       >
-                        {resolvedTheme === "dark" ? "切换为浅色" : "切换为深色"}
+                        {resolvedTheme === "dark" ? t.toLight : t.toDark}
                       </button>
                     ) : null}
                   </div>
@@ -503,10 +761,8 @@ export function SettingsModal({
 
                 <div className="settings-item-card">
                   <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">界面多语言</strong>
-                    <span className="settings-item-card__desc">
-                      当前语言：{shared.controller.locale === "zh-CN" ? "简体中文" : "日本語"}
-                    </span>
+                    <strong className="settings-item-card__name">{t.languageName}</strong>
+                    <span className="settings-item-card__desc">{t.languageCurrent}</span>
                   </div>
                   <div className="settings-item-card__action">
                     <button
@@ -516,7 +772,7 @@ export function SettingsModal({
                         void shared.onLocale(shared.controller.locale === "zh-CN" ? "ja-JP" : "zh-CN")
                       }
                     >
-                      {shared.controller.locale === "zh-CN" ? "日本語に切替" : "切换为中文"}
+                      {t.switchLanguage}
                     </button>
                   </div>
                 </div>
@@ -529,10 +785,8 @@ export function SettingsModal({
           {activeTab === "models" ? (
             <div className="settings-panel-view">
               <div className="settings-panel-view__header">
-                <h3 className="settings-panel-view__title">大模型供应商与 Key 管理</h3>
-                <p className="settings-panel-view__desc">
-                  配置各 LLM Provider 厂商 API Key 与默认模型（StepFun、DeepSeek、GLM、Claude、OpenAI、Gemini）。与系统安全凭据库安全打通。
-                </p>
+                <h3 className="settings-panel-view__title">{t.modelsTitle}</h3>
+                <p className="settings-panel-view__desc">{t.modelsDesc}</p>
               </div>
 
               <LlmSettingsPanel
@@ -552,13 +806,13 @@ export function SettingsModal({
           {activeTab === "custom" ? (
             <div className="settings-panel-view">
               <div className="settings-panel-view__header">
-                <h3 className="settings-panel-view__title">技能与个性化记忆</h3>
-                <p className="settings-panel-view__desc">配置智能体技能扩展与八千代的长期个性化设定记忆。</p>
+                <h3 className="settings-panel-view__title">{t.customTitle}</h3>
+                <p className="settings-panel-view__desc">{t.customDesc}</p>
               </div>
 
               <div className="settings-custom-stack">
                 <div className="settings-card-group">
-                  <h4 className="settings-card-group__title">八千代的长期记忆</h4>
+                  <h4 className="settings-card-group__title">{t.memoryGroup}</h4>
                   <UserMemoryPanel
                     copy={shared.copy}
                     memory={shared.controller.userMemory ?? ""}
@@ -578,7 +832,7 @@ export function SettingsModal({
                 </div>
 
                 <div className="settings-card-group">
-                  <h4 className="settings-card-group__title">技能扩展</h4>
+                  <h4 className="settings-card-group__title">{t.skillsGroup}</h4>
                   <SkillsPanel
                     activeIds={shared.activeSkillIds}
                     copy={shared.copy}
@@ -600,8 +854,8 @@ export function SettingsModal({
           {activeTab === "browser" ? (
             <div className="settings-panel-view">
               <div className="settings-panel-view__header">
-                <h3 className="settings-panel-view__title">联网搜索</h3>
-                <p className="settings-panel-view__desc">允许八千代搜索网页，并选择是否显示参考来源。</p>
+                <h3 className="settings-panel-view__title">{t.navBrowser}</h3>
+                <p className="settings-panel-view__desc">{t.browserDesc}</p>
               </div>
 
               <SkillsPanel
@@ -628,18 +882,60 @@ export function SettingsModal({
           {activeTab === "app" ? (
             <div className="settings-panel-view">
               <div className="settings-panel-view__header">
-                <h3 className="settings-panel-view__title">数据管理与系统维护</h3>
-                <p className="settings-panel-view__desc">管理本地 IndexedDB 缓存、会话持久化与凭据清理。</p>
+                <h3 className="settings-panel-view__title">{t.appTitle}</h3>
+                <p className="settings-panel-view__desc">{t.appDesc}</p>
               </div>
 
+              {desktop ? (
+                <div className="settings-card-group">
+                  <h4 className="settings-card-group__title">{t.updateGroup}</h4>
+                  <div className="settings-item-card">
+                    <div className="settings-item-card__lead">
+                      <strong className="settings-item-card__name">{t.updateName}</strong>
+                      <span className="settings-item-card__desc" aria-live="polite">
+                        {updateCheck === "idle" || updateCheck === "checking"
+                          ? t.updateIdle
+                          : updateCheck === "failed"
+                            ? t.updateFailed
+                            : updateCheck.available !== undefined
+                              ? t.updateAvailable(updateCheck.available.version, updateCheck.currentVersion)
+                              : t.updateLatest(updateCheck.currentVersion)}
+                      </span>
+                    </div>
+                    <div className="settings-item-card__action">
+                      {typeof updateCheck === "object" && updateCheck.available !== undefined ? (
+                        <button
+                          type="button"
+                          className="settings-btn settings-btn--primary"
+                          onClick={() => {
+                            if (typeof updateCheck === "object" && updateCheck.available !== undefined) {
+                              void openExternalUrl(updateCheck.available.url);
+                            }
+                          }}
+                        >
+                          {t.updateDownload}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="settings-btn"
+                          disabled={updateCheck === "checking"}
+                          onClick={() => void handleCheckUpdate()}
+                        >
+                          {updateCheck === "checking" ? t.updateChecking : t.updateName}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="settings-card-group">
-                <h4 className="settings-card-group__title">数据清理</h4>
+                <h4 className="settings-card-group__title">{t.cleanupGroup}</h4>
                 <div className="settings-item-card">
                   <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">清空本地全部会话</strong>
-                    <span className="settings-item-card__desc">
-                      永久清除 IndexedDB 中存储的全部历史对话记录与图片附件缓存。
-                    </span>
+                    <strong className="settings-item-card__name">{t.clearAllName}</strong>
+                    <span className="settings-item-card__desc">{t.clearAllDesc}</span>
                   </div>
                   <div className="settings-item-card__action">
                     {showClearConfirm ? (
@@ -652,14 +948,14 @@ export function SettingsModal({
                             void shared.onClearData();
                           }}
                         >
-                          确认清空
+                          {t.confirmClear}
                         </button>
                         <button
                           type="button"
                           className="settings-btn"
                           onClick={() => setShowClearConfirm(false)}
                         >
-                          取消
+                          {t.cancel}
                         </button>
                       </div>
                     ) : (
@@ -669,7 +965,7 @@ export function SettingsModal({
                         onClick={() => setShowClearConfirm(true)}
                       >
                         <Trash2 size={13} style={{ display: "inline", marginRight: 4 }} />
-                        清空数据
+                        {t.clearData}
                       </button>
                     )}
                   </div>
@@ -677,33 +973,36 @@ export function SettingsModal({
 
                 <div className="settings-item-card">
                   <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">上下文智能压缩</strong>
-                    <span className="settings-item-card__desc">精炼多轮历史，节约 token 消耗。</span>
+                    <strong className="settings-item-card__name">{t.compressName}</strong>
+                    <span className="settings-item-card__desc">{t.compressDesc}</span>
                   </div>
                   <div className="settings-item-card__action">
                     {onCompress ? (
                       <button type="button" className="settings-btn" onClick={onCompress}>
-                        立即压缩
+                        {t.compressNow}
                       </button>
                     ) : null}
                   </div>
                 </div>
 
-                <div className="settings-item-card">
-                  <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">清除服务端凭据</strong>
-                    <span className="settings-item-card__desc">清除当前设备在服务端保存的会话 Session Cookie。</span>
+                {/* 桌面端由本地网关鉴权，不存在服务端会话 Cookie */}
+                {desktop ? null : (
+                  <div className="settings-item-card">
+                    <div className="settings-item-card__lead">
+                      <strong className="settings-item-card__name">{t.signOutName}</strong>
+                      <span className="settings-item-card__desc">{t.signOutDesc}</span>
+                    </div>
+                    <div className="settings-item-card__action">
+                      <button
+                        type="button"
+                        className="settings-btn settings-btn--ghost"
+                        onClick={() => void shared.onSignOut()}
+                      >
+                        {t.signOut}
+                      </button>
+                    </div>
                   </div>
-                  <div className="settings-item-card__action">
-                    <button
-                      type="button"
-                      className="settings-btn settings-btn--ghost"
-                      onClick={() => void shared.onSignOut()}
-                    >
-                      清除凭据
-                    </button>
-                  </div>
-                </div>
+                )}
               </div>
             </div>
           ) : null}
@@ -712,51 +1011,47 @@ export function SettingsModal({
           {activeTab === "shortcuts" ? (
             <div className="settings-panel-view">
               <div className="settings-panel-view__header">
-                <h3 className="settings-panel-view__title">键盘快捷键速查</h3>
-                <p className="settings-panel-view__desc">全键盘操作映射，帮助您快速掌控桌面端交互。</p>
+                <h3 className="settings-panel-view__title">{t.shortcutsTitle}</h3>
+                <p className="settings-panel-view__desc">{t.shortcutsDesc}</p>
               </div>
 
               <div className="settings-card-group">
-                <h4 className="settings-card-group__title">全局操作</h4>
+                <h4 className="settings-card-group__title">{t.globalGroup}</h4>
                 <div className="settings-shortcut-table">
-                  <div className="settings-shortcut-row">
-                    <span className="settings-shortcut-name">新建会话</span>
-                    <kbd className="settings-kbd">Ctrl + N</kbd>
-                  </div>
-                  <div className="settings-shortcut-row">
-                    <span className="settings-shortcut-name">打开 / 收起工作区</span>
-                    <kbd className="settings-kbd">Ctrl + B</kbd>
-                  </div>
-                  <div className="settings-shortcut-row">
-                    <span className="settings-shortcut-name">折叠 / 展开侧边栏</span>
-                    <kbd className="settings-kbd">Ctrl + [</kbd>
-                  </div>
-                  <div className="settings-shortcut-row">
-                    <span className="settings-shortcut-name">打开系统设置中心</span>
-                    <kbd className="settings-kbd">Ctrl + ,</kbd>
-                  </div>
-                  <div className="settings-shortcut-row">
-                    <span className="settings-shortcut-name">关闭弹窗 / 取消对话</span>
-                    <kbd className="settings-kbd">Esc</kbd>
-                  </div>
+                  {(
+                    [
+                      [t.scNewChat, "Ctrl + N"],
+                      [t.scSwitchView, "Ctrl + 1 / 2"],
+                      [t.scToggleRightPane, "Ctrl + B"],
+                      [t.scToggleSidebar, "Ctrl + ["],
+                      [t.scPalette, "Ctrl + K"],
+                      [t.scOpenSettings, "Ctrl + ,"],
+                      [t.scEscape, "Esc"],
+                    ] as const
+                  ).map(([name, keys]) => (
+                    <div className="settings-shortcut-row" key={keys}>
+                      <span className="settings-shortcut-name">{name}</span>
+                      <kbd className="settings-kbd">{keys}</kbd>
+                    </div>
+                  ))}
                 </div>
               </div>
 
               <div className="settings-card-group">
-                <h4 className="settings-card-group__title">输入与发送</h4>
+                <h4 className="settings-card-group__title">{t.inputGroup}</h4>
                 <div className="settings-shortcut-table">
-                  <div className="settings-shortcut-row">
-                    <span className="settings-shortcut-name">发送消息</span>
-                    <kbd className="settings-kbd">Enter</kbd>
-                  </div>
-                  <div className="settings-shortcut-row">
-                    <span className="settings-shortcut-name">输入框内换行</span>
-                    <kbd className="settings-kbd">Shift + Enter</kbd>
-                  </div>
-                  <div className="settings-shortcut-row">
-                    <span className="settings-shortcut-name">快捷唤起指令菜单</span>
-                    <kbd className="settings-kbd">/</kbd>
-                  </div>
+                  {(
+                    [
+                      [t.scSend, "Enter"],
+                      [t.scNewline, "Shift + Enter"],
+                      [t.scSlash, "/"],
+                    ] as const
+                  ).map(([name, keys]) => (
+                    <div className="settings-shortcut-row" key={keys}>
+                      <span className="settings-shortcut-name">{name}</span>
+                      <kbd className="settings-kbd">{keys}</kbd>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -766,10 +1061,8 @@ export function SettingsModal({
           {activeTab === "user" ? (
             <div className="settings-panel-view">
               <div className="settings-panel-view__header">
-                <h3 className="settings-panel-view__title">用户设置</h3>
-                <p className="settings-panel-view__desc">
-                  管理您的本地个人资料、头像与用户名。本页所有数据仅安全保存在当前设备的本地存储中，绝不上传云端。
-                </p>
+                <h3 className="settings-panel-view__title">{t.userSettingsLabel}</h3>
+                <p className="settings-panel-view__desc">{t.userDesc}</p>
               </div>
 
               {/* 隐藏的本地头像文件选择器 */}
@@ -777,14 +1070,14 @@ export function SettingsModal({
                 ref={avatarInputRef}
                 type="file"
                 accept="image/*"
-                aria-label="上传头像文件"
+                aria-label={t.avatarFileLabel}
                 style={{ display: "none" }}
                 onChange={handleAvatarFileChange}
               />
 
               {/* 1. 个人资料卡片：头像与用户名 */}
               <div className="settings-card-group">
-                <h4 className="settings-card-group__title">个人资料 (Profile)</h4>
+                <h4 className="settings-card-group__title">{t.profileGroup}</h4>
                 <div className="settings-item-card settings-user-profile-card">
                   <div className="settings-user-profile-layout">
                     <div className="settings-user-profile-avatar-col">
@@ -792,7 +1085,7 @@ export function SettingsModal({
                         {userSettings.avatar ? (
                           <img
                             src={userSettings.avatar}
-                            alt={userSettings.username || "用户头像"}
+                            alt={userSettings.username || t.userAvatarAlt}
                             className="settings-user-avatar-preview"
                           />
                         ) : (
@@ -804,8 +1097,8 @@ export function SettingsModal({
                           type="button"
                           className="settings-user-avatar-upload-overlay"
                           onClick={() => avatarInputRef.current?.click()}
-                          title="点击更换头像"
-                          aria-label="更换头像"
+                          title={t.changeAvatarTitle}
+                          aria-label={t.changeAvatar}
                         >
                           <Camera size={16} />
                         </button>
@@ -818,7 +1111,7 @@ export function SettingsModal({
                           onClick={() => avatarInputRef.current?.click()}
                         >
                           <Upload size={12} style={{ marginRight: 4 }} />
-                          更换头像
+                          {t.changeAvatar}
                         </button>
                         {userSettings.avatar ? (
                           <button
@@ -826,7 +1119,7 @@ export function SettingsModal({
                             className="settings-btn settings-btn--ghost settings-btn--sm danger-action"
                             onClick={handleRemoveAvatar}
                           >
-                            移除头像
+                            {t.removeAvatar}
                           </button>
                         ) : null}
                       </div>
@@ -834,18 +1127,16 @@ export function SettingsModal({
 
                     <div className="settings-user-profile-info-col">
                       <div className="settings-item-card__lead">
-                        <strong className="settings-item-card__name">用户名称</strong>
-                        <span className="settings-item-card__desc">
-                          设置您的个人展示名称。留空保存时将自动恢复为默认角色名称“酒寄彩叶”。
-                        </span>
+                        <strong className="settings-item-card__name">{t.usernameName}</strong>
+                        <span className="settings-item-card__desc">{t.usernameDesc}</span>
                       </div>
 
                       <div className="settings-user-input-row">
                         <input
                           type="text"
-                          aria-label="用户名"
+                          aria-label={t.usernameLabel}
                           className="settings-user-input"
-                          placeholder="酒寄彩叶"
+                          placeholder={t.defaultUsername}
                           value={usernameDraft}
                           maxLength={20}
                           onChange={(e) => setUsernameDraft(e.target.value)}
@@ -864,10 +1155,10 @@ export function SettingsModal({
                           {usernameSavedToast ? (
                             <>
                               <Check size={13} style={{ marginRight: 4 }} />
-                              已保存
+                              {t.saved}
                             </>
                           ) : (
-                            "保存名称"
+                            t.saveName
                           )}
                         </button>
                       </div>
@@ -878,10 +1169,8 @@ export function SettingsModal({
                 {/* 身份称号与等级设置 */}
                 <div className="settings-item-card settings-user-badge-card" style={{ marginTop: 12 }}>
                   <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">身份称号 (Badge)</strong>
-                    <span className="settings-item-card__desc">
-                      设置侧边栏展示的个人称号。可快速选择标准预设（Lite、Plus、Pro、Go）或键入个性称号。
-                    </span>
+                    <strong className="settings-item-card__name">{t.badgeName}</strong>
+                    <span className="settings-item-card__desc">{t.badgeDesc}</span>
                   </div>
                   <div className="settings-user-badge-settings-block">
                     <div className="settings-user-badge-presets">
@@ -906,9 +1195,9 @@ export function SettingsModal({
                     <div className="settings-user-input-row" style={{ marginTop: 10 }}>
                       <input
                         type="text"
-                        aria-label="个性称号"
+                        aria-label={t.badgeLabel}
                         className="settings-user-input"
-                        placeholder="输入自定义称号 (如 VIP, Go)"
+                        placeholder={t.badgePlaceholder}
                         maxLength={10}
                         value={badgeDraft}
                         onChange={(e) => setBadgeDraft(e.target.value)}
@@ -924,7 +1213,7 @@ export function SettingsModal({
                         className="settings-btn settings-btn--primary"
                         onClick={() => handleSaveBadge(badgeDraft)}
                       >
-                        保存称号
+                        {t.saveBadge}
                       </button>
                     </div>
                   </div>
@@ -933,16 +1222,14 @@ export function SettingsModal({
 
               {/* 2. 本地隐私隔离保证 */}
               <div className="settings-card-group">
-                <h4 className="settings-card-group__title">数据安全与本地存储</h4>
+                <h4 className="settings-card-group__title">{t.storageGroup}</h4>
                 <div className="settings-item-card">
                   <div className="settings-item-card__lead">
-                    <strong className="settings-item-card__name">纯本地隔离存储</strong>
-                    <span className="settings-item-card__desc">
-                      您的头像图片与用户名称仅保存在当前设备的 LocalStorage 中。任何云端服务、网络接口均不会收集或存储该配置。
-                    </span>
+                    <strong className="settings-item-card__name">{t.storageName}</strong>
+                    <span className="settings-item-card__desc">{t.storageDesc}</span>
                   </div>
                   <div className="settings-item-card__action">
-                    <span className="settings-user-storage-badge">仅本地有效</span>
+                    <span className="settings-user-storage-badge">{t.localOnly}</span>
                   </div>
                 </div>
               </div>

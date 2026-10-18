@@ -1,3 +1,4 @@
+import { useLocale } from "../../../i18n/locale-context";
 import type { UiCopy } from "../../../i18n/messages";
 import { SidebarGroupSection } from "./SidebarGroupSection";
 import type { ConversationGroup, TimeGroupKey } from "./types";
@@ -33,11 +34,12 @@ export function SidebarHistoryList({
   totalCount,
   totalMatches,
 }: SidebarHistoryListProps) {
+  const ja = useLocale() === "ja-JP";
   return (
     <div className="desktop-sidebar__history">
       {isSearching ? (
         <div className="desktop-sidebar__search-status">
-          <span className="desktop-sidebar__search-status-label">搜索结果</span>
+          <span className="desktop-sidebar__search-status-label">{ja ? "検索結果" : "搜索结果"}</span>
           <span className="desktop-sidebar__search-status-count">{`${totalMatches} / ${totalCount}`}</span>
         </div>
       ) : null}
@@ -49,7 +51,7 @@ export function SidebarHistoryList({
           </div>
         ) : totalMatches === 0 && isSearching ? (
           <div className="desktop-sidebar__history-empty">
-            <p className="desktop-sidebar__empty-text">未找到匹配的会话</p>
+            <p className="desktop-sidebar__empty-text">{ja ? "一致する会話はありません" : "未找到匹配的会话"}</p>
           </div>
         ) : (
           groups.map((group) => (

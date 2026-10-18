@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import type { EditorWorkspaceController } from "../../app/use-editor-workspace";
+import { useLocale } from "../../i18n/locale-context";
 import type { UiCopy } from "../../i18n/messages";
 import { languageForPath } from "./editor-language";
 import { editorThemeFor, loadMonaco } from "./monaco-loader";
@@ -94,7 +95,7 @@ export function EditorView({
   const { activeProject } = useProjectState();
   const [treeRefreshKey, setTreeRefreshKey] = useState(0);
 
-  const isJa = copy?.editorViewTab === "チャット";
+  const isJa = useLocale() === "ja-JP";
 
   const toggleSidebar = useCallback((collapsed: boolean) => {
     setSidebarCollapsed(collapsed);
@@ -201,13 +202,13 @@ export function EditorView({
   const activeTab = workspace.activeTab;
 
   return (
-    <section className={`editor-view ${hidden ? "editor-view--hidden" : ""}`} aria-label="代码编辑器">
+    <section className={`editor-view ${hidden ? "editor-view--hidden" : ""}`} aria-label={isJa ? "コードエディター" : "代码编辑器"}>
       <div className="editor-view__container">
         {/* 左侧轻量工作区文件树侧栏 */}
         {!sidebarCollapsed ? (
-          <aside className="editor-view__sidebar" aria-label="工作区文件浏览">
+          <aside className="editor-view__sidebar" aria-label={isJa ? "ワークスペースのファイル" : "工作区文件浏览"}>
             <div className="editor-sidebar__header">
-              <div className="editor-sidebar__title" title={activeProject || "工作区"}>
+              <div className="editor-sidebar__title" title={activeProject || (isJa ? "ワークスペース" : "工作区")}>
                 <Folder size={14} className="editor-sidebar__folder-icon" />
                 <span className="editor-sidebar__name">{activeProject ? getWorkspaceName(activeProject) : (isJa ? "ワークスペース" : "工作区")}</span>
               </div>
@@ -234,7 +235,7 @@ export function EditorView({
                   type="button"
                   className="editor-sidebar__btn"
                   onClick={() => toggleSidebar(true)}
-                  title="折叠文件树侧栏"
+                  title={isJa ? "ファイルツリーを折りたたむ" : "折叠文件树侧栏"}
                 >
                   <PanelLeftClose size={13} />
                 </button>
@@ -275,8 +276,8 @@ export function EditorView({
                 type="button"
                 className="editor-tab editor-tab--sidebar-toggle"
                 onClick={() => toggleSidebar(false)}
-                title="展开工作区文件树"
-                aria-label="展开工作区文件树"
+                title={isJa ? "ファイルツリーを展開" : "展开工作区文件树"}
+                aria-label={isJa ? "ファイルツリーを展開" : "展开工作区文件树"}
               >
                 <PanelLeft size={13} />
               </button>
@@ -344,7 +345,7 @@ export function EditorView({
             {workspace.tabs.length === 0 ? (
               <div className="editor-view__empty-state">
                 <Code2 size={40} className="editor-view__empty-icon" />
-                <h3 className="editor-view__empty-title">工作区代码编辑器</h3>
+                <h3 className="editor-view__empty-title">{isJa ? "ワークスペースのコードエディター" : "工作区代码编辑器"}</h3>
                 <p className="editor-view__empty-desc">
                   {activeProject
                     ? (isJa ? "左側のファイルツリーからファイルを選択して開く" : "从左侧选择文件打开")
@@ -363,9 +364,9 @@ export function EditorView({
                 <div className="editor-view__empty-hints">
                   <span>Ctrl+S 保存</span>
                   <span>•</span>
-                  <span>Ctrl+1 对话</span>
+                  <span>{isJa ? "Ctrl+1 会話" : "Ctrl+1 对话"}</span>
                   <span>•</span>
-                  <span>Ctrl+2 编辑器</span>
+                  <span>{isJa ? "Ctrl+2 エディター" : "Ctrl+2 编辑器"}</span>
                 </div>
               </div>
             ) : null}

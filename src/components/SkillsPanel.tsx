@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { useClosing } from "../app/use-closing";
 import type { UiCopy } from "../i18n/messages";
 import type { WebSearchSettings } from "../services/web-search-settings";
-import { type SkillDefinition } from "../skills";
+import { useLocale } from "../i18n/locale-context";
+import { skillLabel, type SkillDefinition } from "../skills";
 
 export interface SkillsPanelProps {
   copy: UiCopy;
@@ -92,6 +93,7 @@ export function SkillsPanel({
   hideWebSearch = false,
   onlyWebSearch = false,
 }: SkillsPanelProps) {
+  const locale = useLocale();
   const cardRef = useRef<HTMLDivElement>(null);
   const [expandedId, setExpandedId] = useState<string>();
 
@@ -127,7 +129,7 @@ export function SkillsPanel({
                 <div className="skills-panel__summary">
                   <div className="skills-panel__meta">
                     <div className="skills-panel__title-row">
-                      <strong className="skills-panel__name">{skill.name}</strong>
+                      <strong className="skills-panel__name">{skillLabel(skill, locale).name}</strong>
                       <button
                         aria-expanded={expanded}
                         className="skills-panel__expand"
@@ -143,11 +145,11 @@ export function SkillsPanel({
                         <span>{expanded ? copy.skillHideContent : copy.skillViewContent}</span>
                       </button>
                     </div>
-                    <span className="skills-panel__desc">{skill.description}</span>
+                    <span className="skills-panel__desc">{skillLabel(skill, locale).description}</span>
                   </div>
                   <button
                     type="button"
-                    aria-label={`${copy.skillToggleLabel}: ${skill.name}`}
+                    aria-label={`${copy.skillToggleLabel}: ${skillLabel(skill, locale).name}`}
                     aria-pressed={active}
                     className={`settings-toggle-switch ${active ? "settings-toggle-switch--active" : ""}`}
                     onClick={() => onToggle(skill.id, !active)}

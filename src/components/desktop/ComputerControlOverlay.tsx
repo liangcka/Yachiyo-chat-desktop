@@ -1,5 +1,6 @@
 import { MonitorDot, Square } from "lucide-react";
 import { useEffect, useMemo } from "react";
+import { useLocale } from "../../i18n/locale-context";
 import { formatComputerControlAction } from "../../services/mcp-manager";
 
 export interface ComputerControlOverlayProps {
@@ -22,6 +23,8 @@ export function ComputerControlOverlay({
   softwareName = "月见八千代",
   onStop,
 }: ComputerControlOverlayProps) {
+  const locale = useLocale();
+  const ja = locale === "ja-JP";
   // 全局 Esc 键快速紧急接管
   useEffect(() => {
     if (!active) return;
@@ -37,9 +40,9 @@ export function ComputerControlOverlay({
   }, [active, onStop]);
 
   const actionText = useMemo(() => {
-    if (!toolName) return "正在执行自动化任务...";
-    return formatComputerControlAction(toolName, toolArgs);
-  }, [toolName, toolArgs]);
+    if (!toolName) return ja ? "自動化タスクを実行中…" : "正在执行自动化任务...";
+    return formatComputerControlAction(toolName, toolArgs, locale);
+  }, [ja, locale, toolName, toolArgs]);
 
   if (!active) return null;
 
@@ -48,7 +51,7 @@ export function ComputerControlOverlay({
       className="computer-control-overlay"
       role="alert"
       aria-live="assertive"
-      aria-label={`${softwareName} 正在控制你的电脑`}
+      aria-label={ja ? `${softwareName} が PC を操作しています` : `${softwareName} 正在控制你的电脑`}
     >
       {/* 1. 四周周边呼吸发光环 (类似 Codex 控制电脑光晕) */}
       <div className="computer-control-overlay__rim" aria-hidden="true">
@@ -68,7 +71,7 @@ export function ComputerControlOverlay({
         <div className="computer-control-overlay__info">
           <div className="computer-control-overlay__title">
             <span className="computer-control-overlay__software">{softwareName}</span>
-            <span className="computer-control-overlay__status-text">正在控制你的电脑</span>
+            <span className="computer-control-overlay__status-text">{ja ? "が PC を操作しています" : "正在控制你的电脑"}</span>
           </div>
           <div className="computer-control-overlay__desc" title={actionText}>
             {actionText}
@@ -79,11 +82,11 @@ export function ComputerControlOverlay({
           type="button"
           className="computer-control-overlay__takeover-btn"
           onClick={onStop}
-          title="按下 Esc 键或点击立即接管控制"
-          aria-label="立即接管电脑控制"
+          title={ja ? "Esc キーまたはクリックで操作を取り戻す" : "按下 Esc 键或点击立即接管控制"}
+          aria-label={ja ? "PC の操作をすぐに取り戻す" : "立即接管电脑控制"}
         >
           <Square size={13} fill="currentColor" />
-          <span>立即接管 (Esc)</span>
+          <span>{ja ? "操作を取り戻す (Esc)" : "立即接管 (Esc)"}</span>
         </button>
       </div>
     </div>

@@ -260,8 +260,8 @@ export const MessageBubble = memo(function MessageBubble({
       ) : null}
       {editing ? (
         <form className="message-bubble__edit" onSubmit={(event) => { event.preventDefault(); if (editText.trim()) { onEdit?.(editText); setEditing(false); } }}>
-          <textarea aria-label="编辑消息" value={editText} onChange={(event) => setEditText(event.target.value)} />
-          <div><button type="button" onClick={() => setEditing(false)}>取消</button><button type="submit" disabled={!editText.trim()}>保存并重新生成</button></div>
+          <textarea aria-label={locale === "ja-JP" ? "メッセージを編集" : "编辑消息"} value={editText} onChange={(event) => setEditText(event.target.value)} />
+          <div><button type="button" onClick={() => setEditing(false)}>{locale === "ja-JP" ? "キャンセル" : "取消"}</button><button type="submit" disabled={!editText.trim()}>{locale === "ja-JP" ? "保存して再生成" : "保存并重新生成"}</button></div>
         </form>
       ) : isEmpty && message.status === "failed" && message.role === "assistant" ? (
         <p>{locale === "ja-JP" ? "返信を生成できませんでした。" : "本次回复未生成。"}</p>
@@ -311,10 +311,10 @@ export const MessageBubble = memo(function MessageBubble({
       {!editing && (showCopy || onEdit || showRegenerate || showVersions) ? (
         <div className="message-bubble__actions">
           {showVersions && versions ? (
-            <div className="message-bubble__versions" aria-label="消息版本">
-              <button type="button" aria-label="上一个版本" disabled={!onVersionChange || versions.indexOf(message.branchVersion ?? 1) <= 0} onClick={() => onVersionChange?.(versions[versions.indexOf(message.branchVersion ?? 1) - 1]!)}><ChevronLeft size={13} /></button>
+            <div className="message-bubble__versions" aria-label={locale === "ja-JP" ? "メッセージのバージョン" : "消息版本"}>
+              <button type="button" aria-label={locale === "ja-JP" ? "前のバージョン" : "上一个版本"} disabled={!onVersionChange || versions.indexOf(message.branchVersion ?? 1) <= 0} onClick={() => onVersionChange?.(versions[versions.indexOf(message.branchVersion ?? 1) - 1]!)}><ChevronLeft size={13} /></button>
               <span>{versions.indexOf(message.branchVersion ?? 1) + 1} / {versions.length}</span>
-              <button type="button" aria-label="下一个版本" disabled={!onVersionChange || versions.indexOf(message.branchVersion ?? 1) >= versions.length - 1} onClick={() => onVersionChange?.(versions[versions.indexOf(message.branchVersion ?? 1) + 1]!)}><ChevronRight size={13} /></button>
+              <button type="button" aria-label={locale === "ja-JP" ? "次のバージョン" : "下一个版本"} disabled={!onVersionChange || versions.indexOf(message.branchVersion ?? 1) >= versions.length - 1} onClick={() => onVersionChange?.(versions[versions.indexOf(message.branchVersion ?? 1) + 1]!)}><ChevronRight size={13} /></button>
             </div>
           ) : null}
           {showCopy ? (
@@ -322,7 +322,7 @@ export const MessageBubble = memo(function MessageBubble({
               <Copy size={13} />
             </button>
           ) : null}
-          {onEdit ? <button type="button" title="编辑消息" aria-label="编辑消息" onClick={() => { setEditText(message.text); setEditing(true); }}><Pencil size={13} /></button> : null}
+          {onEdit ? <button type="button" title={locale === "ja-JP" ? "メッセージを編集" : "编辑消息"} aria-label={locale === "ja-JP" ? "メッセージを編集" : "编辑消息"} onClick={() => { setEditText(message.text); setEditing(true); }}><Pencil size={13} /></button> : null}
           {showRegenerate ? (
             <button type="button" onClick={handleRegenerateAction} title={copyFor(locale).regenerate} aria-label={copyFor(locale).regenerate}>
               <RotateCw size={13} />

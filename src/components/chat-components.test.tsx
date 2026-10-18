@@ -152,9 +152,10 @@ describe("reference chat components", () => {
     render(<MessageBubble locale={locale} message={message} versions={[1, 2]} onVersionChange={onVersionChange} />);
 
     expect(screen.getByText(placeholder)).toBeVisible();
-    expect(screen.getByLabelText("消息版本")).toHaveTextContent("2 / 2");
-    expect(screen.getByRole("button", { name: "下一个版本" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "上一个版本" }));
+    const ja = locale === "ja-JP";
+    expect(screen.getByLabelText(ja ? "メッセージのバージョン" : "消息版本")).toHaveTextContent("2 / 2");
+    expect(screen.getByRole("button", { name: ja ? "次のバージョン" : "下一个版本" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: ja ? "前のバージョン" : "上一个版本" }));
     expect(onVersionChange).toHaveBeenCalledWith(1);
   });
 

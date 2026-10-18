@@ -166,6 +166,7 @@ export interface UiCopy {
   readonly desktopKeyRequired: string;
   readonly desktopUpdateAvailable: (version: string) => string;
   readonly desktopUpdateAction: string;
+  readonly serverCredentialsCleared: string;
 }
 
 const chinese = Object.freeze({
@@ -334,6 +335,7 @@ const chinese = Object.freeze({
   desktopKeyRequired: "还没有可用的模型，请在「设置 → 模型」中填写 API Key 并启用。",
   desktopUpdateAvailable: (version) => `发现新版本 v${version}`,
   desktopUpdateAction: "前往下载",
+  serverCredentialsCleared: "服务端凭据已清除",
 } satisfies UiCopy);
 
 const japanese = Object.freeze({
@@ -503,6 +505,7 @@ const japanese = Object.freeze({
   desktopKeyRequired: "利用できるモデルがありません。「設定 → モデル」で API キーを入力して有効にしてください。",
   desktopUpdateAvailable: (version) => `新しいバージョン v${version} があります`,
   desktopUpdateAction: "ダウンロード",
+  serverCredentialsCleared: "サーバー側の認証情報を削除しました",
 } satisfies UiCopy);
 
 const dictionaries: Readonly<Record<Locale, UiCopy>> = Object.freeze({

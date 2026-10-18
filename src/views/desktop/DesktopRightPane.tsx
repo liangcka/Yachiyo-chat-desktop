@@ -48,15 +48,16 @@ export function DesktopRightPane({
   resolvedTheme = "dark",
 }: DesktopRightPaneProps) {
   const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
+  const ja = shared.controller.locale === "ja-JP";
 
   if (activeTab === "none") return null;
   const visibleTab = activeTab === "editor" ? "workspace" : activeTab;
 
   return (
-    <aside className="desktop-right-pane" aria-label="成果与多功能审阅面板">
+    <aside className="desktop-right-pane" aria-label={ja ? "成果とレビューのパネル" : "成果与多功能审阅面板"}>
       {/* 顶部标签切换与关闭 */}
       <div className="desktop-right-pane__header">
-        <div className="desktop-right-pane__tabs" role="tablist" aria-label="成果与审阅标签">
+        <div className="desktop-right-pane__tabs" role="tablist" aria-label={ja ? "成果とレビューのタブ" : "成果与审阅标签"}>
           {/* 1. 代码差异审阅 (Codex 式 Hunk 审阅) */}
           <button
             type="button"
@@ -64,10 +65,10 @@ export function DesktopRightPane({
             aria-selected={activeTab === "review"}
             className={`desktop-right-pane__tab ${activeTab === "review" ? "desktop-right-pane__tab--active" : ""}`}
             onClick={() => onSelectTab("review")}
-            title="代码差异与逐块审阅 (Codex Review)"
+            title={ja ? "コード差分のブロック単位レビュー (Codex Review)" : "代码差异与逐块审阅 (Codex Review)"}
           >
             <GitCompareArrows size={14} />
-            <span>代码审阅</span>
+            <span>{ja ? "コードレビュー" : "代码审阅"}</span>
           </button>
 
           {/* 3. 产物工件画廊 */}
@@ -77,10 +78,10 @@ export function DesktopRightPane({
             aria-selected={activeTab === "artifacts"}
             className={`desktop-right-pane__tab ${activeTab === "artifacts" ? "desktop-right-pane__tab--active" : ""}`}
             onClick={() => onSelectTab("artifacts")}
-            title="多模态生成产物与活动步骤"
+            title={ja ? "生成された成果物と実行ステップ" : "多模态生成产物与活动步骤"}
           >
             <Layers size={14} />
-            <span>成果工件</span>
+            <span>{ja ? "成果物" : "成果工件"}</span>
           </button>
 
           {/* 4. 工作区与终端 */}
@@ -90,10 +91,10 @@ export function DesktopRightPane({
             aria-selected={visibleTab === "workspace"}
             className={`desktop-right-pane__tab ${visibleTab === "workspace" ? "desktop-right-pane__tab--active" : ""}`}
             onClick={() => onSelectTab("workspace")}
-            title="工作区文件树与快捷终端"
+            title={ja ? "ワークスペースのファイルツリーとターミナル" : "工作区文件树与快捷终端"}
           >
             <FolderCode size={14} />
-            <span>工作区</span>
+            <span>{ja ? "ワークスペース" : "工作区"}</span>
           </button>
         </div>
 
@@ -103,8 +104,8 @@ export function DesktopRightPane({
               type="button"
               className="desktop-right-pane__action-btn"
               onClick={() => setReviewRefreshKey((k) => k + 1)}
-              title={shared.copy.refreshFileTree ?? "刷新变更列表"}
-              aria-label={shared.copy.refreshFileTree ?? "刷新变更列表"}
+              title={shared.copy.refreshFileTree}
+              aria-label={shared.copy.refreshFileTree}
             >
               <RefreshCw size={14} />
             </button>
@@ -113,8 +114,8 @@ export function DesktopRightPane({
             type="button"
             className="desktop-right-pane__close-btn"
             onClick={onClose}
-            title="关闭右侧面板 (Ctrl+B / Esc)"
-            aria-label="关闭成果面板"
+            title={ja ? "右側のパネルを閉じる (Ctrl+B / Esc)" : "关闭右侧面板 (Ctrl+B / Esc)"}
+            aria-label={ja ? "成果パネルを閉じる" : "关闭成果面板"}
           >
             <X size={15} />
           </button>

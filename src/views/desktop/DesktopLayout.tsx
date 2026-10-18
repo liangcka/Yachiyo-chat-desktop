@@ -307,10 +307,14 @@ export function DesktopLayout(props: SharedViewProps) {
     }
   }, [props]);
 
+  const paletteJa = props.controller.locale === "ja-JP";
   const paletteCommands: PaletteCommand[] = [
-    ...props.conversations.map((conversation) => ({ id: `chat-${conversation.id}`, label: conversation.title, group: "对话", run: () => { void props.controller.selectConversation(conversation.id); switchCenterView("chat"); } })),
-    ...props.llmEntries.map((entry) => ({ id: `model-${entry.provider}`, label: entry.model || entry.provider, group: "模型", run: () => { void props.onLlmActivate(entry.provider); } })),
-    ...([ ["general", "常规"], ["models", "模型"], ["browser", "联网搜索"], ["custom", "技能"], ["shortcuts", "快捷键"] ] as const).map(([tab, label]) => ({ id: `settings-${tab}`, label, group: "设置", run: () => handleOpenSettings(tab) })),
+    ...props.conversations.map((conversation) => ({ id: `chat-${conversation.id}`, label: conversation.title, group: paletteJa ? "会話" : "对话", run: () => { void props.controller.selectConversation(conversation.id); switchCenterView("chat"); } })),
+    ...props.llmEntries.map((entry) => ({ id: `model-${entry.provider}`, label: entry.model || entry.provider, group: paletteJa ? "モデル" : "模型", run: () => { void props.onLlmActivate(entry.provider); } })),
+    ...(paletteJa
+      ? ([ ["general", "一般"], ["models", "モデル"], ["browser", "ウェブ検索"], ["custom", "スキル"], ["shortcuts", "ショートカット"] ] as const)
+      : ([ ["general", "常规"], ["models", "模型"], ["browser", "联网搜索"], ["custom", "技能"], ["shortcuts", "快捷键"] ] as const)
+    ).map(([tab, label]) => ({ id: `settings-${tab}`, label, group: paletteJa ? "設定" : "设置", run: () => handleOpenSettings(tab) })),
   ];
 
   // 监测 AI 是否正在控制电脑（执行 Windows MCP / 系统控制工具）
@@ -359,6 +363,7 @@ export function DesktopLayout(props: SharedViewProps) {
       const detail = formatComputerControlAction(
         activeControlStep.name,
         activeControlStep.args,
+        props.controller.locale,
       );
       void showControlOverlay(activeControlStep.name, detail);
     } else {
@@ -367,7 +372,7 @@ export function DesktopLayout(props: SharedViewProps) {
     return () => {
       void hideControlOverlay();
     };
-  }, [activeControlStep]);
+  }, [activeControlStep, props.controller.locale]);
 
   /* ── 渲染 ─────────────────────────────────────────── */
 
@@ -406,7 +411,6 @@ export function DesktopLayout(props: SharedViewProps) {
           <DesktopSidebar
             activeConversationId={props.controller.activeConversation?.id}
             collapsed={sidebarCollapsed}
-            hideBrandHeader={true}
             conversations={props.conversations}
             copy={props.copy}
             locale={props.controller.locale}
@@ -516,7 +520,7 @@ export function DesktopLayout(props: SharedViewProps) {
         active={activeControlStep !== null}
         toolName={activeControlStep?.name}
         toolArgs={activeControlStep?.args}
-        softwareName="月见八千代"
+        softwareName={paletteJa ? "月見八千代" : "月见八千代"}
         onStop={() => void props.controller.stop()}
       />
 
