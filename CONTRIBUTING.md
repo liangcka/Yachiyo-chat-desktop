@@ -48,7 +48,15 @@ npm run test:functions
 npm run build
 ```
 
-### 4. Git 提交规范
+### 4. 发布桌面安装包
+
+1. 同步修改三处版本号：`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`。
+2. 提交后打标签并推送：`git tag v0.2.0 && git push origin v0.2.0`。
+3. `Release` 工作流会在 Windows 上构建 `.exe`（NSIS）与 `.msi` 安装包，并创建草稿 Release；核对说明后手动发布。
+4. 应用启动时会读取 GitHub 最新正式版，版本号高于本机时提示用户前往下载。草稿与预发布不会触发提示。
+5. 安装包暂未签名。如需消除 SmartScreen 提示，需要购买代码签名证书，并按 Tauri 文档在 `bundle.windows` 中配置签名。
+
+### 5. Git 提交规范
 
 遵循常规提交格式（Conventional Commits）：
 - `feat:` 新功能
@@ -59,7 +67,7 @@ npm run build
 - `test:` 测试补充
 - `chore:` 构建或辅助工具变动
 
-### 5. 安全注意
+### 6. 安全注意
 - `android/`、`capacitor.config.ts` 和移动端构建脚本作为历史工程保留，桌面 UI 任务不修改这些原生文件。
 - **切勿**将任何包含真实 API Key、Token 或私钥的文件（如 `.dev.vars`、`keystore.properties`、`*.jks`、`*.keystore`）提交至仓库。
 - 敏感配置请使用 `.dev.vars.example` 或 `android/keystore.properties.example` 作为模板。

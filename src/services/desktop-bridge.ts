@@ -17,6 +17,24 @@ export interface HeadFile {
   content: string;
 }
 
+/** 更新检查原始结果（对应 Rust `UpdateInfo`；仓库尚无正式版时 latestTag 为 null） */
+export interface DesktopUpdateInfo {
+  currentVersion: string;
+  latestTag: string | null;
+  releaseUrl: string | null;
+}
+
+/** 查询当前版本与 GitHub 最新正式版；非桌面端或网络失败返回 undefined */
+export async function checkDesktopUpdate(): Promise<DesktopUpdateInfo | undefined> {
+  if (!isDesktopApp()) return undefined;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return await invoke<DesktopUpdateInfo>("check_for_update");
+  } catch {
+    return undefined;
+  }
+}
+
 export async function getDesktopWorkspaceRoot(): Promise<string | undefined> {
   if (!isDesktopApp()) return undefined;
   try {

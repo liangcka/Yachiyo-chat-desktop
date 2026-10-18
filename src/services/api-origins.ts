@@ -69,11 +69,19 @@ function isNetworkFailure(error: unknown): boolean {
 /** 桌面端本地网关鉴权头名，与 src-tauri/src/server/http.rs 的 GATEWAY_TOKEN_HEADER 严格一致 */
 const gatewayTokenHeader = "x-yachiyo-gateway-token";
 
-/** 已取到的网关 token：null 表示尚未成功获取，空串表示本次获取不可用（不写入缓存，留待下次重试） */
-let cachedGatewayToken: string | null = null;
+/** 桌面端本地网关的访问信息：origin 为空串时退回相对路径（仅开发态 Vite 代理可用） */
+interface DesktopGateway {
+  origin: string;
+  token: string;
+}
+
+const unavailableGateway: DesktopGateway = { origin: "", token: "" };
+
+/** 已取到的网关信息：null 表示尚未成功获取 */
+let cachedGateway: DesktopGateway | null = null;
 
 /** 进行中的获取：并发首请求共用同一次 invoke，避免同时向 IPC 发起多趟调用 */
-let pendingGatewayToken: Promise<string> | null = null;
+let pendingGateway: Promise<DesktopGateway> | null = null;
 
 /**
  * 桌面端判定就地内联而不复用 app-platform 的 isDesktopApp：
@@ -83,30 +91,35 @@ function isDesktopRuntime(): boolean {
   return typeof window !== "undefined" && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
 }
 
-async function resolveGatewayToken(): Promise<string> {
-  if (cachedGatewayToken !== null) {
-    return cachedGatewayToken;
+/**
+ * 打包后页面源是 tauri.localhost（Windows）或 tauri://localhost，相对路径到不了 Axum 网关，
+ * 因此必须拿到网关实际监听端口（28888 起浮动）拼出绝对地址。
+ */
+async function resolveDesktopGateway(): Promise<DesktopGateway> {
+  if (cachedGateway !== null) {
+    return cachedGateway;
   }
-  // 失败不写缓存：IPC 尚未就绪或动态分包加载失败时若固化空值，此后整个会话的每个请求都会缺失 token
-  pendingGatewayToken ??= import("@tauri-apps/api/core")
-    .then(({ invoke }) => invoke<string>("get_gateway_token"))
+  // 失败不写缓存：IPC 尚未就绪或动态分包加载失败时若固化空值，此后整个会话的每个请求都会失败
+  pendingGateway ??= import("@tauri-apps/api/core")
+    .then(({ invoke }) =>
+      Promise.all([invoke<number>("get_server_port"), invoke<string>("get_gateway_token")]),
+    )
     .then(
-      (token) => {
-        cachedGatewayToken = token;
-        pendingGatewayToken = null;
-        return token;
+      ([port, token]) => {
+        cachedGateway = { origin: `http://127.0.0.1:${port}`, token };
+        pendingGateway = null;
+        return cachedGateway;
       },
       () => {
-        pendingGatewayToken = null;
-        return "";
+        pendingGateway = null;
+        return unavailableGateway;
       },
     );
-  return pendingGatewayToken;
+  return pendingGateway;
 }
 
 /** 为桌面端请求附加网关 token 头，其余调用点与请求体形态保持不变 */
-async function withGatewayToken(init: RequestInit): Promise<RequestInit> {
-  const token = await resolveGatewayToken();
+function withGatewayToken(init: RequestInit, token: string): RequestInit {
   if (!token) {
     return init;
   }
@@ -132,7 +145,7 @@ export interface ApiFetchOptions {
  *   切换到下一条候选线路重试一次并记住新线路；
  * - HTTP 错误（4xx/5xx）是服务端正常响应，不换线，原样返回；
  * - 中止信号原样上抛，不重试；
- * - 桌面端额外注入本地网关 token 头（Web/PWA 与 APK 轨道完全走原路径）。
+ * - 桌面端直连本地网关并注入 token 头，不参与换线（Web/PWA 与 APK 轨道完全走原路径）。
  */
 export async function apiFetch(
   path: string,
@@ -140,15 +153,19 @@ export async function apiFetch(
   options: ApiFetchOptions = {},
 ): Promise<Response> {
   const fetcher = options.fetcher ?? globalThis.fetch.bind(globalThis);
+  if (isDesktopRuntime()) {
+    const gateway = await resolveDesktopGateway();
+    return await fetcher(gateway.origin + path, withGatewayToken(init, gateway.token));
+  }
+
   const storage = options.storage ?? defaultStorage();
   const candidates = candidateOrigins();
   const primary = currentApiOrigin(storage);
-  const requestInit = isDesktopRuntime() ? await withGatewayToken(init) : init;
 
   try {
-    return await fetcher(primary + path, requestInit);
+    return await fetcher(primary + path, init);
   } catch (error) {
-    if (!isNetworkFailure(error) || !isRetryableBody(requestInit)) {
+    if (!isNetworkFailure(error) || !isRetryableBody(init)) {
       throw error;
     }
     const currentIndex = candidates.indexOf(primary);
@@ -157,7 +174,7 @@ export async function apiFetch(
       throw error;
     }
     writeStoredOrigin(storage, next);
-    return await fetcher(next + path, requestInit);
+    return await fetcher(next + path, init);
   }
 }
 

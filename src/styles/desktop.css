@@ -7804,3 +7804,68 @@
     margin-left: 4px;
   }
 }
+
+/* ─── 桌面端新版本提示：右下角浮动卡片，不遮挡输入区 ─── */
+.desktop-update-notice {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(420px, calc(100vw - 40px));
+  padding: 10px 10px 10px 14px;
+  border: 1px solid var(--border-l2);
+  border-radius: var(--yx-radius-lg);
+  color: var(--text-primary);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-elevated);
+  font-size: 13px;
+  animation: motion-prompt-in var(--motion-duration-panel) var(--motion-ease-enter) backwards;
+}
+
+.desktop-update-notice__icon {
+  flex: none;
+  color: var(--accent-brand);
+}
+
+.desktop-update-notice__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.desktop-update-notice__action {
+  flex: none;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: #ffffff;
+  background: var(--accent-brand);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.desktop-update-notice__dismiss {
+  display: grid;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
+  background: transparent;
+  place-items: center;
+  cursor: pointer;
+}
+
+.desktop-update-notice__dismiss:hover {
+  background: var(--interactive-hover);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-update-notice {
+    animation: none;
+  }
+}

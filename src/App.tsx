@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { useChatController, type ChatRepository, type StreamChatFunction } from "./app/use-chat-controller";
 import { ToastRegion } from "./components/ToastRegion";
+import { DesktopUpdateNotice } from "./components/desktop/DesktopUpdateNotice";
 import { ConversationRepository } from "./data/conversation-repository";
 import { YachiyoDatabase } from "./data/db";
 import type { Conversation, Locale, StoredImage } from "./domain/chat";
@@ -21,6 +22,7 @@ import { streamChat } from "./services/chat-client";
 import { LlmSettingsService } from "./services/llm-settings";
 import { projectManager } from "./services/project-manager";
 import { SessionClient } from "./services/session-client";
+import { checkForUpdate, type AvailableUpdate } from "./services/update-check";
 import { SkillSettingsService } from "./services/skill-settings";
 import {
   WebSearchSettingsService,
@@ -89,7 +91,7 @@ function imageErrorMessage(code: ImageProcessingErrorCode, copy: UiCopy): string
 function controllerErrorMessage(code: string, copy: UiCopy): string {
   if (code === "DAILY_QUOTA_EXCEEDED") return copy.quotaReached;
   if (code === "SESSION_REQUIRED") {
-    return isDesktopApp() ? "请先在菜单「LLM 设置」中填入 API Key 并启用" : copy.sessionExpired;
+    return isDesktopApp() ? copy.desktopKeyRequired : copy.sessionExpired;
   }
   if (code === "WORKSPACE_REQUIRED") return copy.workspaceRequired;
   if (code === "NETWORK_ERROR") return copy.offline;
@@ -118,6 +120,7 @@ export function App({ services, autoAiTitle }: AppProps) {
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [webSearchSettings, setWebSearchSettings] = useState<WebSearchSettings>(defaultWebSearchSettings);
   const [toast, setToast] = useState<ToastState>();
+  const [desktopUpdate, setDesktopUpdate] = useState<AvailableUpdate>();
 
   const activeLlmConfig = useMemo<ActiveLlmConfig | undefined>(() => {
     if (llmActiveProvider === undefined) return undefined;
@@ -239,9 +242,21 @@ export function App({ services, autoAiTitle }: AppProps) {
     return () => clearTimeout(timeout);
   }, [isOnline, setControllerOnline]);
 
-  // 原生壳启动自愈：清掉旧版 APK 可能残留的 Service Worker 与缓存
+  // 原生壳与桌面端启动自愈：清掉旧版本可能残留的 Service Worker 与缓存，避免升级后仍加载旧资源
   useEffect(() => {
-    if (isNativeApp()) void clearWebCaches();
+    if (isNativeApp() || isDesktopApp()) void clearWebCaches();
+  }, []);
+
+  // 桌面端启动时静默检查一次新版本；网络失败不打扰用户
+  useEffect(() => {
+    if (!isDesktopApp()) return;
+    let cancelled = false;
+    void checkForUpdate().then((result) => {
+      if (!cancelled && result?.available !== undefined) setDesktopUpdate(result.available);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -683,6 +698,13 @@ export function App({ services, autoAiTitle }: AppProps) {
               onDismissUpdate={() => pwa.setNeedRefresh(false)}
               onUpdate={() => void pwa.updateServiceWorker(true)}
             />
+            {desktopUpdate !== undefined ? (
+              <DesktopUpdateNotice
+                copy={copy}
+                update={desktopUpdate}
+                onDismiss={() => setDesktopUpdate(undefined)}
+              />
+            ) : null}
           </>
         )}
         <ToastRegion

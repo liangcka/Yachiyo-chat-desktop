@@ -79,8 +79,12 @@ pub const OPENAI_CONFIG: ProviderConfig = ProviderConfig {
 pub const CLAUDE_CONFIG: ProviderConfig = ProviderConfig {
     id: ProviderId::Claude,
     endpoint: "https://api.anthropic.com/v1/messages",
-    default_model: "claude-sonnet-5",
+    default_model: "claude-sonnet-5-5",
     allowed_models: &[
+        "claude-fable-5-1",
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5",
         "claude-fable-5",
         "claude-opus-5",
         "claude-sonnet-5",
@@ -88,6 +92,10 @@ pub const CLAUDE_CONFIG: ProviderConfig = ProviderConfig {
     ],
     supports_image: true,
     image_models: &[
+        "claude-fable-5-1",
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5",
         "claude-fable-5",
         "claude-opus-5",
         "claude-sonnet-5",

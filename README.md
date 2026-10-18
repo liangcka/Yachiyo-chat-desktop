@@ -5,7 +5,7 @@
 
 Yachiyo Chat Desktop 是围绕动画电影《超时空辉夜姬》（超かぐや姫！）角色「月见八千代」构建的桌面对话与开发工作区，面向 Windows 原生桌面和 PC 浏览器使用。
 
-前端统一采用桌面布局：左侧管理会话，中间切换对话与编辑器，右侧查看代码审阅、预览、成果工件和工作区。原有深海蓝主题支持明暗模式，界面通过间距与轻边框组织内容。首次发送消息时，输入区从欢迎页平滑移至底部；系统启用“减少动态效果”时直接就位。
+前端统一采用桌面布局：左侧管理会话，中间切换对话与编辑器，右侧查看代码审阅、预览、成果工件和工作区。界面采用中性灰阶配色与品牌蓝强调色，支持明暗模式与中日双语，通过间距与轻边框组织内容。首次发送消息时，输入区从欢迎页平滑移至底部；系统启用“减少动态效果”时直接就位。
 
 Tauri v2 与 Rust 提供原生桌面窗口、本地网关和工作区工具；PC 浏览器版本通过 Cloudflare Pages Functions 提供对话接口。移动版界面和右下角 Live2D 挂件已移除，`android/` 与 `capacitor.config.ts` 作为历史原生工程保留，不属于当前 UI 交付范围。
 
@@ -18,7 +18,7 @@ Tauri v2 与 Rust 提供原生桌面窗口、本地网关和工作区工具；PC
 
 ![桌面对话与工作区](docs/images/chat-desktop-main.png)
 
-项目的角色陪伴概念源于《超かぐや姫！》ray MV 中的日常交流场景。当前产品围绕桌面端的对话、代码编辑和工作区协作展开；早期手机界面截图仍保留在 `docs/images/`，不代表当前界面。
+项目的角色陪伴概念源于《超かぐや姫！》ray MV 中的日常交流场景。当前产品围绕桌面端的对话、代码编辑和工作区协作展开。
 
 ---
 
@@ -62,12 +62,12 @@ Tauri v2 与 Rust 提供原生桌面窗口、本地网关和工作区工具；PC
 
 | 分组 | 厂商 | 模型支持 | 视觉模型 |
 | ---- | ---- | -------- | -------- |
-| 国内 | 阶跃星辰 StepFun | step-5-flash, step-plan 等 | 支持 |
-| 国内 | DeepSeek | deepseek-v4, | 支持 |
-| 国内 | 智谱 GLM | glm-5.3, glm-4.7v-flash 等 | 支持 |
-| 国际 | OpenAI | gpt-6, gpt-6.1-sol 等 | 支持 |
-| 国际 | Anthropic | claude-5-5-sonnet, claude-5-5-sonnet 等 | 支持 |
-| 国际 | Google Gemini | gemini-3.1-pro, gemini-3.8-flash 等 | 支持 |
+| 国内 | 阶跃星辰 StepFun | step-3.7-flash, step-plan 等 | 支持 |
+| 国内 | DeepSeek | deepseek-v4-flash, deepseek-v4-pro 等 | 支持 |
+| 国内 | 智谱 GLM | glm-5.3, glm-4.6v-flash 等 | 支持 |
+| 国际 | OpenAI | gpt-5.6-sol, gpt-5.5 等 | 支持 |
+| 国际 | Anthropic | claude-opus-5-5, claude-sonnet-5-5 等 | 支持 |
+| 国际 | Google Gemini | gemini-3.1-pro, gemini-3.7-flash 等 | 支持 |
 
 ### 5. DSH 联网搜索管道 (WebRuntime Router)
 
@@ -95,7 +95,20 @@ Tauri v2 与 Rust 提供原生桌面窗口、本地网关和工作区工具；PC
 
 ---
 
-## 快速开始
+## 下载安装
+
+普通用户无需搭建开发环境：
+
+1. 在 [Releases](https://github.com/liangcka/Yachiyo-chat-desktop/releases) 下载最新的 Windows 安装包（`.exe` 或 `.msi`）。
+2. 安装包暂未进行代码签名，首次运行时 Windows SmartScreen 可能提示“已保护你的电脑”，点击“更多信息 → 仍要运行”即可。
+3. 首次启动后，在欢迎页点击“配置模型”（或左下角“设置 → 模型”），填写任一厂商的个人 API Key 并选择模型，即可开始对话。
+4. API Key 仅保存在本机：Windows 下使用系统 DPAPI 按当前登录用户加密，不会上传到任何服务器。
+
+应用启动时会检查 GitHub 上是否有新版本，发现更新时在界面中提示下载地址。
+
+---
+
+## 快速开始（开发者）
 
 ### 环境准备
 
@@ -196,6 +209,14 @@ cargo test --manifest-path src-tauri/Cargo.toml
 - 代码规范与决策记录请参考 `.agents/notes/` 目录；
 - 安全漏洞反馈请参阅 [SECURITY.md](SECURITY.md)；
 - 贡献流程与代码提交守则请参考 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+---
+
+## 声明
+
+- 本项目为非官方同人作品，与《超かぐや姫！》（超时空辉夜姬）的版权方及制作方无关。角色「月见八千代」「酒寄彩叶」及相关设定的著作权归原权利人所有。
+- 仓库中的角色设定与提示词仅供学习交流与非商业用途；如权利人认为存在不当使用，请通过 Issue 联系，我们会及时处理。
+- Apache License 2.0 仅适用于本项目原创的源代码，不授予任何第三方角色、名称或素材的使用权。
 
 ---
 

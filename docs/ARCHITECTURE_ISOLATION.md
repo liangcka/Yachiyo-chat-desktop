@@ -26,7 +26,7 @@ React 桌面界面（src/views/desktop/）
 | `relay-worker/` | 独立的远程中继服务；不是桌面 UI 的启动前提 |
 | `android/`、`capacitor.config.ts` | 保留的历史 Android 原生工程与配置；不提供独立移动版界面 |
 
-`MobileLayout` 与闲置设备模式 Hook 已移除。原生平台适配、共享组件和 Capacitor 依赖继续保留，日常桌面开发不修改 Android 原生代码或构建配置。`public/live2d/` 为保留的历史素材，应用不加载其脚本、模型或样式。
+`MobileLayout` 与闲置设备模式 Hook 已移除。原生平台适配、共享组件和 Capacitor 依赖继续保留，日常桌面开发不修改 Android 原生代码或构建配置。历史 Live2D 素材属于第三方作品，已从仓库移除，避免随构建产物与安装包分发。
 
 ## 3. 开发与构建
 
