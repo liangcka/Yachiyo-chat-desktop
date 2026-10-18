@@ -43,6 +43,33 @@ jobs:
       - name: 构建
         run: npm run build
 
+  desktop:
+    name: 桌面端 Rust 测试
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          cache: npm
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装依赖
+        run: npm ci
+
+      # tauri::generate_context! 在编译期读取 frontendDist，需先产出 dist
+      - name: 构建前端产物
+        run: npm run build
+
+      - name: Rust 测试
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
   e2e:
     name: E2E
     runs-on: ubuntu-latest

@@ -2,7 +2,7 @@ import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useSt
 import type { KeyboardEvent, Ref } from "react";
 import { Bot, Check, Globe, Minimize2, Plus, Sparkles, Terminal, X } from "lucide-react";
 import type { Locale } from "../../domain/chat";
-import type { SkillDefinition } from "../../skills";
+import { skillLabel, type SkillDefinition } from "../../skills";
 
 export interface SlashActionItem {
   id: string;
@@ -118,16 +118,16 @@ export function SlashCommandPicker({
     const skillItems: SlashSkillItem[] = skills.map((skill) => ({
       id: `skill:${skill.id}`,
       type: "skill",
-      name: skill.name,
+      name: skillLabel(skill, locale).name,
       command: `/${skill.id}`,
-      description: skill.description,
+      description: skillLabel(skill, locale).description,
       isActive: activeSkillIds.includes(skill.id),
       skill,
       onToggle: (next: boolean) => onToggleSkill(skill.id, next),
     }));
 
     return [...actions, ...skillItems];
-  }, [actions, activeSkillIds, onToggleSkill, skills]);
+  }, [actions, activeSkillIds, locale, onToggleSkill, skills]);
 
   // 根据 query 模糊检索条目
   const filteredList = useMemo(() => {

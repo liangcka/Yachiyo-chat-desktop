@@ -1,4 +1,4 @@
-import { REQUEST_CHARACTER_BUDGET, shouldCompressContext } from "../domain/context-budget";
+import { shouldCompressContext } from "../domain/context-budget";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ChatMessage, ChatSource, Conversation, Locale, MessageContentSegment, StoredImage, TokenUsage, ToolStep } from "../domain/chat";
 import { archiveBranch, restoreBranch } from "../domain/message-branches";
@@ -25,6 +25,20 @@ import {
   type ChatAction,
   type ChatState,
 } from "./chat-reducer";
+import {
+  compressionInstruction,
+  compressionTriggerUncompressedMessages,
+  countUncompressedMessages,
+  parseCompressionOutput,
+} from "./conversation-compression";
+import {
+  blobToDataUrl,
+  formatClientTimestamp,
+  isHistoryMessage,
+  maximumRequestMessages,
+  requestHistory,
+} from "./request-history";
+import { createStreamBatcher, type StreamBatcher } from "./stream-batcher";
 import {
   buildTitleRequestMessages,
   cleanAiGeneratedTitle,
@@ -164,218 +178,6 @@ const partialPersistenceInterval = 250;
 /** UI 窗口化：初始只加载最近 windowSize 条历史，向上滚动时按 historyLoadStep 条上翻 */
 const historyWindowSize = 50;
 const historyLoadStep = 30;
-/** 流式 delta/thought 用 requestAnimationFrame 合并后再 dispatch，避免逐 chunk 触发全列表 reducer */
-const maximumRequestCharacters = REQUEST_CHARACTER_BUDGET;
-const maximumRequestMessageCharacters = REQUEST_CHARACTER_BUDGET;
-const maximumRequestMessages = 20;
-/** 未压缩历史消息达到该数量时，发送前自动触发增量压缩（为摘要/长期记忆前缀预留槽位） */
-const compressionTriggerUncompressedMessages = maximumRequestMessages - 4;
-
-interface PendingStreamDelta {
-  messageId: string;
-  text: string;
-  type: "delta" | "thought-delta";
-  contentSegments: ReadonlyArray<MessageContentSegment>;
-}
-
-interface StreamBatcher {
-  /** 追加一个待合并的流式增量；返回 true 表示本次调度了 rAF 刷新 */
-  push(action: PendingStreamDelta): boolean;
-  /** 立即同步派发所有未合并的增量（终态/中止/卸载前必须调用） */
-  flush(): void;
-}
-
-function createStreamBatcher(
-  emitAction: (action: ChatAction) => void,
-): StreamBatcher {
-  let pending: PendingStreamDelta[] = [];
-  let frameHandle: number | undefined;
-
-  const flush = () => {
-    if (frameHandle !== undefined) {
-      cancelAnimationFrame(frameHandle);
-      frameHandle = undefined;
-    }
-    if (pending.length === 0) return;
-    const batch = pending;
-    pending = [];
-    for (const action of batch) {
-      emitAction(action);
-    }
-  };
-
-  const schedule = () => {
-    if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
-      flush();
-      return false;
-    }
-    frameHandle = window.requestAnimationFrame(() => {
-      frameHandle = undefined;
-      flush();
-    });
-    return true;
-  };
-
-  return {
-    push(action) {
-      const last = pending.at(-1);
-      if (last?.type === action.type && last.messageId === action.messageId) {
-        pending[pending.length - 1] = { ...action, text: last.text + action.text };
-      } else {
-        pending.push(action);
-      }
-      if (frameHandle === undefined) return schedule();
-      return false;
-    },
-    flush,
-  };
-}
-
-function blobToDataUrl(image: StoredImage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      if (typeof reader.result === "string") resolve(reader.result);
-      else reject(new TypeError("Image could not be encoded."));
-    });
-    reader.addEventListener("error", () => reject(new TypeError("Image could not be encoded.")));
-    reader.readAsDataURL(image.blob);
-  });
-}
-
-function isHistoryMessage(message: ChatMessage): boolean {
-  if (message.status === "complete" || message.status === "stopped") {
-    return true;
-  }
-  // 核心契约：如果消息包含已执行的工具步骤（Agent 模式），这是客观发生的操作记录，
-  // 即使消息末尾发生网络抖动或断流（failed），也必须作为有效历史带入上下文，防止重试或重连时丢失已查验的事实
-  if (
-    message.status === "failed" &&
-    message.role === "assistant" &&
-    message.toolSteps !== undefined &&
-    message.toolSteps.length > 0
-  ) {
-    return true;
-  }
-  return false;
-}
-
-const weekdaysZh = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"] as const;
-const weekdaysJa = ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"] as const;
-
-export function formatClientTimestamp(timestamp: number, locale: Locale): string {
-  const date = new Date(timestamp);
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  const hours = `${date.getHours()}`.padStart(2, "0");
-  const minutes = `${date.getMinutes()}`.padStart(2, "0");
-  const seconds = `${date.getSeconds()}`.padStart(2, "0");
-  const weekday = locale === "ja-JP" ? weekdaysJa[date.getDay()] : weekdaysZh[date.getDay()];
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} ${weekday}`;
-}
-
-function truncateUnicode(value: string, maximum: number): string {
-  let result = "";
-  let length = 0;
-  for (const character of value) {
-    if (length >= maximum) break;
-    result += character;
-    length += 1;
-  }
-  return result;
-}
-
-function requestHistory(
-  messages: ChatMessage[],
-  reserveCharacters = 0,
-  maxMessages = maximumRequestMessages,
-  compressedUpTo?: number,
-  oldestFirst = false,
-): Array<{ message: ChatMessage; text: string }> {
-  // 早于压缩边界的消息已被摘要取代，不再重复进入请求（retained-tail 语义）
-  const eligible = messages.filter(
-    (message) =>
-      isHistoryMessage(message) &&
-      (compressedUpTo === undefined || message.createdAt > compressedUpTo),
-  );
-  const selected: Array<{ message: ChatMessage; text: string }> = [];
-  let totalCharacters = reserveCharacters;
-
-  for (let offset = 0; offset < eligible.length && selected.length < maxMessages; offset += 1) {
-    const index = oldestFirst ? offset : eligible.length - 1 - offset;
-    const message = eligible[index];
-    if (message === undefined) continue;
-    const text = truncateUnicode(message.text, maximumRequestMessageCharacters);
-    const isLastMessage = index === eligible.length - 1;
-    if (!isLastMessage && text.trim().length === 0) continue;
-    const characterLength = [...text].length;
-    if (totalCharacters + characterLength > maximumRequestCharacters) break;
-    if (oldestFirst) selected.push({ message, text });
-    else selected.unshift({ message, text });
-    totalCharacters += characterLength;
-  }
-
-  return selected;
-}
-
-/** 解析压缩请求的双区块输出；模型未按格式输出时整体降级为会话记忆 */
-function parseCompressionOutput(text: string): { conversationMemory: string; userProfile?: string } {
-  const memoryMatch = text.match(/<conversation_memory>([\s\S]*?)<\/conversation_memory>/i);
-  const profileMatch = text.match(/<user_profile>([\s\S]*?)<\/user_profile>/i);
-  const conversationMemory = memoryMatch?.[1]?.trim() ?? "";
-  if (conversationMemory.length > 0) {
-    const userProfile = profileMatch?.[1]?.trim();
-    return {
-      conversationMemory,
-      ...(userProfile !== undefined && userProfile.length > 0 ? { userProfile } : {}),
-    };
-  }
-  return { conversationMemory: text.trim() };
-}
-
-/** 压缩指令：要求合并既有记忆并顺带提炼用户长期画像，双区块输出 */
-const compressionInstruction: Record<"zh-CN" | "ja-JP", string> = {
-  "zh-CN": `请整理以上内容，输出以下两个区块，不要输出其他内容：
-
-<conversation_memory>
-合并【已有记忆摘要】与最新对话内容，输出更新后的完整会话记忆，按以下结构组织：
-【核心事实】双方确认的重要事实与设定
-【用户特征与偏好】彩叶表现出的喜好、习惯与性格特点
-【双方约定】互相许下的承诺与约定
-【关系与情绪】当前关系状态与情绪脉络
-【剧情进展】故事线的关键节点
-旧记忆中仍然有效的内容必须保留，不得遗漏。
-</conversation_memory>
-
-<user_profile>
-从对话中提炼用户「酒寄彩叶」的长期画像（称呼、喜好、重要经历等），与【现有用户画像】合并去重后输出完整版本；没有新增内容时原样输出既有画像。
-</user_profile>`,
-  "ja-JP": `以上の内容を整理し、次の2つのブロックのみを出力してください：
-
-<conversation_memory>
-【既存の記憶要約】と最新の会話を統合し、更新後の完全な会話メモリーを以下の構成で出力してください：
-【核心的事実】両者が確認した重要な事実と設定
-【ユーザーの特徴と好み】彩葉の好み・習慣・性格
-【約束事項】交わした約束
-【関係と感情】現在の関係性と感情の流れ
-【ストーリーの進展】物語の重要な節目
-古い記憶のうち今も有効な内容は必ず残してください。
-</conversation_memory>
-
-<user_profile>
-会話からユーザー「酒寄彩葉」の長期プロフィール（呼び名、好み、大切な出来事など）を抽出し、【既存のユーザープロフィール】と統合・重複排除した完全版を出力してください。追加情報がない場合は既存のプロフィールをそのまま出力してください。
-</user_profile>`,
-};
-
-/** 仅统计压缩边界之后（未被摘要取代）的 eligible 消息数 */
-function countUncompressedMessages(messages: ChatMessage[], compressedUpTo?: number): number {
-  return messages.filter(
-    (message) =>
-      isHistoryMessage(message) &&
-      (compressedUpTo === undefined || message.createdAt > compressedUpTo),
-  ).length;
-}
 
 /**
  * 派生叠加视图：流式期间增量写在 state.streaming 槽位里，这里把累积文本叠到

@@ -1,7 +1,7 @@
 import { useRegisterSW } from "virtual:pwa-register/react";
-import { isNativeApp } from "../services/app-platform";
+import { isDesktopApp, isNativeApp } from "../services/app-platform";
 
-export function usePwaUpdate() {
+function useRegisteredPwaUpdate() {
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     offlineReady: [offlineReady, setOfflineReady],
@@ -43,3 +43,19 @@ export function usePwaUpdate() {
     updateServiceWorker,
   };
 }
+
+const noop = () => undefined;
+
+/** 桌面端资源随安装包内置：Service Worker 会在升级安装后继续返回旧缓存，因此完全不注册 */
+function useDisabledPwaUpdate(): ReturnType<typeof useRegisteredPwaUpdate> {
+  return {
+    needRefresh: false,
+    offlineReady: false,
+    setNeedRefresh: noop,
+    setOfflineReady: noop,
+    updateServiceWorker: async () => undefined,
+  };
+}
+
+// 运行环境在页面生命周期内恒定，模块加载时选定实现即可保证每次渲染调用同一组 Hook
+export const usePwaUpdate = isDesktopApp() ? useDisabledPwaUpdate : useRegisteredPwaUpdate;

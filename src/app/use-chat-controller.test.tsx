@@ -12,8 +12,8 @@ import {
   resetLocalUserSettings,
   saveLocalUserSettings,
 } from "../services/user-settings";
+import { formatClientTimestamp } from "./request-history";
 import {
-  formatClientTimestamp,
   useChatController,
   type ChatRepository,
   type StreamChatFunction,

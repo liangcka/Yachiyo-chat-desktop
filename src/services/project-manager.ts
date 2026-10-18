@@ -1,13 +1,17 @@
 import { useEffect, useSyncExternalStore } from "react";
+import type { Locale } from "../domain/chat";
 import { pickDesktopFolder, setDesktopWorkspaceRoot } from "./desktop-bridge";
 
 export const STORAGE_RECENT_PROJECTS = "yachiyo_recent_projects";
 export const STORAGE_ACTIVE_PROJECT = "yachiyo_active_project";
 
 /** 提取路径的项目名称（如 "D:\\web\\my-app" -> "my-app"） */
-export function getProjectDisplayName(projectPath: string | null | undefined): string {
+export function getProjectDisplayName(
+  projectPath: string | null | undefined,
+  locale: Locale = "zh-CN",
+): string {
   if (!projectPath || !projectPath.trim()) {
-    return "无项目";
+    return locale === "ja-JP" ? "プロジェクトなし" : "无项目";
   }
   const normalized = projectPath.replace(/\\/g, "/").replace(/\/+$/, "");
   const parts = normalized.split("/");

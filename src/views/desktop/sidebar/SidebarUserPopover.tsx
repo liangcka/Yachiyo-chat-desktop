@@ -55,6 +55,7 @@ export function SidebarUserPopover({
   const customBadgeInputRef = useRef<HTMLInputElement | null>(null);
 
   const copy = copyFor(locale);
+  const ja = locale === "ja-JP";
 
   // 称号选择器浮层
   const [isBadgePickerOpen, setIsBadgePickerOpen] = useState<boolean>(false);
@@ -137,14 +138,17 @@ export function SidebarUserPopover({
     }
     const closed = await exitDesktopApp();
     if (!closed) {
-      showToast?.("当前在浏览器模式，请直接关闭窗口或标签页", "info");
+      showToast?.(
+        ja ? "ブラウザで開いています。ウィンドウまたはタブを直接閉じてください" : "当前在浏览器模式，请直接关闭窗口或标签页",
+        "info",
+      );
     }
   };
 
   const handleSelectPresetBadge = (badge: PresetUserBadge) => {
     saveLocalUserSettings({ badge });
     setIsBadgePickerOpen(false);
-    showToast?.(`已切换称号为「${badge}」`, "info");
+    showToast?.(ja ? `称号を「${badge}」に切り替えました` : `已切换称号为「${badge}」`, "info");
   };
 
   const handleSaveCustomBadge = () => {
@@ -157,7 +161,7 @@ export function SidebarUserPopover({
     saveLocalUserSettings({ badge: finalBadge });
     setIsBadgePickerOpen(false);
     setCustomBadgeDraft("");
-    showToast?.(`已设置个性称号为「${finalBadge}」`, "info");
+    showToast?.(ja ? `称号を「${finalBadge}」に設定しました` : `已设置个性称号为「${finalBadge}」`, "info");
   };
 
   const username = userSettings.username || "酒寄彩叶";
@@ -177,7 +181,7 @@ export function SidebarUserPopover({
       ref={popoverRef}
       className="desktop-sidebar__user-popover"
       role="dialog"
-      aria-label="用户账户与设置菜单"
+      aria-label={ja ? "アカウントと設定メニュー" : "用户账户与设置菜单"}
     >
       {/* 1. 顶部用户卡片 */}
       <div className="desktop-sidebar__popover-header">
@@ -202,8 +206,12 @@ export function SidebarUserPopover({
                     type="button"
                     className={`desktop-sidebar__popover-badge desktop-sidebar__popover-badge--interactive ${getBadgeStyleClass(currentBadge)}`}
                     onClick={() => setIsBadgePickerOpen((prev) => !prev)}
-                    title={`当前称号：${currentBadge}（点击切换称号，如 Plus / Pro / Go）`}
-                    aria-label={`切换称号，当前为 ${currentBadge}`}
+                    title={
+                      ja
+                        ? `現在の称号：${currentBadge}（クリックで切り替え：Plus / Pro / Go など）`
+                        : `当前称号：${currentBadge}（点击切换称号，如 Plus / Pro / Go）`
+                    }
+                    aria-label={ja ? `称号を切り替え（現在 ${currentBadge}）` : `切换称号，当前为 ${currentBadge}`}
                     aria-haspopup="true"
                     aria-expanded={isBadgePickerOpen}
                   >
@@ -220,15 +228,17 @@ export function SidebarUserPopover({
               ref={badgePickerRef}
               className="desktop-sidebar__popover-badge-picker"
               role="region"
-              aria-label="选择称号"
+              aria-label={ja ? "称号を選択" : "选择称号"}
             >
               <div className="desktop-sidebar__popover-badge-picker-header">
-                <span className="desktop-sidebar__popover-badge-picker-title">选择或自定义称号</span>
+                <span className="desktop-sidebar__popover-badge-picker-title">
+                  {ja ? "称号を選択またはカスタマイズ" : "选择或自定义称号"}
+                </span>
                 <button
                   type="button"
                   className="desktop-sidebar__popover-badge-picker-close"
                   onClick={() => setIsBadgePickerOpen(false)}
-                  aria-label="关闭称号选择"
+                  aria-label={ja ? "称号の選択を閉じる" : "关闭称号选择"}
                 >
                   <X size={13} />
                 </button>
@@ -260,7 +270,7 @@ export function SidebarUserPopover({
                   ref={customBadgeInputRef}
                   type="text"
                   className="desktop-sidebar__popover-badge-input"
-                  placeholder="自定义输入 (如 VIP, Go)"
+                  placeholder={ja ? "自由入力 (例: VIP, Go)" : "自定义输入 (如 VIP, Go)"}
                   maxLength={10}
                   value={customBadgeDraft}
                   onChange={(e) => setCustomBadgeDraft(e.target.value)}
@@ -275,16 +285,16 @@ export function SidebarUserPopover({
                   type="button"
                   className="desktop-sidebar__popover-badge-save-btn"
                   onClick={handleSaveCustomBadge}
-                  title="保存个性称号"
+                  title={ja ? "称号を保存" : "保存个性称号"}
                 >
-                  应用
+                  {ja ? "適用" : "应用"}
                 </button>
                 {currentBadge !== "Lite" ? (
                   <button
                     type="button"
                     className="desktop-sidebar__popover-badge-reset-btn"
                     onClick={() => handleSelectPresetBadge("Lite")}
-                    title="重置为默认 Lite"
+                    title={ja ? "既定の Lite に戻す" : "重置为默认 Lite"}
                   >
                     <RotateCcw size={12} />
                   </button>
@@ -301,11 +311,11 @@ export function SidebarUserPopover({
               type="button"
               className="desktop-sidebar__popover-item"
               onClick={handleOpenAccount}
-              aria-label="管理账户"
+              aria-label={ja ? "アカウント管理" : "管理账户"}
             >
               <div className="desktop-sidebar__popover-item-left">
                 <User size={16} className="desktop-sidebar__popover-item-icon" />
-                <span className="desktop-sidebar__popover-item-label">管理账户</span>
+                <span className="desktop-sidebar__popover-item-label">{ja ? "アカウント管理" : "管理账户"}</span>
               </div>
               <ChevronRight size={14} className="desktop-sidebar__popover-item-arrow" />
             </button>
@@ -314,12 +324,12 @@ export function SidebarUserPopover({
               type="button"
               className="desktop-sidebar__popover-item"
               onClick={handleToggleLocale}
-              title="切换语言"
-              aria-label="选择语言"
+              title={ja ? "言語を切り替え" : "切换语言"}
+              aria-label={ja ? "言語を選択" : "选择语言"}
             >
               <div className="desktop-sidebar__popover-item-left">
                 <Globe size={16} className="desktop-sidebar__popover-item-icon" />
-                <span className="desktop-sidebar__popover-item-label">语言</span>
+                <span className="desktop-sidebar__popover-item-label">{ja ? "言語" : "语言"}</span>
               </div>
               <div className="desktop-sidebar__popover-item-right">
                 <span className="desktop-sidebar__popover-item-value">
@@ -333,7 +343,7 @@ export function SidebarUserPopover({
               type="button"
               className="desktop-sidebar__popover-item"
               onClick={onToggleTheme}
-              aria-label="切换主题"
+              aria-label={ja ? "テーマを切り替え" : "切换主题"}
             >
               <div className="desktop-sidebar__popover-item-left">
                 {isLight ? (
@@ -341,10 +351,10 @@ export function SidebarUserPopover({
                 ) : (
                   <Moon size={16} className="desktop-sidebar__popover-item-icon" />
                 )}
-                <span className="desktop-sidebar__popover-item-label">主题</span>
+                <span className="desktop-sidebar__popover-item-label">{ja ? "テーマ" : "主题"}</span>
               </div>
               <div className="desktop-sidebar__popover-item-right">
-                <span className="desktop-sidebar__popover-item-value">{isLight ? "亮色" : "深色"}</span>
+                <span className="desktop-sidebar__popover-item-value">{isLight ? (ja ? "ライト" : "亮色") : ja ? "ダーク" : "深色"}</span>
                 <ChevronRight size={14} className="desktop-sidebar__popover-item-arrow" />
               </div>
             </button>
@@ -353,12 +363,12 @@ export function SidebarUserPopover({
               type="button"
               className="desktop-sidebar__popover-item"
               onClick={handleOpenGeneralSettings}
-              title="系统设置与偏好"
-              aria-label="设置"
+              title={ja ? "設定と環境" : "系统设置与偏好"}
+              aria-label={ja ? "設定" : "设置"}
             >
               <div className="desktop-sidebar__popover-item-left">
                 <Settings size={16} className="desktop-sidebar__popover-item-icon" />
-                <span className="desktop-sidebar__popover-item-label">设置</span>
+                <span className="desktop-sidebar__popover-item-label">{ja ? "設定" : "设置"}</span>
               </div>
             </button>
 
@@ -366,11 +376,11 @@ export function SidebarUserPopover({
               type="button"
               className="desktop-sidebar__popover-item"
               onClick={handleReportIssue}
-              aria-label="报告问题"
+              aria-label={ja ? "問題を報告" : "报告问题"}
             >
               <div className="desktop-sidebar__popover-item-left">
                 <HelpCircle size={16} className="desktop-sidebar__popover-item-icon" />
-                <span className="desktop-sidebar__popover-item-label">报告问题</span>
+                <span className="desktop-sidebar__popover-item-label">{ja ? "問題を報告" : "报告问题"}</span>
               </div>
             </button>
           </div>
@@ -381,12 +391,12 @@ export function SidebarUserPopover({
               type="button"
               className="desktop-sidebar__popover-logout-btn desktop-sidebar__popover-close-btn"
               onClick={handleCloseAppClick}
-              aria-label={copy.closeApp || "关闭应用"}
-              title={copy.closeApp || "关闭应用"}
+              aria-label={copy.closeApp}
+              title={copy.closeApp}
               data-action="close-app"
             >
               <Power size={16} className="desktop-sidebar__popover-logout-icon" />
-              <span>{copy.closeApp || "关闭应用"}</span>
+              <span>{copy.closeApp}</span>
             </button>
           </div>
     </div>

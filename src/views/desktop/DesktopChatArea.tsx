@@ -20,7 +20,7 @@ import { PermissionCard } from "../../components/tools/PermissionCard";
 import { appendAttachments, COMPOSER_CHARACTER_LIMIT, readTextAttachment, type TextAttachment } from "../../features/file-reference/attachments";
 import { extractLatestTodos } from "../../domain/chat";
 import { isRetryableChatErrorCode } from "../../services/chat-client";
-import { SKILLS } from "../../skills";
+import { SKILLS, skillLabel } from "../../skills";
 
 import { controllerErrorMessage, type SharedViewProps } from "../layout-types";
 import type { SettingsTabKey } from "../../components/settings/SettingsModal";
@@ -31,6 +31,7 @@ import {
   type SlashActionItem,
   type SlashItem,
 } from "../../components/chat/SlashCommandPicker";
+import { isDesktopApp } from "../../services/app-platform";
 import { searchWorkspaceFiles } from "../../services/desktop-bridge";
 import "../../styles/desktop-chat-area.css";
 import { DesktopWelcome } from "./DesktopWelcome";
@@ -81,6 +82,8 @@ export function DesktopChatArea({
   const isJapanese = controller.locale === "ja-JP";
   const loadingLabel = isJapanese ? "会話を読み込み中…" : "正在加载对话…";
   const isBlank = controller.messages.length === 0 && !controller.activeConversation?.summary;
+  // 桌面端没有服务端兜底模型：未配置时直接引导到设置，而不是发出必然失败的请求
+  const needsModelSetup = isDesktopApp() && llmActiveProvider === undefined;
 
   const latestTodos = useMemo(
     () => extractLatestTodos(controller.messages),
@@ -142,9 +145,19 @@ export function DesktopChatArea({
   );
 
   const sendMessage = (text: string): void => {
+    if (needsModelSetup) {
+      showToast(copy.desktopKeyRequired, "error");
+      onOpenSettings?.("models");
+      return;
+    }
     const content = appendAttachments(text, attachments);
     if (attachments.length > 0 && [...content].length > COMPOSER_CHARACTER_LIMIT) {
-      showToast("正文与附件合计超过 20000 字，请移除部分内容后发送", "error");
+      showToast(
+        isJapanese
+          ? "本文と添付ファイルの合計が 20000 文字を超えています。一部を削除してから送信してください"
+          : "正文与附件合计超过 20000 字，请移除部分内容后发送",
+        "error",
+      );
       return;
     }
     prepareTransition();
@@ -253,21 +266,27 @@ export function DesktopChatArea({
     {
       id: "action:web",
       type: "action",
-      name: "切换联网搜索",
+      name: isJapanese ? "ウェブ検索の切り替え" : "切换联网搜索",
       command: "/web",
-      description: `当前状态：${webSearchSettings.enabled ? "已开启" : "已关闭"} (点击切换)`,
+      description: isJapanese
+        ? `現在の状態：${webSearchSettings.enabled ? "オン" : "オフ"}（クリックで切り替え）`
+        : `当前状态：${webSearchSettings.enabled ? "已开启" : "已关闭"} (点击切换)`,
       icon: "globe",
       onExecute: () => {
         onWebSearchSettingsChange?.({ enabled: !webSearchSettings.enabled });
-        showToast(webSearchSettings.enabled ? "联网搜索已关闭" : "联网搜索已开启");
+        showToast(
+          webSearchSettings.enabled
+            ? isJapanese ? "ウェブ検索をオフにしました" : "联网搜索已关闭"
+            : isJapanese ? "ウェブ検索をオンにしました" : "联网搜索已开启",
+        );
       },
     },
     {
       id: "action:new-chat",
       type: "action",
-      name: "新建对话",
+      name: isJapanese ? "新しい会話" : "新建对话",
       command: "/clear",
-      description: "重置当前工作台并开启新对话",
+      description: isJapanese ? "ワークベンチをリセットして新しい会話を始めます" : "重置当前工作台并开启新对话",
       icon: "plus",
       onExecute: () => {
         void onNewChat();
@@ -281,7 +300,11 @@ export function DesktopChatArea({
     } else {
       const nextActive = !activeSkillIds.includes(item.skill.id);
       void onSkillToggle?.(item.skill.id, nextActive);
-      showToast(nextActive ? `已加载「${item.name}」技能` : `已卸载「${item.name}」技能`);
+      showToast(
+        nextActive
+          ? isJapanese ? `スキル「${item.name}」を読み込みました` : `已加载「${item.name}」技能`
+          : isJapanese ? `スキル「${item.name}」を外しました` : `已卸载「${item.name}」技能`,
+      );
     }
 
     // 移除触发词 /xxx
@@ -359,14 +382,14 @@ export function DesktopChatArea({
       if (activeConversationIdRef.current !== conversationId) return;
       try {
         if (file.type.startsWith("image/")) {
-          if (!activeProviderSupportsImage) { showToast("当前模型不支持图片，请先切换模型", "error"); continue; }
+          if (!activeProviderSupportsImage) { showToast(isJapanese ? "現在のモデルは画像に対応していません。モデルを切り替えてください" : "当前模型不支持图片，请先切换模型", "error"); continue; }
           const image = await processImage(file);
           if (activeConversationIdRef.current === conversationId) onImage(image);
         } else {
-          const attachment = await readTextAttachment(file);
+          const attachment = await readTextAttachment(file, controller.locale);
           if (activeConversationIdRef.current !== conversationId) return;
           addedCharacters += [...appendAttachments("", [attachment])].length;
-          if (addedCharacters > COMPOSER_CHARACTER_LIMIT) { showToast("附件合计超过 20000 字，请分批发送", "error"); break; }
+          if (addedCharacters > COMPOSER_CHARACTER_LIMIT) { showToast(isJapanese ? "添付ファイルの合計が 20000 文字を超えています。分けて送信してください" : "附件合计超过 20000 字，请分批发送", "error"); break; }
           setAttachments((previous) => [...previous, attachment].slice(-8));
         }
       } catch (error) { showToast(error instanceof Error ? error.message : copy.imageInvalid, "error"); }
@@ -428,9 +451,9 @@ export function DesktopChatArea({
         </div>
       ) : null}
 
-      {activeSkills.length > 0 || attachments.length > 0 ? <div className="dsh-composer-chips" aria-label="已加载内容">
-        {activeSkills.map((skill) => <button type="button" key={skill.id} onClick={() => void onSkillToggle?.(skill.id, false)} title={`移除技能 ${skill.name}`}>{skill.name}<X size={12} /></button>)}
-        {attachments.map((file, index) => <button type="button" key={`${file.name}-${index}`} title={`移除附件 ${file.name}`} onClick={() => setAttachments((previous) => previous.filter((_, i) => i !== index))}>{file.name}<X size={12} /></button>)}
+      {activeSkills.length > 0 || attachments.length > 0 ? <div className="dsh-composer-chips" aria-label={isJapanese ? "読み込み済みの内容" : "已加载内容"}>
+        {activeSkills.map((skill) => <button type="button" key={skill.id} onClick={() => void onSkillToggle?.(skill.id, false)} title={isJapanese ? `スキル ${skillLabel(skill, controller.locale).name} を外す` : `移除技能 ${skill.name}`}>{skillLabel(skill, controller.locale).name}<X size={12} /></button>)}
+        {attachments.map((file, index) => <button type="button" key={`${file.name}-${index}`} title={isJapanese ? `添付 ${file.name} を削除` : `移除附件 ${file.name}`} onClick={() => setAttachments((previous) => previous.filter((_, i) => i !== index))}>{file.name}<X size={12} /></button>)}
       </div> : null}
       {/* 输入框主卡片 */}
       <div className="dsh-composer-card"
@@ -479,7 +502,7 @@ export function DesktopChatArea({
           <div className="dsh-composer-card__attachment">
             <img
               src={pendingImageDataUrl || "blob:mock-image"}
-              alt="待发送图片"
+              alt={isJapanese ? "送信予定の画像" : "待发送图片"}
               className="dsh-composer-card__attachment-img"
             />
             <button
@@ -489,8 +512,8 @@ export function DesktopChatArea({
                 controller.setPendingImage(undefined);
                 setPendingImageDataUrl(undefined);
               }}
-              title="移除图片"
-              aria-label="移除图片"
+              title={isJapanese ? "画像を削除" : "移除图片"}
+              aria-label={isJapanese ? "画像を削除" : "移除图片"}
             >
               &times;
             </button>
@@ -616,8 +639,8 @@ export function DesktopChatArea({
                               {isActive ? <Check size={11} /> : null}
                             </span>
                             <span className="dsh-skill-popover__item-meta">
-                              <span className="dsh-skill-popover__item-name">{skill.name}</span>
-                              <span className="dsh-skill-popover__item-desc">{skill.description}</span>
+                              <span className="dsh-skill-popover__item-name">{skillLabel(skill, controller.locale).name}</span>
+                              <span className="dsh-skill-popover__item-desc">{skillLabel(skill, controller.locale).description}</span>
                             </span>
                           </button>
                         </li>
@@ -715,7 +738,7 @@ export function DesktopChatArea({
                   }
                 }}
                 disabled={composerUnavailable || (!composerValue.trim() && !pendingImageDataUrl && attachments.length === 0)}
-                title={`${isStreaming ? "停止当前回复并发送补充要求" : copy.send} (Enter)`}
+                title={`${isStreaming ? (isJapanese ? "現在の返信を止めて追加の指示を送信" : "停止当前回复并发送补充要求") : copy.send} (Enter)`}
                 aria-label={copy.send}
               >
                 <ArrowUp size={16} strokeWidth={2.5} />
@@ -728,14 +751,16 @@ export function DesktopChatArea({
   );
 
   return (
-    <main className="desktop-main-chat" aria-label="核心对话工作台">
+    <main className="desktop-main-chat" aria-label={isJapanese ? "会話ワークベンチ" : "核心对话工作台"}>
       {/* 消息流与 Hero 区域 */}
       <div className={`desktop-chat-body ${isBlank ? "desktop-chat-body--welcome" : ""}`}>
         {isBlank ? (
           <DesktopWelcome
             disabled={composerUnavailable || isStreaming}
             locale={controller.locale}
+            needsModelSetup={needsModelSetup}
             onPrompt={handleHeroPrompt}
+            onSetupModel={() => onOpenSettings?.("models")}
           />
         ) : (
           <div className="desktop-conversation-region">

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AtSign, File, FileCode, FileJson, FileText, Image as ImageIcon, X } from "lucide-react";
+import { useLocale } from "../../i18n/locale-context";
 import { searchWorkspaceFiles } from "../../services/desktop-bridge";
 
 export interface FileReferencePickerProps {
@@ -83,6 +84,7 @@ export function FileReferencePicker({
   selectedIndex: controlledIndex,
   onSelectedIndexChange,
 }: FileReferencePickerProps) {
+  const ja = useLocale() === "ja-JP";
   const [internalItems, setInternalItems] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [uncontrolledIndex, setUncontrolledIndex] = useState(0);
@@ -157,24 +159,24 @@ export function FileReferencePicker({
     <div
       className="file-ref-picker"
       role="listbox"
-      aria-label="工作区文件引用选择"
+      aria-label={ja ? "ワークスペースのファイルを引用" : "工作区文件引用选择"}
       tabIndex={-1}
     >
       <div className="file-ref-picker__header">
         <div className="file-ref-picker__title">
           <AtSign size={13} />
-          <span>引用工作区文件</span>
+          <span>{ja ? "ワークスペースのファイルを引用" : "引用工作区文件"}</span>
           {query ? <span className="file-ref-picker__query-tag">@{query}</span> : null}
         </div>
         <div className="file-ref-picker__hints">
-          <span className="file-ref-picker__hint-badge">↑↓ 移动</span>
-          <span className="file-ref-picker__hint-badge">Enter 选取</span>
+          <span className="file-ref-picker__hint-badge">{ja ? "↑↓ 移動" : "↑↓ 移动"}</span>
+          <span className="file-ref-picker__hint-badge">{ja ? "Enter 選択" : "Enter 选取"}</span>
           <button
             type="button"
             className="file-ref-picker__close-btn"
             onClick={onClose}
-            title="关闭浮层 (Esc)"
-            aria-label="关闭文件选择浮层"
+            title={ja ? "閉じる (Esc)" : "关闭浮层 (Esc)"}
+            aria-label={ja ? "ファイル選択を閉じる" : "关闭文件选择浮层"}
           >
             <X size={12} />
           </button>
@@ -183,9 +185,9 @@ export function FileReferencePicker({
 
       <ul className="file-ref-picker__list" ref={listRef}>
         {loading && displayList.length === 0 ? (
-          <li className="file-ref-picker__empty">正在检索工作区文件…</li>
+          <li className="file-ref-picker__empty">{ja ? "ワークスペースのファイルを検索中…" : "正在检索工作区文件…"}</li>
         ) : displayList.length === 0 ? (
-          <li className="file-ref-picker__empty">未找到匹配的工作区文件</li>
+          <li className="file-ref-picker__empty">{ja ? "一致するファイルはありません" : "未找到匹配的工作区文件"}</li>
         ) : (
           displayList.map((path, idx) => {
             const isSelected = idx === activeIndex;

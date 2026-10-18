@@ -58,10 +58,14 @@ export function SidebarFooter({
           type="button"
           className="desktop-sidebar__user-bar-main"
           onClick={() => setPopoverOpen((prev) => !prev)}
-          aria-label="用户资料与菜单"
+          aria-label={locale === "ja-JP" ? "プロフィールとメニュー" : "用户资料与菜单"}
           aria-haspopup="dialog"
           aria-expanded={popoverOpen}
-          title={`当前用户：${username} [${currentBadge}]（点击展开菜单）`}
+          title={
+            locale === "ja-JP"
+              ? `ユーザー：${username} [${currentBadge}]（クリックでメニューを開く）`
+              : `当前用户：${username} [${currentBadge}]（点击展开菜单）`
+          }
         >
           <div className="desktop-sidebar__user-bar-avatar">
             {userSettings.avatar ? (

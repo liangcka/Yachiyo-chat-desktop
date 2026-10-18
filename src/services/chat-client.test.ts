@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { KEYSTORE_MANAGED_API_KEY } from "../domain/llm";
 import { ChatClientError, isRetryableChatErrorCode, streamChat, type StreamChatRequest } from "./chat-client";
 
 const sampleRequest: StreamChatRequest = {
@@ -91,6 +92,21 @@ describe("streamChat", () => {
     expect(serverFetch).toHaveBeenCalledWith("/api/chat", expect.objectContaining({
       body: JSON.stringify(requestWithTime),
     }));
+  });
+
+  it("omits the keystore placeholder so the desktop gateway reads its stored key", async () => {
+    serverFetch.mockResolvedValue(
+      sseResponse('event: done\ndata: {"truncated":false}\n\n'),
+    );
+
+    await streamChat(
+      { ...sampleRequest, provider: "claude", apiKey: KEYSTORE_MANAGED_API_KEY, model: "claude-sonnet-5-5" },
+      { fetcher: serverFetch, onDelta: () => undefined },
+    );
+
+    const body = JSON.parse(serverFetch.mock.calls[0]![1]!.body as string) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("apiKey");
+    expect(body).toMatchObject({ provider: "claude", model: "claude-sonnet-5-5" });
   });
 
   it.each([

@@ -1,6 +1,5 @@
 import { ProjectSelector } from "../../../components/desktop/ProjectSelector";
 import { useState } from "react";
-import { SidebarBrandHeader } from "./SidebarBrandHeader";
 import { SidebarFooter } from "./SidebarFooter";
 import { SidebarHistoryList } from "./SidebarHistoryList";
 import { SidebarNewChat } from "./SidebarNewChat";
@@ -15,7 +14,6 @@ export function DesktopSidebar({
   activeRightTab,
   collapsed = false,
   conversations,
-  hideBrandHeader = false,
   copy,
   locale,
   onDeleteConversation,
@@ -76,15 +74,10 @@ export function DesktopSidebar({
   return (
     <aside
       className={`desktop-sidebar ${!pointerInside ? "desktop-sidebar--quiet-bars" : ""}`}
-      aria-label="桌面导航与历史会话"
+      aria-label={locale === "ja-JP" ? "ナビゲーションと会話履歴" : "桌面导航与历史会话"}
       onPointerEnter={handlePointerEnter}
       onPointerLeave={handlePointerLeave}
     >
-      {/* 1. 顶部品牌与折叠按钮（若全局顶栏接管则静默隐藏） */}
-      {!hideBrandHeader ? (
-        <SidebarBrandHeader onNewChat={onNewChat} onToggleCollapse={onToggleCollapse} />
-      ) : null}
-
       {/* 2. 新建对话与项目选择下拉菜单 */}
       <SidebarNewChat
         copy={copy}

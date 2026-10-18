@@ -1,3 +1,4 @@
+import type { Locale } from "../domain/chat";
 import { isDesktopApp } from "./app-platform";
 import { apiFetch } from "./api-origins";
 
@@ -50,6 +51,8 @@ export interface McpPreset {
   id: string;
   name: string;
   description: string;
+  /** 日文界面展示用的名称与说明；填入表单的 config 仍为用户可编辑的数据 */
+  ja: { name: string; description: string };
   category: "database" | "filesystem" | "developer" | "web" | "general";
   config: McpServerConfig;
 }
@@ -74,34 +77,47 @@ export function isComputerControlTool(toolName: string): boolean {
 }
 
 /** 格式化电脑控制动作名称，向用户直观展示当前操作 */
-export function formatComputerControlAction(toolName: string, args?: Record<string, unknown>): string {
+export function formatComputerControlAction(
+  toolName: string,
+  args?: Record<string, unknown>,
+  locale: Locale = "zh-CN",
+): string {
   const parsed = parseMcpToolName(toolName);
   const base = parsed.isMcp && parsed.originalToolName ? parsed.originalToolName : toolName;
   const normalized = base.toLowerCase().replace(/^(?:mcp_)?(?:windows[-_])?/, "");
+  const ja = locale === "ja-JP";
   switch (normalized) {
     case "click":
       if (args && (args.x !== undefined || args.y !== undefined)) {
-        return `正在模拟鼠标点击 (${args.x ?? 0}, ${args.y ?? 0})`;
+        return ja
+          ? `マウスクリックを実行中 (${args.x ?? 0}, ${args.y ?? 0})`
+          : `正在模拟鼠标点击 (${args.x ?? 0}, ${args.y ?? 0})`;
       }
-      return "正在模拟鼠标点击";
+      return ja ? "マウスクリックを実行中" : "正在模拟鼠标点击";
     case "type":
-      return "正在模拟键盘键入文本";
+      return ja ? "キーボード入力を実行中" : "正在模拟键盘键入文本";
     case "move":
-      return "正在移动鼠标光标";
+      return ja ? "マウスカーソルを移動中" : "正在移动鼠标光标";
     case "scroll":
-      return "正在滚动页面视口";
+      return ja ? "画面をスクロール中" : "正在滚动页面视口";
     case "shortcut":
-      return args?.shortcut ? `正在触发系统快捷键 [${args.shortcut}]` : "正在触发快捷键组合";
+      if (args?.shortcut) {
+        return ja ? `ショートカット [${args.shortcut}] を実行中` : `正在触发系统快捷键 [${args.shortcut}]`;
+      }
+      return ja ? "ショートカットを実行中" : "正在触发快捷键组合";
     case "app":
-      return args?.name ? `正在切换/启动应用 [${args.name}]` : "正在管理应用程序窗口";
+      if (args?.name) {
+        return ja ? `アプリ [${args.name}] を切り替え／起動中` : `正在切换/启动应用 [${args.name}]`;
+      }
+      return ja ? "アプリのウィンドウを操作中" : "正在管理应用程序窗口";
     case "clipboard":
-      return "正在操作系统剪贴板";
+      return ja ? "クリップボードを操作中" : "正在操作系统剪贴板";
     case "multiselect":
-      return "正在进行多项选择";
+      return ja ? "複数の項目を選択中" : "正在进行多项选择";
     case "multiedit":
-      return "正在进行批量编辑";
+      return ja ? "まとめて編集中" : "正在进行批量编辑";
     default:
-      return `正在执行操作：${toolName}`;
+      return ja ? `操作を実行中：${toolName}` : `正在执行操作：${toolName}`;
   }
 }
 
@@ -110,6 +126,7 @@ export const MCP_PRESETS: McpPreset[] = [
     id: "windows_mcp",
     name: "Windows 桌面控制 (Windows MCP)",
     description: "内置 Windows MCP 服务，支持控制应用程序、模拟鼠标点击、键盘输入、屏幕捕获与 PowerShell 执行",
+    ja: { name: "Windows デスクトップ操作 (Windows MCP)", description: "内蔵の Windows MCP サーバー。アプリ操作、マウスクリック、キーボード入力、画面キャプチャ、PowerShell 実行に対応" },
     category: "general",
     config: {
       id: "windows_mcp",
@@ -128,6 +145,7 @@ export const MCP_PRESETS: McpPreset[] = [
     id: "sqlite",
     name: "SQLite 数据库",
     description: "通过只读/写入能力查询与分析本地 SQLite 数据库文件",
+    ja: { name: "SQLite データベース", description: "ローカルの SQLite データベースファイルを読み書きして検索・分析します" },
     category: "database",
     config: {
       id: "sqlite",
@@ -146,6 +164,7 @@ export const MCP_PRESETS: McpPreset[] = [
     id: "fetch",
     name: "Web Fetch 网页内容抓取",
     description: "抓取并转换指定网页为 Markdown 格式，提取页面信息",
+    ja: { name: "Web Fetch ウェブページ取得", description: "指定したウェブページを取得して Markdown に変換し、情報を抽出します" },
     category: "web",
     config: {
       id: "fetch",
@@ -164,6 +183,7 @@ export const MCP_PRESETS: McpPreset[] = [
     id: "filesystem",
     name: "文件系统扩展 (Filesystem)",
     description: "官方 MCP 文件系统服务，支持目录与文件高级读写",
+    ja: { name: "ファイルシステム拡張 (Filesystem)", description: "公式 MCP ファイルシステムサーバー。ディレクトリとファイルの高度な読み書きに対応" },
     category: "filesystem",
     config: {
       id: "filesystem",
@@ -182,6 +202,7 @@ export const MCP_PRESETS: McpPreset[] = [
     id: "git",
     name: "Git 仓库服务",
     description: "官方 Git 仓库工具，支持日志、分支与差异检索",
+    ja: { name: "Git リポジトリ", description: "公式 Git ツール。ログ、ブランチ、差分の検索に対応" },
     category: "developer",
     config: {
       id: "git",
@@ -200,6 +221,7 @@ export const MCP_PRESETS: McpPreset[] = [
     id: "remote_sse",
     name: "远程 SSE / HTTP 服务",
     description: "连接局域网或云端提供的标准 MCP SSE 端点",
+    ja: { name: "リモート SSE / HTTP サーバー", description: "LAN やクラウドで提供される標準 MCP SSE エンドポイントに接続します" },
     category: "general",
     config: {
       id: "remote_sse",

@@ -119,18 +119,75 @@ button {
   background: linear-gradient(180deg, var(--space-1), var(--space-0));
 }
 
-.app-shell__backdrop {
-  position: absolute;
-  z-index: -1;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 18% 24%, rgb(247 248 252 / 70%) 0 1px, transparent 2px),
-    radial-gradient(circle at 78% 18%, rgb(211 217 231 / 55%) 0 1px, transparent 2px),
-    radial-gradient(circle at 68% 66%, rgb(247 248 252 / 45%) 0 1px, transparent 2px);
-  background-size: 11rem 13rem, 15rem 17rem, 19rem 23rem;
+/* 渲染异常兜底页：独立于桌面布局，只依赖主题 Token */
+.app-error-boundary {
+  display: grid;
+  min-height: 100dvh;
+  padding: 24px;
+  color: var(--text-primary);
+  background: var(--space-0);
+  place-items: center;
 }
 
-[data-theme="light"] .app-shell__backdrop {
-  display: none;
+.app-error-boundary__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 440px;
+  text-align: center;
+}
+
+.app-error-boundary__mark {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+}
+
+.app-error-boundary h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.app-error-boundary p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.app-error-boundary__detail {
+  max-width: 100%;
+  padding: 8px 12px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border-l1);
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
+  background: var(--surface-card);
+  font-family: var(--ds-font-family-code);
+  font-size: 12px;
+}
+
+.app-error-boundary__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.app-error-boundary__actions button {
+  height: 34px;
+  padding: 0 16px;
+  border: 1px solid var(--border-l2);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  background: var(--surface-card);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.app-error-boundary__actions .app-error-boundary__primary {
+  border-color: transparent;
+  color: var(--surface-card);
+  background: var(--text-primary);
 }

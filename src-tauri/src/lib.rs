@@ -216,8 +216,9 @@ fn open_external_url(url: String) -> Result<(), String> {
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
+        // 用解析后重新序列化的 URL 拼命令行：双引号已被百分号编码，无法闭合引号注入额外命令
         std::process::Command::new("cmd")
-            .raw_arg(format!("/c start \"\" \"{}\"", url))
+            .raw_arg(format!("/c start \"\" \"{}\"", parsed.as_str()))
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| format!("Failed to open system browser: {e}"))?;
@@ -243,6 +244,51 @@ fn open_external_url(url: String) -> Result<(), String> {
     {
         Err("Unsupported operating system".into())
     }
+}
+
+/// GitHub Releases 最新正式版接口（不含草稿与预发布）
+const LATEST_RELEASE_API: &str =
+    "https://api.github.com/repos/liangcka/Yachiyo-chat-desktop/releases/latest";
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateInfo {
+    current_version: String,
+    latest_tag: Option<String>,
+    release_url: Option<String>,
+}
+
+/// 查询当前版本与 GitHub 最新正式版；版本比较交给前端，网络失败直接返回错误由前端静默处理
+#[tauri::command]
+async fn check_for_update(
+    app: tauri::AppHandle,
+    state: State<'_, DesktopState>,
+) -> Result<UpdateInfo, String> {
+    let current_version = app.package_info().version.to_string();
+    let response = state
+        .http_client
+        .get(LATEST_RELEASE_API)
+        .header(reqwest::header::USER_AGENT, "yachiyo-desktop")
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    // 仓库尚无正式版时接口返回 404，视为“已是最新”
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(UpdateInfo { current_version, latest_tag: None, release_url: None });
+    }
+    let body: serde_json::Value = response
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(UpdateInfo {
+        current_version,
+        latest_tag: body["tag_name"].as_str().map(str::to_string),
+        release_url: body["html_url"].as_str().map(str::to_string),
+    })
 }
 
 #[tauri::command]
@@ -409,6 +455,12 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
+        // 记住主窗口位置与尺寸；全屏控制遮罩窗口每次按需显示，不参与记忆
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_denylist(&["control_overlay"])
+                .build(),
+        )
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
@@ -417,29 +469,24 @@ pub fn run() {
         }))
         .manage(desktop_state)
         .setup(move |app| {
-            let app_handle = app.handle().clone();
-
-            // 启动后台本地 HTTP 服务
-            tauri::async_runtime::spawn(async move {
-                match start_local_server(
-                    ks_for_server,
-                    wm_for_server,
-                    mcp_for_server,
-                    gateway_token,
-                    28888,
-                )
-                .await
-                {
-                    Ok((port, _handle)) => {
-                        let state = app_handle.state::<DesktopState>();
-                        state.server_port.store(port, Ordering::SeqCst);
-                        info!("Yachiyo local HTTP backend ready on port {}", port);
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to start local HTTP server: {}", e);
-                    }
+            // 同步完成端口绑定再进入事件循环：前端经 get_server_port 拼网关地址，
+            // 若异步绑定尚未完成，端口漂移（28888 被占用）时首批请求会打到错误端口
+            match tauri::async_runtime::block_on(start_local_server(
+                ks_for_server,
+                wm_for_server,
+                mcp_for_server,
+                gateway_token,
+                28888,
+            )) {
+                Ok((port, _handle)) => {
+                    let state = app.state::<DesktopState>();
+                    state.server_port.store(port, Ordering::SeqCst);
+                    info!("Yachiyo local HTTP backend ready on port {}", port);
                 }
-            });
+                Err(e) => {
+                    eprintln!("Failed to start local HTTP server: {}", e);
+                }
+            }
 
             // 系统托盘菜单
             let quit_i = MenuItem::with_id(app, "quit", "退出 Yachiyo Chat", true, None::<&str>)?;
@@ -496,6 +543,7 @@ pub fn run() {
             pick_folder,
             exit_app,
             open_external_url,
+            check_for_update,
             minimize_window,
             toggle_maximize_window,
             is_window_maximized,

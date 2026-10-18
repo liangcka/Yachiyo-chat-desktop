@@ -2,6 +2,7 @@ import { Check, MessageCircle, Pencil, Pin, PinOff, Trash2, X } from "lucide-rea
 import type { FormEvent, MouseEvent as ReactMouseEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { Conversation } from "../../../domain/chat";
+import { useLocale } from "../../../i18n/locale-context";
 import type { UiCopy } from "../../../i18n/messages";
 
 interface SidebarConversationItemProps {
@@ -25,6 +26,7 @@ export function SidebarConversationItem({
   onSelect,
   onTogglePin,
 }: SidebarConversationItemProps) {
+  const ja = useLocale() === "ja-JP";
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(conversation.title);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -120,7 +122,7 @@ export function SidebarConversationItem({
               {conversation.title || copy.newChat}
             </span>
             {isPinned ? (
-              <span className="desktop-sidebar__history-pin-badge" title="已置顶">
+              <span className="desktop-sidebar__history-pin-badge" title={ja ? "ピン留め済み" : "已置顶"}>
                 <Pin size={11} />
               </span>
             ) : null}
@@ -136,8 +138,8 @@ export function SidebarConversationItem({
                   e.stopPropagation();
                   onTogglePin(conversation.id);
                 }}
-                title={isPinned ? "取消置顶" : "置顶会话"}
-                aria-label={isPinned ? "取消置顶" : "置顶会话"}
+                title={isPinned ? (ja ? "ピン留めを外す" : "取消置顶") : ja ? "ピン留め" : "置顶会话"}
+                aria-label={isPinned ? (ja ? "ピン留めを外す" : "取消置顶") : ja ? "ピン留め" : "置顶会话"}
               >
                 {isPinned ? <PinOff size={13} /> : <Pin size={13} />}
               </button>

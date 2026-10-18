@@ -161,7 +161,7 @@ describe("buildAnthropicAdapter", () => {
     expect(adapter.id).toBe("claude");
     expect(adapter.isOpenAICompat).toBe(false);
     expect(adapter.supportsImage).toBe(true);
-    expect(adapter.defaultModel).toBe("claude-sonnet-5");
+    expect(adapter.defaultModel).toBe("claude-sonnet-5-5");
     expect(adapter.allowedModels).toContain("claude-opus-5");
   });
 

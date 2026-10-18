@@ -1,12 +1,3 @@
-.desktop-composer-hint {
-  margin: 0;
-  padding: 0 12px;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
-  line-height: 1.5;
-  text-align: right;
-}
-
 .dsh-composer-card__tools-left {
   flex-wrap: wrap;
   min-width: 0;
@@ -27,10 +18,6 @@
   background: transparent;
   color: var(--text-muted);
   font-size: 11px;
-}
-
-.dsh-composer-card .desktop-header-pill--active {
-  color: var(--text-primary);
 }
 
 .dsh-composer-card .desktop-header-pill:hover,
@@ -311,8 +298,6 @@
   background: var(--interactive-hover);
   border-color: var(--border-l1);
 }
-
-.desktop-sidebar__rail-avatar-dot { display: none; }
 
 .dsh-skill-popover__list,
 .skills-panel-content {

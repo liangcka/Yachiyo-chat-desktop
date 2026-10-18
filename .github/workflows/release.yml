@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Windows 安装包
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          cache: npm
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装依赖
+        run: npm ci
+
+      # tauri.conf.json 的 beforeBuildCommand 会先执行 npm run build（含类型检查）
+      - name: 构建安装包并创建草稿 Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: Yachiyo Chat v__VERSION__
+          releaseBody: |
+            下载下方的 `.exe`（推荐）或 `.msi` 安装包。
+
+            安装包暂未进行代码签名，首次运行时如出现 SmartScreen 提示，请点击“更多信息 → 仍要运行”。
+          releaseDraft: true
+          prerelease: false

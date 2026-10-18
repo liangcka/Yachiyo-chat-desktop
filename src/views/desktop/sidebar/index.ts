@@ -2,7 +2,6 @@ export * from "./DesktopSidebar";
 export * from "./types";
 export * from "./use-conversation-groups";
 export * from "./use-scrollbar-linger";
-export * from "./SidebarBrandHeader";
 export * from "./SidebarNewChat";
 export * from "./SidebarSearch";
 export * from "./SidebarHistoryList";

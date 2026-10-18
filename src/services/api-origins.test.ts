@@ -6,6 +6,10 @@ vi.mock("@capacitor/core", () => ({
   Capacitor: { isNativePlatform: vi.fn(() => false) },
 }));
 
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(async (command: string) => (command === "get_server_port" ? 28889 : "gateway-token")),
+}));
+
 const primaryOrigin = "https://yachiyochat.amtale.cn";
 const fallbackOrigin = "https://yachiyo-chat-brn.pages.dev";
 
@@ -143,5 +147,29 @@ describe("api-origins (native)", () => {
     storage.setItem("yachiyo-api-origin-v1", "https://stale.example.com");
 
     expect(currentApiOrigin(storage)).toBe(primaryOrigin);
+  });
+});
+
+describe("api-origins (desktop)", () => {
+  beforeEach(() => {
+    vi.mocked(Capacitor.isNativePlatform).mockReturnValue(false);
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
+    return () => {
+      Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+    };
+  });
+
+  it("targets the local gateway port with the gateway token", async () => {
+    const calls: Array<[string, RequestInit | undefined]> = [];
+    const fetcher = async (input: string, init?: RequestInit) => {
+      calls.push([input, init]);
+      return new Response("ok");
+    };
+    await apiFetch("/api/chat", { method: "POST", body: "{}" }, { fetcher });
+
+    expect(calls).toHaveLength(1);
+    const [url, init] = calls[0]!;
+    expect(url).toBe("http://127.0.0.1:28889/api/chat");
+    expect(new Headers(init?.headers).get("x-yachiyo-gateway-token")).toBe("gateway-token");
   });
 });

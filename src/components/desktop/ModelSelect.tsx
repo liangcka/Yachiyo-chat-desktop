@@ -1,6 +1,7 @@
 import { Check, ChevronDown, Cpu } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { PROVIDER_METADATA, type ProviderId } from "../../domain/llm";
+import { useLocale } from "../../i18n/locale-context";
 
 export interface ModelSelectProps {
   activeProvider?: ProviderId;
@@ -21,6 +22,7 @@ export function ModelSelect({
   onOpenSettings,
   disabled = false,
 }: ModelSelectProps) {
+  const ja = useLocale() === "ja-JP";
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -50,7 +52,7 @@ export function ModelSelect({
     ? currentModel
       ? `${activeMeta.label} (${currentModel})`
       : activeMeta.label
-    : "选择模型 (Default)";
+    : ja ? "モデルを選択 (Default)" : "选择模型 (Default)";
 
   return (
     <div ref={rootRef} className="dsh-model-select">
@@ -61,7 +63,7 @@ export function ModelSelect({
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={`${fullLabel} - 点击切换模型`}
+        title={ja ? `${fullLabel} - クリックでモデルを切り替え` : `${fullLabel} - 点击切换模型`}
       >
         <Cpu size={13} className="dsh-model-select__icon" />
         {modelLabel ? (
@@ -69,7 +71,7 @@ export function ModelSelect({
             <span className="dsh-model-select__model">{modelLabel}</span>
           </span>
         ) : (
-          <span className="dsh-model-select__placeholder">选择模型</span>
+          <span className="dsh-model-select__placeholder">{ja ? "モデルを選択" : "选择模型"}</span>
         )}
         <ChevronDown size={12} className={`dsh-model-select__chevron ${open ? "dsh-model-select__chevron--open" : ""}`} />
       </button>
@@ -77,13 +79,13 @@ export function ModelSelect({
       {open && (
         <div className="dsh-model-select__menu" role="listbox">
           <div className="dsh-model-select__header">
-            <span className="dsh-model-select__header-title">已配置模型</span>
+            <span className="dsh-model-select__header-title">{ja ? "設定済みのモデル" : "已配置模型"}</span>
           </div>
 
           <div className="dsh-model-select__list">
             {entries.length === 0 ? (
               <div className="dsh-model-select__empty">
-                <span>尚未配置 API Key</span>
+                <span>{ja ? "API キーが未設定です" : "尚未配置 API Key"}</span>
               </div>
             ) : (
               entries.map((entry) => {
@@ -120,7 +122,7 @@ export function ModelSelect({
               }}
             >
               <Cpu size={14} />
-              <span>管理模型与 API Key...</span>
+              <span>{ja ? "モデルと API キーを管理…" : "管理模型与 API Key..."}</span>
             </button>
           </div>
         </div>

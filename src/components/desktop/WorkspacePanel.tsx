@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { useLocale } from "../../i18n/locale-context";
 import { ChevronRight, FolderGit2, GitCompareArrows, Play, RefreshCw } from "lucide-react";
 import type { UiCopy } from "../../i18n/messages";
 import { executeDesktopAgentTool } from "../../services/desktop-bridge";
@@ -29,6 +30,7 @@ export function WorkspacePanel({
   isAgentRunning = false,
   onCheckpointRestored,
 }: WorkspacePanelProps) {
+  const ja = useLocale() === "ja-JP";
   const { activeProject } = useProjectState();
   const [terminalOutput, setTerminalOutput] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
@@ -167,8 +169,8 @@ export function WorkspacePanel({
             <button
               type="button"
               className="workspace-panel__btn workspace-panel__btn--icon"
-              aria-label="刷新检查点"
-              title="刷新检查点"
+              aria-label={ja ? "チェックポイントを更新" : "刷新检查点"}
+              title={ja ? "チェックポイントを更新" : "刷新检查点"}
               onClick={() => setCheckpointRefreshKey((k) => k + 1)}
             >
               <RefreshCw size={12} />
@@ -232,7 +234,10 @@ export function WorkspacePanel({
         {isTerminalOpen ? (
           <div className="workspace-panel__section workspace-panel__section--terminal">
             <pre className="workspace-panel__terminal-output">
-              {terminalOutput || "就绪。可在下方输入命令或由八千代自动执行。"}
+              {terminalOutput ||
+                (ja
+                  ? "準備完了。下にコマンドを入力するか、八千代に実行を任せてください。"
+                  : "就绪。可在下方输入命令或由八千代自动执行。")}
             </pre>
 
             <form onSubmit={handleRunCommand} className="workspace-panel__cmd-form">
@@ -241,15 +246,15 @@ export function WorkspacePanel({
                 className="workspace-panel__input workspace-panel__cmd-input"
                 value={commandInput}
                 onChange={(e) => setCommandInput(e.target.value)}
-                placeholder="输入终端命令 (如 npm test)..."
+                placeholder={ja ? "ターミナルコマンドを入力 (例: npm test)…" : "输入终端命令 (如 npm test)..."}
                 disabled={isLoading || isAgentRunning}
               />
               <button
                 type="submit"
                 className="workspace-panel__btn workspace-panel__btn--send"
                 disabled={isLoading || isAgentRunning || !commandInput.trim()}
-                title="执行命令"
-                aria-label="执行命令"
+                title={ja ? "コマンドを実行" : "执行命令"}
+                aria-label={ja ? "コマンドを実行" : "执行命令"}
               >
                 <Play size={12} />
               </button>

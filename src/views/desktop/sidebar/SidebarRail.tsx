@@ -73,12 +73,15 @@ export function SidebarRail({
   const username = userSettings.username || "酒寄彩叶";
 
   return (
-    <aside className="desktop-sidebar desktop-sidebar--rail" aria-label="紧凑导航栏">
+    <aside
+      className="desktop-sidebar desktop-sidebar--rail"
+      aria-label={locale === "ja-JP" ? "コンパクトナビゲーション" : "紧凑导航栏"}
+    >
       {/* 展开按钮由窗口标题栏统一提供；项目文件夹图标紧跟新建会话按钮下方 */}
       <div className="desktop-sidebar__rail-top">
         <RailButton
           icon={<Plus size={18} />}
-          label="新建会话 (Ctrl+N)"
+          label={locale === "ja-JP" ? "新しい会話 (Ctrl+N)" : "新建会话 (Ctrl+N)"}
           onClick={() => void onNewChat()}
         />
         <ProjectSelector variant="rail" label={copy.workspaceEntry} onNewChat={onNewChat} onOpenSettings={onOpenWorkspace} />
@@ -114,8 +117,8 @@ export function SidebarRail({
             popoverOpen ? "desktop-sidebar__rail-avatar-btn--active" : ""
           }`}
           onClick={() => setPopoverOpen((prev) => !prev)}
-          title={`当前用户：${username}（点击展开菜单）`}
-          aria-label="用户账户与设置"
+          title={locale === "ja-JP" ? `ユーザー：${username}（クリックでメニューを開く）` : `当前用户：${username}（点击展开菜单）`}
+          aria-label={locale === "ja-JP" ? "アカウントと設定" : "用户账户与设置"}
           aria-haspopup="dialog"
           aria-expanded={popoverOpen}
         >

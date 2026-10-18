@@ -1,6 +1,7 @@
 import { CheckCircle2, ChevronDown, ChevronUp, Circle, Loader2, ListTodo } from "lucide-react";
 import { useState } from "react";
 import type { TodoItem } from "../../domain/chat";
+import { useLocale } from "../../i18n/locale-context";
 import "./PlanStrip.css";
 
 export interface PlanStripProps {
@@ -9,6 +10,7 @@ export interface PlanStripProps {
 }
 
 export function PlanStrip({ todos, className = "" }: PlanStripProps) {
+  const ja = useLocale() === "ja-JP";
   const [expanded, setExpanded] = useState(false);
 
   if (!todos || todos.length === 0) {
@@ -23,7 +25,7 @@ export function PlanStrip({ todos, className = "" }: PlanStripProps) {
     <div
       className={`plan-strip ${expanded ? "plan-strip--expanded" : ""} ${className}`.trim()}
       role="region"
-      aria-label="Agent 任务清单"
+      aria-label={ja ? "Agent のタスクリスト" : "Agent 任务清单"}
     >
       <div
         className="plan-strip__header"
@@ -50,23 +52,27 @@ export function PlanStrip({ todos, className = "" }: PlanStripProps) {
 
         <div className="plan-strip__summary">
           <span className="plan-strip__counter">
-            任务进度 {completedCount}/{totalCount}
+            {ja ? "進捗" : "任务进度"} {completedCount}/{totalCount}
           </span>
           {inProgressItem ? (
             <span className="plan-strip__active-task" title={inProgressItem.content}>
               {inProgressItem.content}
             </span>
           ) : completedCount === totalCount ? (
-            <span className="plan-strip__completed-label">所有计划步骤已完成</span>
+            <span className="plan-strip__completed-label">{ja ? "すべてのステップが完了しました" : "所有计划步骤已完成"}</span>
           ) : (
-            <span className="plan-strip__idle-label">待继续推进</span>
+            <span className="plan-strip__idle-label">{ja ? "続きを待っています" : "待继续推进"}</span>
           )}
         </div>
 
         <button
           type="button"
           className="plan-strip__toggle"
-          aria-label={expanded ? "收起任务清单" : "展开任务清单"}
+          aria-label={
+            expanded
+              ? ja ? "タスクリストを閉じる" : "收起任务清单"
+              : ja ? "タスクリストを開く" : "展开任务清单"
+          }
           onClick={(e) => {
             e.stopPropagation();
             setExpanded((prev) => !prev);
@@ -98,7 +104,7 @@ export function PlanStrip({ todos, className = "" }: PlanStripProps) {
                 </div>
                 <span className="plan-strip__item-content">{item.content}</span>
                 {isActive ? (
-                  <span className="plan-strip__item-badge">进行中</span>
+                  <span className="plan-strip__item-badge">{ja ? "実行中" : "进行中"}</span>
                 ) : null}
               </li>
             );

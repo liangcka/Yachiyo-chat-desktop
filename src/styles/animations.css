@@ -93,14 +93,6 @@
   to { opacity: 1; }
 }
 
-/* 双端形态切换过渡容器 (Desktop ↔ Mobile) */
-.layout-transition-wrapper {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-}
-
 .layout-transition-view {
   width: 100%;
   height: 100%;

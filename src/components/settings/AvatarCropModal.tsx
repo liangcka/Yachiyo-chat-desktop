@@ -1,5 +1,6 @@
 import { RotateCw, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocale } from "../../i18n/locale-context";
 
 export interface AvatarCropModalProps {
   /** 选中的原始图片 Data URL 或 Object URL */
@@ -28,6 +29,7 @@ export function AvatarCropModal({
   onConfirm,
   open,
 }: AvatarCropModalProps) {
+  const ja = useLocale() === "ja-JP";
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [imageObj, setImageObj] = useState<HTMLImageElement | null>(null);
 
@@ -242,7 +244,7 @@ export function AvatarCropModal({
       className="avatar-crop-modal-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label="裁剪圆形头像"
+      aria-label={ja ? "アバターを円形に切り抜く" : "裁剪圆形头像"}
     >
       <button
         type="button"
@@ -254,12 +256,12 @@ export function AvatarCropModal({
 
       <div className="avatar-crop-modal-card">
         <header className="avatar-crop-modal-header">
-          <h4 className="avatar-crop-modal-title">裁剪圆形头像</h4>
+          <h4 className="avatar-crop-modal-title">{ja ? "アバターを円形に切り抜く" : "裁剪圆形头像"}</h4>
           <button
             type="button"
             className="avatar-crop-modal-close"
             onClick={onClose}
-            aria-label="关闭裁剪"
+            aria-label={ja ? "切り抜きを閉じる" : "关闭裁剪"}
           >
             <X size={16} />
           </button>
@@ -276,7 +278,7 @@ export function AvatarCropModal({
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
             onWheel={handleWheel}
-            title="拖动调整位置，滑动缩放"
+            title={ja ? "ドラッグで位置を調整、スクロールで拡大縮小" : "拖动调整位置，滑动缩放"}
           />
         </div>
 
@@ -289,7 +291,7 @@ export function AvatarCropModal({
             />
             <input
               type="range"
-              aria-label="缩放比例"
+              aria-label={ja ? "拡大率" : "缩放比例"}
               min="1.0"
               max="3.0"
               step="0.05"
@@ -306,12 +308,14 @@ export function AvatarCropModal({
               type="button"
               className="avatar-crop-rotate-btn"
               onClick={handleRotate}
-              title="顺时针旋转90°"
+              title={ja ? "時計回りに 90° 回転" : "顺时针旋转90°"}
             >
               <RotateCw size={14} />
             </button>
           </div>
-          <span className="avatar-crop-hint">裁切范围限制在图片内，拖动调整位置</span>
+          <span className="avatar-crop-hint">
+            {ja ? "切り抜き範囲は画像内に収まります。ドラッグで位置を調整できます" : "裁切范围限制在图片内，拖动调整位置"}
+          </span>
         </div>
 
         <footer className="avatar-crop-modal-footer">
@@ -320,14 +324,14 @@ export function AvatarCropModal({
             className="settings-btn settings-btn--ghost"
             onClick={onClose}
           >
-            取消
+            {ja ? "キャンセル" : "取消"}
           </button>
           <button
             type="button"
             className="settings-btn settings-btn--primary"
             onClick={handleConfirmCrop}
           >
-            完成裁剪
+            {ja ? "切り抜きを完了" : "完成裁剪"}
           </button>
         </footer>
       </div>

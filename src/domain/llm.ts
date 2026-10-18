@@ -33,7 +33,6 @@ export interface LlmProviderMeta {
   readonly supportsImage: boolean;
   /** 可发送图片的具体模型白名单;拍照/发图能力按所选模型判断 */
   readonly imageModels: readonly string[];
-  readonly apiKeyHint: string;
 }
 
 export const PROVIDER_METADATA: Readonly<Record<ProviderId, LlmProviderMeta>> = Object.freeze({
@@ -53,7 +52,6 @@ export const PROVIDER_METADATA: Readonly<Record<ProviderId, LlmProviderMeta>> = 
     defaultModel: "step-3.7-flash",
     supportsImage: true,
     imageModels: ["step-3.7-flash"],
-    apiKeyHint: "在 StepFun Step Plan 控制台获取 API Key",
   },
   deepseek: {
     id: "deepseek",
@@ -63,7 +61,6 @@ export const PROVIDER_METADATA: Readonly<Record<ProviderId, LlmProviderMeta>> = 
     defaultModel: "deepseek-v4-flash",
     supportsImage: true,
     imageModels: ["deepseek-v4-flash-vision-exp"],
-    apiKeyHint: "在 platform.deepseek.com 获取 API Key",
   },
   glm: {
     id: "glm",
@@ -73,7 +70,6 @@ export const PROVIDER_METADATA: Readonly<Record<ProviderId, LlmProviderMeta>> = 
     defaultModel: "glm-5.3-flash",
     supportsImage: true,
     imageModels: ["glm-5.3-flash", "glm-4.6v-flash", "glm-4v-flash"],
-    apiKeyHint: "在 open.bigmodel.cn 控制台获取 API Key",
   },
   openai: {
     id: "openai",
@@ -83,17 +79,15 @@ export const PROVIDER_METADATA: Readonly<Record<ProviderId, LlmProviderMeta>> = 
     defaultModel: "gpt-5.6-luna",
     supportsImage: true,
     imageModels: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-4.1", "gpt-4.1-mini"],
-    apiKeyHint: "在 platform.openai.com 获取 API Key",
   },
   claude: {
     id: "claude",
     group: "international",
     label: "Anthropic (Claude)",
-    models: ["claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
-    defaultModel: "claude-sonnet-5",
+    models: ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
+    defaultModel: "claude-sonnet-5-5",
     supportsImage: true,
-    imageModels: ["claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
-    apiKeyHint: "在 console.anthropic.com 获取 API Key",
+    imageModels: ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
   },
   gemini: {
     id: "gemini",
@@ -117,7 +111,6 @@ export const PROVIDER_METADATA: Readonly<Record<ProviderId, LlmProviderMeta>> = 
       "gemini-3.1-pro",
       "gemini-3.1-flash-lite",
     ],
-    apiKeyHint: "在 aistudio.google.com 获取 API Key",
   },
 });
 
@@ -131,6 +124,12 @@ export const INTERNATIONAL_PROVIDERS: readonly ProviderId[] = PROVIDER_IDS.filte
 export function getProviderMeta(id: ProviderId): LlmProviderMeta {
   return PROVIDER_METADATA[id];
 }
+
+/**
+ * 桌面端 IndexedDB 中的 API Key 占位符：真实 Key 只保存在本地网关的系统加密存储里，
+ * 请求体遇到占位符时不携带 apiKey，由网关按厂商读取。满足 isValidApiKey 以复用既有校验。
+ */
+export const KEYSTORE_MANAGED_API_KEY = "yachiyo-desktop-keystore-managed";
 
 /** IndexedDB llmSettings 表中每家厂商的配置记录 */
 export interface LlmSettingsRecord {
@@ -158,7 +157,8 @@ export interface ModelVendorItem {
   readonly defaultModel: string;
   readonly models: readonly string[];
   readonly defaultBaseUrl?: string;
-  readonly keyHint: string;
+  /** 获取 API Key 的控制台地址或名称，界面按语言拼接提示语 */
+  readonly keySource: string;
   readonly supportsImage: boolean;
   readonly isCustom?: boolean;
 }
@@ -170,7 +170,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     mappedProvider: "deepseek",
     defaultModel: "deepseek-v4-flash",
     models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp", "deepseek-chat", "deepseek-reasoner"],
-    keyHint: "在 platform.deepseek.com 获取 API Key",
+    keySource: "platform.deepseek.com",
     supportsImage: true,
   },
   {
@@ -180,7 +180,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     defaultModel: "doubao-pro-32k",
     models: ["doubao-pro-32k", "doubao-lite-32k", "doubao-vision-pro"],
     defaultBaseUrl: "https://ark.cn-beijing.volces.com/api/v3",
-    keyHint: "在 console.volcengine.com/ark 获取 API Key",
+    keySource: "console.volcengine.com/ark",
     supportsImage: true,
   },
   {
@@ -190,7 +190,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     defaultModel: "abab6.5s-chat",
     models: ["abab6.5s-chat", "abab6.5t-chat", "abab7-chat-preview"],
     defaultBaseUrl: "https://api.minimax.chat/v1",
-    keyHint: "在 platform.minimaxi.com 获取 API Key",
+    keySource: "platform.minimaxi.com",
     supportsImage: true,
   },
   {
@@ -200,7 +200,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     defaultModel: "abab6.5s-chat",
     models: ["abab6.5s-chat", "abab6.5t-chat"],
     defaultBaseUrl: "https://api.minimaxi.chat/v1",
-    keyHint: "在 api.minimaxi.chat 控制台获取 API Key",
+    keySource: "api.minimaxi.chat",
     supportsImage: true,
   },
   {
@@ -209,7 +209,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     mappedProvider: "glm",
     defaultModel: "glm-5.3-flash",
     models: ["glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-4.7-flash", "glm-4.6", "glm-4.6v-flash"],
-    keyHint: "在 open.bigmodel.cn 控制台获取 API Key",
+    keySource: "open.bigmodel.cn",
     supportsImage: true,
   },
   {
@@ -219,7 +219,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     defaultModel: "qwen-max",
     models: ["qwen-max", "qwen-plus", "qwen-turbo", "qwen-vl-max"],
     defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    keyHint: "在 dashscope.console.aliyun.com 获取 API Key",
+    keySource: "dashscope.console.aliyun.com",
     supportsImage: true,
   },
   {
@@ -229,7 +229,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     defaultModel: "mimo-v1-chat",
     models: ["mimo-v1-chat", "mimo-v1-pro"],
     defaultBaseUrl: "https://api.mimo.mi.com/v1",
-    keyHint: "在 mimo.mi.com 开放平台获取 API Key",
+    keySource: "mimo.mi.com",
     supportsImage: false,
   },
   {
@@ -239,7 +239,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     defaultModel: "deepseek-ai/DeepSeek-V3",
     models: ["deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1", "Qwen/Qwen2.5-72B-Instruct"],
     defaultBaseUrl: "https://api.siliconflow.cn/v1",
-    keyHint: "在 cloud.siliconflow.cn 获取 API Key",
+    keySource: "cloud.siliconflow.cn",
     supportsImage: true,
   },
   {
@@ -248,7 +248,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     mappedProvider: "glm",
     defaultModel: "glm-5.3-flash",
     models: ["glm-5.3-flash", "glm-4.7-flash"],
-    keyHint: "在 z.ai 开发者中心获取 API Key",
+    keySource: "z.ai",
     supportsImage: true,
   },
   {
@@ -258,7 +258,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     defaultModel: "anthropic/claude-3.7-sonnet",
     models: ["anthropic/claude-3.7-sonnet", "openai/gpt-4o", "deepseek/deepseek-r1", "google/gemini-2.5-flash"],
     defaultBaseUrl: "https://openrouter.ai/api/v1",
-    keyHint: "在 openrouter.ai/keys 获取 API Key",
+    keySource: "openrouter.ai/keys",
     supportsImage: true,
   },
   {
@@ -268,7 +268,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     defaultModel: "moonshot-v1-8k",
     models: ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
     defaultBaseUrl: "https://api.moonshot.cn/v1",
-    keyHint: "在 platform.moonshot.cn 获取 API Key",
+    keySource: "platform.moonshot.cn",
     supportsImage: true,
   },
   {
@@ -278,7 +278,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     defaultModel: "moonshot-v1-8k",
     models: ["moonshot-v1-8k", "moonshot-v1-32k"],
     defaultBaseUrl: "https://api.moonshot.cn/v1",
-    keyHint: "在 platform.moonshot.cn 获取 API Key",
+    keySource: "platform.moonshot.cn",
     supportsImage: true,
   },
   {
@@ -288,7 +288,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     defaultModel: "doubao-pro-32k",
     models: ["doubao-pro-32k", "doubao-lite-32k"],
     defaultBaseUrl: "https://api.byteplus.com/v1",
-    keyHint: "在 byteplus.com 控制台获取 API Key",
+    keySource: "byteplus.com",
     supportsImage: true,
   },
   {
@@ -297,7 +297,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     mappedProvider: "claude",
     defaultModel: "claude-sonnet-5",
     models: ["claude-sonnet-5", "claude-haiku-4-5"],
-    keyHint: "在 aws.amazon.com/bedrock 获取凭据",
+    keySource: "aws.amazon.com/bedrock",
     supportsImage: true,
   },
   {
@@ -307,7 +307,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     defaultModel: "hunyuan-pro",
     models: ["hunyuan-pro", "hunyuan-standard", "hunyuan-vision"],
     defaultBaseUrl: "https://api.hunyuan.cloud.tencent.com/v1",
-    keyHint: "在 console.cloud.tencent.com/hunyuan 获取 API Key",
+    keySource: "console.cloud.tencent.com/hunyuan",
     supportsImage: true,
   },
   {
@@ -317,7 +317,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     defaultModel: "magic-v1-chat",
     models: ["magic-v1-chat", "magic-v1-fast"],
     defaultBaseUrl: "https://api.magicark.cn/v1",
-    keyHint: "在 magicark.cn 开发者控制台获取 API Key",
+    keySource: "magicark.cn",
     supportsImage: false,
   },
   {
@@ -327,7 +327,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     defaultModel: "deepseek/deepseek-v3",
     models: ["deepseek/deepseek-v3", "deepseek/deepseek-r1"],
     defaultBaseUrl: "https://api.ppinfra.com/v3/openai",
-    keyHint: "在 ppinfra.com 控制台获取 API Key",
+    keySource: "ppinfra.com",
     supportsImage: true,
   },
   {
@@ -344,7 +344,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
       "step-1v-8k",
       "step-plan",
     ],
-    keyHint: "在 StepFun Step Plan 控制台获取 API Key",
+    keySource: "StepFun Step Plan",
     supportsImage: true,
   },
   {
@@ -353,16 +353,16 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     mappedProvider: "openai",
     defaultModel: "gpt-5.6-luna",
     models: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-4.1", "gpt-4.1-mini"],
-    keyHint: "在 platform.openai.com 获取 API Key",
+    keySource: "platform.openai.com",
     supportsImage: true,
   },
   {
     id: "claude",
     name: "Anthropic (Claude)",
     mappedProvider: "claude",
-    defaultModel: "claude-sonnet-5",
-    models: ["claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
-    keyHint: "在 console.anthropic.com 获取 API Key",
+    defaultModel: "claude-sonnet-5-5",
+    models: ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
+    keySource: "console.anthropic.com",
     supportsImage: true,
   },
   {
@@ -371,7 +371,7 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     mappedProvider: "gemini",
     defaultModel: "gemini-3.7-flash",
     models: ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-pro"],
-    keyHint: "在 aistudio.google.com 获取 API Key",
+    keySource: "aistudio.google.com",
     supportsImage: true,
   },
 ];

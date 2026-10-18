@@ -9,12 +9,12 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Pencil,
-  Sparkles,
   Square,
   X,
 } from "lucide-react";
 import type { FormEvent, MouseEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocale } from "../../i18n/locale-context";
 import type { UiCopy } from "../../i18n/messages";
 import { isDesktopApp } from "../../services/app-platform";
 import {
@@ -55,12 +55,14 @@ export function DesktopTopBar({
   rightPaneOpen = false,
   sidebarCollapsed = false,
 }: DesktopTopBarProps) {
+  const locale = useLocale();
+  const ja = locale === "ja-JP";
   const isDesktop = isDesktopApp();
   const [isMaximized, setIsMaximized] = useState(false);
 
   // 项目与标题重命名状态
   const { activeProject } = useProjectState();
-  const projectDisplayName = getProjectDisplayName(activeProject);
+  const projectDisplayName = getProjectDisplayName(activeProject, locale);
   const currentTitle = conversationTitle || copy.newChat;
 
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -182,7 +184,7 @@ export function DesktopTopBar({
       className="desktop-topbar"
       data-tauri-drag-region
       onDoubleClick={handleDoubleClick}
-      aria-label="应用顶栏"
+      aria-label={ja ? "アプリのトップバー" : "应用顶栏"}
     >
       {/* 1. 左侧：应用品牌徽章与侧栏折叠开关 + 会话标题与当前项目名 */}
       <div className="desktop-topbar__left" data-tauri-drag-region>
@@ -190,13 +192,11 @@ export function DesktopTopBar({
           type="button"
           className="desktop-topbar__brand-btn"
           onClick={() => void onNewChat()}
-          title="月见八千代 (Tsukimi Yachiyo)"
-          aria-label="月见八千代"
+          title={ja ? "月見八千代 (Tsukimi Yachiyo)" : "月见八千代 (Tsukimi Yachiyo)"}
+          aria-label={ja ? "月見八千代" : "月见八千代"}
         >
-          <span className="desktop-topbar__brand-icon-wrap" aria-hidden="true">
-            <Sparkles size={13} className="desktop-topbar__brand-icon" />
-          </span>
-          <span className="desktop-topbar__brand-title">月见八千代</span>
+          <img className="desktop-topbar__brand-mark" src="/yachiyo-mark.svg" alt="" aria-hidden="true" />
+          <span className="desktop-topbar__brand-title">{ja ? "月見八千代" : "月见八千代"}</span>
         </button>
 
         {onToggleSidebar ? (
@@ -204,8 +204,16 @@ export function DesktopTopBar({
             type="button"
             className="desktop-topbar__collapse-btn"
             onClick={onToggleSidebar}
-            title={sidebarCollapsed ? "展开侧边栏 (Ctrl+[)" : "折叠侧边栏 (Ctrl+[)"}
-            aria-label={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}
+            title={
+            sidebarCollapsed
+              ? ja ? "サイドバーを展開 (Ctrl+[)" : "展开侧边栏 (Ctrl+[)"
+              : ja ? "サイドバーを折りたたむ (Ctrl+[)" : "折叠侧边栏 (Ctrl+[)"
+          }
+          aria-label={
+            sidebarCollapsed
+              ? ja ? "サイドバーを展開" : "展开侧边栏"
+              : ja ? "サイドバーを折りたたむ" : "折叠侧边栏"
+          }
           >
             {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
@@ -231,7 +239,7 @@ export function DesktopTopBar({
                 }
               }}
               className="desktop-topbar__rename-input"
-              aria-label="重命名当前会话"
+              aria-label={ja ? "現在の会話の名前を変更" : "重命名当前会话"}
             />
             <button
               type="submit"
@@ -256,7 +264,7 @@ export function DesktopTopBar({
             <button
               type="button"
               className="desktop-topbar__title-btn"
-              title={`${currentTitle} (点击重命名)`}
+              title={ja ? `${currentTitle}（クリックで名前を変更）` : `${currentTitle} (点击重命名)`}
               onClick={handleStartEditTitle}
             >
               <span className="desktop-topbar__title">{currentTitle}</span>
@@ -266,15 +274,15 @@ export function DesktopTopBar({
                 type="button"
                 className="desktop-topbar__title-edit-btn"
                 onClick={handleStartEditTitle}
-                title="重命名会话"
-                aria-label="重命名会话"
+                title={ja ? "会話の名前を変更" : "重命名会话"}
+                aria-label={ja ? "会話の名前を変更" : "重命名会话"}
               >
                 <Pencil size={12} />
               </button>
             ) : null}
             <span
               className="desktop-topbar__project-name"
-              title={`当前项目：${projectDisplayName}`}
+              title={ja ? `現在のプロジェクト：${projectDisplayName}` : `当前项目：${projectDisplayName}`}
             >
               {projectDisplayName}
             </span>
@@ -306,8 +314,16 @@ export function DesktopTopBar({
           type="button"
           className="desktop-topbar__collapse-btn"
           onClick={onToggleRightPane}
-          title={rightPaneOpen ? "收起右侧成果面板 (Ctrl+B)" : "展开右侧成果面板 (Ctrl+B)"}
-          aria-label={rightPaneOpen ? "收起成果面板" : "展开成果面板"}
+          title={
+              rightPaneOpen
+                ? ja ? "右側の成果パネルを閉じる (Ctrl+B)" : "收起右侧成果面板 (Ctrl+B)"
+                : ja ? "右側の成果パネルを開く (Ctrl+B)" : "展开右侧成果面板 (Ctrl+B)"
+            }
+          aria-label={
+              rightPaneOpen
+                ? ja ? "成果パネルを閉じる" : "收起成果面板"
+                : ja ? "成果パネルを開く" : "展开成果面板"
+            }
         >
           {rightPaneOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
         </button>
@@ -315,13 +331,13 @@ export function DesktopTopBar({
 
       {/* 4. 原生感桌面窗口控制三件套（仅在桌面环境下渲染） */}
       {isDesktop ? (
-        <div className="desktop-window-controls" role="group" aria-label="窗口控制">
+        <div className="desktop-window-controls" role="group" aria-label={ja ? "ウィンドウ操作" : "窗口控制"}>
           <button
             type="button"
             className="desktop-window-control-btn"
             onClick={handleMinimize}
             title="最小化"
-            aria-label="最小化窗口"
+            aria-label={ja ? "ウィンドウを最小化" : "最小化窗口"}
           >
             <Minus size={13} strokeWidth={2} />
           </button>
@@ -329,8 +345,12 @@ export function DesktopTopBar({
             type="button"
             className="desktop-window-control-btn"
             onClick={(e) => void handleToggleMaximize(e)}
-            title={isMaximized ? "向下还原" : "最大化"}
-            aria-label={isMaximized ? "向下还原窗口" : "最大化窗口"}
+            title={isMaximized ? (ja ? "元のサイズに戻す" : "向下还原") : "最大化"}
+            aria-label={
+              isMaximized
+                ? ja ? "ウィンドウを元のサイズに戻す" : "向下还原窗口"
+                : ja ? "ウィンドウを最大化" : "最大化窗口"
+            }
           >
             {isMaximized ? (
               <Copy size={11} strokeWidth={2} className="desktop-window-control-icon--restore" />
@@ -342,8 +362,8 @@ export function DesktopTopBar({
             type="button"
             className="desktop-window-control-btn desktop-window-control-btn--close"
             onClick={handleClose}
-            title="关闭"
-            aria-label="关闭窗口"
+            title={ja ? "閉じる" : "关闭"}
+            aria-label={ja ? "ウィンドウを閉じる" : "关闭窗口"}
           >
             <X size={14} strokeWidth={2} />
           </button>

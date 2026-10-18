@@ -1,5 +1,6 @@
 import { Check, Copy } from "lucide-react";
 import React, { memo, useState } from "react";
+import { useLocale } from "../../i18n/locale-context";
 
 export interface MarkdownContentProps {
   text: string;
@@ -8,6 +9,7 @@ export interface MarkdownContentProps {
 
 /** 复制代码块辅助按钮 */
 function CopyCodeButton({ code }: { code: string }) {
+  const ja = useLocale() === "ja-JP";
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -25,18 +27,18 @@ function CopyCodeButton({ code }: { code: string }) {
       type="button"
       className="markdown-code-copy-btn"
       onClick={handleCopy}
-      title={copied ? "已复制" : "复制代码"}
-      aria-label={copied ? "已复制" : "复制代码"}
+      title={copied ? (ja ? "コピーしました" : "已复制") : ja ? "コードをコピー" : "复制代码"}
+      aria-label={copied ? (ja ? "コピーしました" : "已复制") : ja ? "コードをコピー" : "复制代码"}
     >
       {copied ? (
         <>
           <Check size={12} className="markdown-code-copy-icon--success" />
-          <span>已复制</span>
+          <span>{ja ? "コピー済み" : "已复制"}</span>
         </>
       ) : (
         <>
           <Copy size={12} />
-          <span>复制</span>
+          <span>{ja ? "コピー" : "复制"}</span>
         </>
       )}
     </button>
@@ -50,7 +52,7 @@ function CopyCodeButton({ code }: { code: string }) {
  * 3. 斜体 (*text*)
  * 4. 八千代动作神态 ((动作神态) 或 （动作神态），包含中日文字符)
  */
-function renderInlineFormatting(line: string, isAssistant = false): React.ReactNode[] {
+function renderInlineFormatting(line: string, isAssistant = false, emoteTitle = ""): React.ReactNode[] {
   const tokenRegex =
     /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|(?:\([^\n()]{1,30}[\u4e00-\u9fa5\u3040-\u30ff][^\n()]{0,10}\)|（[^\n（）]{1,30}[\u4e00-\u9fa5\u3040-\u30ff][^\n（）]{0,10}）))/gu;
 
@@ -87,7 +89,7 @@ function renderInlineFormatting(line: string, isAssistant = false): React.ReactN
     } else if (isAssistant && (token.startsWith("(") || token.startsWith("（"))) {
       // 八千代动作神态胶囊
       parts.push(
-        <span key={key} className="yachiyo-emote-badge" title="八千代神态动作">
+        <span key={key} className="yachiyo-emote-badge" title={emoteTitle}>
           {token}
         </span>,
       );
@@ -117,6 +119,7 @@ export const MarkdownContent = memo(function MarkdownContent({
   text,
   isAssistant = false,
 }: MarkdownContentProps) {
+  const emoteTitle = useLocale() === "ja-JP" ? "八千代のしぐさ" : "八千代神态动作";
   if (!text) return null;
 
   // 按代码块拆分文本
@@ -163,7 +166,7 @@ export const MarkdownContent = memo(function MarkdownContent({
           <li key={`li-${lineIdx}`} className="markdown-li">
             <span className="markdown-li__bullet" aria-hidden="true" />
             <div className="markdown-li__content">
-              {renderInlineFormatting(unorderedMatch[1], isAssistant)}
+              {renderInlineFormatting(unorderedMatch[1], isAssistant, emoteTitle)}
             </div>
           </li>,
         );
@@ -179,7 +182,7 @@ export const MarkdownContent = memo(function MarkdownContent({
           <li key={`oli-${lineIdx}`} className="markdown-ol-li">
             <span className="markdown-ol-li__num">{orderedMatch[1]}.</span>
             <div className="markdown-li__content">
-              {renderInlineFormatting(orderedMatch[2], isAssistant)}
+              {renderInlineFormatting(orderedMatch[2], isAssistant, emoteTitle)}
             </div>
           </li>,
         );
@@ -200,7 +203,7 @@ export const MarkdownContent = memo(function MarkdownContent({
         const quoteText = trimmed.replace(/^>\s*/, "");
         renderedNodes.push(
           <blockquote key={`bq-${lineIdx}`} className="markdown-blockquote">
-            {renderInlineFormatting(quoteText, isAssistant)}
+            {renderInlineFormatting(quoteText, isAssistant, emoteTitle)}
           </blockquote>,
         );
         return;
@@ -209,7 +212,7 @@ export const MarkdownContent = memo(function MarkdownContent({
       // 普通段落行
       renderedNodes.push(
         <p key={`p-${keyPrefix}-${lineIdx}`} className="markdown-p">
-          {renderInlineFormatting(line, isAssistant)}
+          {renderInlineFormatting(line, isAssistant, emoteTitle)}
         </p>,
       );
     });

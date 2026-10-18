@@ -5,7 +5,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/liangcka/yachiyo-chat.git"
+    "url": "https://github.com/liangcka/Yachiyo-chat-desktop.git"
   },
   "type": "module",
   "scripts": {

@@ -1,5 +1,6 @@
 import { ChevronDown, Pin } from "lucide-react";
 import type { Conversation } from "../../../domain/chat";
+import { useLocale } from "../../../i18n/locale-context";
 import type { UiCopy } from "../../../i18n/messages";
 import { SidebarConversationItem } from "./SidebarConversationItem";
 import type { ConversationGroup } from "./types";
@@ -29,6 +30,7 @@ export function SidebarGroupSection({
   onTogglePinConversation,
   pinnedIds,
 }: SidebarGroupSectionProps) {
+  const ja = useLocale() === "ja-JP";
   const isPinnedGroup = group.key === "pinned";
 
   return (
@@ -37,7 +39,7 @@ export function SidebarGroupSection({
         type="button"
         className="desktop-sidebar__group-header"
         onClick={onToggleCollapse}
-        title={`${isCollapsed ? "展开" : "折叠"} ${group.label}`}
+        title={ja ? `${group.label}を${isCollapsed ? "展開" : "折りたたむ"}` : `${isCollapsed ? "展开" : "折叠"} ${group.label}`}
       >
         <span
           className={`desktop-sidebar__group-chevron ${

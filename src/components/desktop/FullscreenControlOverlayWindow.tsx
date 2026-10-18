@@ -1,4 +1,5 @@
 import { MonitorDot, Square } from "lucide-react";
+import { LOCALE_MIRROR_KEY } from "../../i18n/locale-context";
 import { useEffect, useState, useCallback } from "react";
 import { setOverlayIgnoreCursor, stopActiveControl } from "../../services/desktop-bridge";
 import "../../styles/fullscreen-control-overlay.css";
@@ -7,6 +8,15 @@ interface ControlPayload {
   active: boolean;
   toolName?: string;
   detail?: string;
+}
+
+/** 遮罩是独立 webview，拿不到主窗口的 React 状态；主窗口把界面语言镜像到同源 localStorage */
+function readMirroredLocale(): string | null {
+  try {
+    return localStorage.getItem(LOCALE_MIRROR_KEY);
+  } catch {
+    return null;
+  }
 }
 
 export function FullscreenControlOverlayWindow() {
@@ -86,14 +96,16 @@ export function FullscreenControlOverlayWindow() {
     return null;
   }
 
-  const detailText = controlState.detail?.trim() || "正在执行自动化桌面控制任务...";
+  const ja = readMirroredLocale() === "ja-JP";
+  const detailText =
+    controlState.detail?.trim() || (ja ? "デスクトップの自動操作を実行中…" : "正在执行自动化桌面控制任务...");
 
   return (
     <div
       className="fullscreen-control-window"
       role="alert"
       aria-live="assertive"
-      aria-label="月见八千代 正在控制你的电脑"
+      aria-label={ja ? "月見八千代が PC を操作しています" : "月见八千代 正在控制你的电脑"}
     >
       {/* 1. 四周全屏幕物理边缘激光流动环 (类似 Codex 全屏控制视界) */}
       <div className="fullscreen-control-window__glow-rim" aria-hidden="true">
@@ -116,8 +128,8 @@ export function FullscreenControlOverlayWindow() {
 
         <div className="fullscreen-control-window__info">
           <div className="fullscreen-control-window__title">
-            <span className="fullscreen-control-window__software">月见八千代</span>
-            <span className="fullscreen-control-window__status-text">正在控制你的电脑</span>
+            <span className="fullscreen-control-window__software">{ja ? "月見八千代" : "月见八千代"}</span>
+            <span className="fullscreen-control-window__status-text">{ja ? "が PC を操作しています" : "正在控制你的电脑"}</span>
           </div>
           <div className="fullscreen-control-window__desc" title={detailText}>
             {detailText}
@@ -128,11 +140,11 @@ export function FullscreenControlOverlayWindow() {
           type="button"
           className="fullscreen-control-window__takeover-btn"
           onClick={() => void handleTakeover()}
-          title="点击或按 Esc 键立即接管电脑控制"
-          aria-label="立即接管电脑控制"
+          title={ja ? "クリックまたは Esc キーで PC の操作を取り戻す" : "点击或按 Esc 键立即接管电脑控制"}
+          aria-label={ja ? "PC の操作をすぐに取り戻す" : "立即接管电脑控制"}
         >
           <Square size={13} fill="currentColor" />
-          <span>立即接管 (Esc)</span>
+          <span>{ja ? "操作を取り戻す (Esc)" : "立即接管 (Esc)"}</span>
         </button>
       </div>
     </div>

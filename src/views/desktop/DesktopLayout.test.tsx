@@ -127,7 +127,7 @@ describe("DesktopLayout", () => {
 
     await user.click(screen.getByRole("button", { name: "打开设置" }));
 
-    expect(screen.getByRole("dialog", { name: "设置中心" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "设置中心" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "常规" })).toBeInTheDocument();
     expect(screen.getByText("本地隐私保护模式")).toBeInTheDocument();
     expect(screen.getByText("大语言模型服务 (LLM)")).toBeInTheDocument();
@@ -382,7 +382,7 @@ describe("DesktopLayout", () => {
     await user.click(manageSkillsBtn);
 
     // 应唤起设置中心，且直达“自定义”标签页（技能与个性化记忆）
-    expect(screen.getByRole("dialog", { name: "设置中心" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "设置中心" })).toBeInTheDocument();
     expect(screen.getByText("技能与个性化记忆")).toBeInTheDocument();
     expect(screen.getByText("技能扩展")).toBeInTheDocument();
   });

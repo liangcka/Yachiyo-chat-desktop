@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Folder, FolderCode, FolderPlus, FolderX, Settings, X } from "lucide-react";
+import { useLocale } from "../../i18n/locale-context";
 import {
   getProjectDisplayName,
   projectManager,
@@ -34,6 +35,8 @@ export function ProjectSelector({
   onOpenSettings,
   onNewChat,
 }: ProjectSelectorProps) {
+  const locale = useLocale();
+  const ja = locale === "ja-JP";
   const { activeProject, recentProjects } = useProjectState();
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -110,8 +113,9 @@ export function ProjectSelector({
     onOpenSettings?.();
   };
 
-  const activeDisplayName = getProjectDisplayName(activeProject);
-  const buttonLabel = label ?? (variant === "chip" || variant === "composer" ? activeDisplayName : "新建对话");
+  const activeDisplayName = getProjectDisplayName(activeProject, locale);
+  const buttonLabel =
+    label ?? (variant === "chip" || variant === "composer" ? activeDisplayName : ja ? "新しい会話" : "新建对话");
 
   const displayProjects = useMemo(() => {
     if (!activeProject) return recentProjects;
@@ -136,7 +140,7 @@ export function ProjectSelector({
               className="workspace-panel__project-name"
               title={activeProject ?? ""}
             >
-              {activeProject ? activeDisplayName : (noProjectLabel ?? "未选择项目")}
+              {activeProject ? activeDisplayName : (noProjectLabel ?? (ja ? "プロジェクト未選択" : "未选择项目"))}
             </span>
           </div>
           <button
@@ -146,7 +150,7 @@ export function ProjectSelector({
             aria-haspopup="menu"
             aria-expanded={isOpen}
           >
-            {activeProject ? (changeLabel ?? "更换") : (selectLabel ?? "选择项目")}
+            {activeProject ? (changeLabel ?? (ja ? "変更" : "更换")) : (selectLabel ?? (ja ? "プロジェクトを選択" : "选择项目"))}
           </button>
         </div>
       ) : variant === "rail" ? (
@@ -156,8 +160,8 @@ export function ProjectSelector({
           onClick={handleToggle}
           aria-haspopup="menu"
           aria-expanded={isOpen}
-          aria-label="工作区项目"
-          title={`工作区项目：${activeDisplayName}`}
+          aria-label={ja ? "ワークスペースのプロジェクト" : "工作区项目"}
+          title={ja ? `ワークスペースのプロジェクト：${activeDisplayName}` : `工作区项目：${activeDisplayName}`}
         >
           <FolderCode size={17} />
         </button>
@@ -172,7 +176,11 @@ export function ProjectSelector({
           onClick={handleToggle}
           aria-haspopup="menu"
           aria-expanded={isOpen}
-          title={`当前项目：${activeDisplayName} (点击切换或新建项目)`}
+          title={
+            ja
+              ? `現在のプロジェクト：${activeDisplayName}（クリックで切り替え・新規作成）`
+              : `当前项目：${activeDisplayName} (点击切换或新建项目)`
+          }
         >
 
           {activeProject ? (
@@ -192,7 +200,7 @@ export function ProjectSelector({
             type="button"
             className="desktop-sidebar__new-btn project-selector__main-btn"
             onClick={() => void onNewChat?.()}
-            title="新建对话 (Ctrl+N)"
+            title={ja ? "新しい会話 (Ctrl+N)" : "新建对话 (Ctrl+N)"}
           >
             <span className="desktop-sidebar__new-btn-label">{buttonLabel}</span>
           </button>
@@ -202,8 +210,8 @@ export function ProjectSelector({
             onClick={handleToggle}
             aria-haspopup="menu"
             aria-expanded={isOpen}
-            title="项目选择与新建项目"
-            aria-label="项目选择与新建项目"
+            title={ja ? "プロジェクトの選択と新規作成" : "项目选择与新建项目"}
+            aria-label={ja ? "プロジェクトの選択と新規作成" : "项目选择与新建项目"}
           >
             <ChevronDown
               size={13}
@@ -215,12 +223,12 @@ export function ProjectSelector({
 
       {/* 下拉菜单面板（完全对标图片样式与结构） */}
       {isOpen ? (
-        <div className="project-dropdown" role="menu" aria-label="项目选择菜单">
+        <div className="project-dropdown" role="menu" aria-label={ja ? "プロジェクト選択メニュー" : "项目选择菜单"}>
           {/* 1. 最近项目列表 */}
           <div className="project-dropdown__section project-dropdown__section--recents">
             {displayProjects.map((projectPath) => {
               const isActive = activeProject?.toLowerCase() === projectPath.toLowerCase();
-              const name = getProjectDisplayName(projectPath);
+              const name = getProjectDisplayName(projectPath, locale);
 
               return (
                 <div
@@ -246,8 +254,8 @@ export function ProjectSelector({
                         type="button"
                         className="project-dropdown__action-icon"
                         onClick={handleGearClick}
-                        title="打开文件与终端"
-                        aria-label="打开文件与终端"
+                        title={ja ? "ファイルとターミナルを開く" : "打开文件与终端"}
+                        aria-label={ja ? "ファイルとターミナルを開く" : "打开文件与终端"}
                       >
                         <Settings size={14} />
                       </button> : null}
@@ -259,8 +267,8 @@ export function ProjectSelector({
                           event.stopPropagation();
                           projectManager.removeRecentProject(projectPath);
                         }}
-                        title="从最近项目中移除"
-                        aria-label={`从最近项目中移除 ${name}`}
+                        title={ja ? "最近のプロジェクトから削除" : "从最近项目中移除"}
+                        aria-label={ja ? `${name} を最近のプロジェクトから削除` : `从最近项目中移除 ${name}`}
                       >
                         <X size={13} />
                       </button>
@@ -283,7 +291,7 @@ export function ProjectSelector({
               onClick={() => void handleNewProject()}
             >
               <FolderPlus size={15} className="project-dropdown__icon" />
-              <span className="project-dropdown__name">新建项目</span>
+              <span className="project-dropdown__name">{ja ? "新しいプロジェクト" : "新建项目"}</span>
             </button>
 
             <button
@@ -293,7 +301,7 @@ export function ProjectSelector({
               onClick={() => void handleQuickStart()}
             >
               <FolderPlus size={15} className="project-dropdown__icon" />
-              <span className="project-dropdown__name">快速开始</span>
+              <span className="project-dropdown__name">{ja ? "クイックスタート" : "快速开始"}</span>
             </button>
           </div>
 
@@ -305,7 +313,7 @@ export function ProjectSelector({
             {recentProjects.length > 0 ? (
               <button type="button" className="project-dropdown__item" role="menuitem" onClick={() => projectManager.clearRecentProjects()}>
                 <X size={15} className="project-dropdown__icon" />
-                <span className="project-dropdown__name">清空最近项目</span>
+                <span className="project-dropdown__name">{ja ? "最近のプロジェクトをクリア" : "清空最近项目"}</span>
               </button>
             ) : null}
             <button
@@ -315,7 +323,7 @@ export function ProjectSelector({
               onClick={() => void handleSelectNoProject()}
             >
               <FolderX size={15} className="project-dropdown__icon" />
-              <span className="project-dropdown__name">无项目</span>
+              <span className="project-dropdown__name">{ja ? "プロジェクトなし" : "无项目"}</span>
               {!activeProject ? (
                 <Check size={14} className="project-dropdown__check" />
               ) : null}

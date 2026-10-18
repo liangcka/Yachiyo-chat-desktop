@@ -25,7 +25,6 @@ export interface DesktopSidebarProps {
   activeConversationId?: string;
   activeRightTab?: DesktopRightTab;
   collapsed?: boolean;
-  hideBrandHeader?: boolean;
   conversations: Conversation[];
   copy: UiCopy;
   locale: Locale;

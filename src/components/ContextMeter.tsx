@@ -76,7 +76,7 @@ export function ContextMeter({
       <button
         type="button"
         className="context-meter-trigger"
-        aria-label={`上下文已用 ${percent}%`}
+        aria-label={isJapanese ? `コンテキスト使用率 ${percent}%` : `上下文已用 ${percent}%`}
         aria-haspopup="dialog"
         aria-expanded={open}
         title={`${isJapanese ? "コンテキスト推定量" : "上下文估算"} ${percent}% (~${formatTokens(breakdown.usedTokens)} / ${formatTokens(breakdown.contextWindow)})`}
