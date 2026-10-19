@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { KEYSTORE_MANAGED_API_KEY } from "../domain/llm";
 import { copyFor } from "../i18n/messages";
 import { LlmSettingsPanel } from "./LlmSettingsPanel";
 
@@ -75,7 +76,7 @@ describe("LlmSettingsPanel", () => {
     expect(screen.getByText("自定义模型")).toBeInTheDocument();
     expect(screen.getByText("火山引擎")).toBeInTheDocument();
     expect(screen.getByText("MiniMax CN")).toBeInTheDocument();
-    expect(screen.getByText("阿里云")).toBeInTheDocument();
+    expect(screen.getByText("阿里云百炼")).toBeInTheDocument();
     expect(screen.getByText("硅基流动")).toBeInTheDocument();
   });
 
@@ -102,6 +103,61 @@ describe("LlmSettingsPanel", () => {
       "https://ark.cn-beijing.volces.com/api/v3",
     );
     expect(onActivate).toHaveBeenCalledWith("openai");
+  });
+
+  it("does not carry another vendor's model, endpoint or stored key into a shared slot", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn(async () => undefined);
+    mount({
+      onSave,
+      entries: [
+        {
+          provider: "openai",
+          apiKey: KEYSTORE_MANAGED_API_KEY,
+          model: "kimi-k3",
+          baseUrl: "https://api.moonshot.cn/v1",
+        },
+      ],
+    });
+
+    await user.click(screen.getByRole("button", { name: "添加模型" }));
+    await user.click(screen.getByText("阿里云百炼"));
+
+    const dialog = screen.getByRole("dialog", { name: "配置模型" });
+    expect(within(dialog).getByDisplayValue("https://dashscope.aliyuncs.com/compatible-mode/v1")).toBeInTheDocument();
+    const save = screen.getByRole("button", { name: "保存并启用" });
+    expect(save).toBeDisabled();
+    await user.type(screen.getByPlaceholderText("请输入服务商 API Key"), VALID_KEY);
+    await user.click(save);
+
+    expect(onSave).toHaveBeenCalledWith(
+      "openai",
+      VALID_KEY,
+      "qwen3.8-flash",
+      "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    );
+  });
+
+  it("keeps the stored key when reopening the card that owns the slot", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn(async () => undefined);
+    mount({
+      onSave,
+      entries: [
+        {
+          provider: "openai",
+          apiKey: KEYSTORE_MANAGED_API_KEY,
+          model: "kimi-k3",
+          baseUrl: "https://api.moonshot.cn/v1",
+        },
+      ],
+    });
+
+    await user.click(screen.getByRole("button", { name: "添加模型" }));
+    await user.click(screen.getByText("Kimi CN"));
+    await user.click(screen.getByRole("button", { name: "保存并启用" }));
+
+    expect(onSave).toHaveBeenCalledWith("openai", KEYSTORE_MANAGED_API_KEY, "kimi-k3", "https://api.moonshot.cn/v1");
   });
 
   it("opens custom model config and saves custom model", async () => {

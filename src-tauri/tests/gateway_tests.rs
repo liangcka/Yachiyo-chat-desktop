@@ -83,10 +83,15 @@ fn test_client_event_encoding() {
             completion_tokens: Some(20),
             total_tokens: Some(30),
         }),
+        reason: None,
     };
     let encoded_done = encode_client_event(&done_event);
     assert!(encoded_done.starts_with("event: done\ndata: "));
     assert!(encoded_done.contains("\"truncated\":false"));
+    assert!(!encoded_done.contains("reason"));
+
+    let loop_done = ClientStreamEvent::Done { truncated: false, usage: None, reason: Some("loop_detected".to_string()) };
+    assert_eq!(encode_client_event(&loop_done), "event: done\ndata: {\"truncated\":false,\"reason\":\"loop_detected\"}\n\n");
 }
 
 #[test]
@@ -426,4 +431,101 @@ fn test_gemini_chat_body_requests_thought_summaries() {
     assert_eq!(chat["generationConfig"]["thinkingConfig"]["includeThoughts"], true);
     let summary = build_gemini_body(&plain_request("gemini", "summary"));
     assert!(summary["generationConfig"]["thinkingConfig"].get("includeThoughts").is_none());
+}
+
+fn custom_request(provider: &str, mode: &str, base_url: &str) -> yachiyo_desktop_lib::types::ClientChatRequest {
+    let mode = if mode.is_empty() { String::new() } else { format!(r#","mode":"{}""#, mode) };
+    serde_json::from_str(&format!(
+        r#"{{"locale":"zh-CN","provider":"{}","baseUrl":"{}","messages":[{{"role":"user","text":"你好"}}]{}}}"#,
+        provider, base_url, mode
+    ))
+    .unwrap()
+}
+
+#[test]
+fn test_custom_base_url_routes_plain_requests_without_official_openai_rules() {
+    use yachiyo_desktop_lib::gateway::build_upstream_request;
+
+    let request = custom_request("openai", "summary", "https://api.moonshot.cn/v1/");
+    let built = build_upstream_request(&request, "sk-test", "kimi-k3").unwrap();
+    assert_eq!(built.url, "https://api.moonshot.cn/v1/chat/completions");
+    let body: serde_json::Value = serde_json::from_str(&built.body).unwrap();
+    assert_eq!(body["max_tokens"], 4096);
+    assert!(body.get("max_completion_tokens").is_none());
+    assert_eq!(body["reasoning_effort"], "low");
+    assert!(body.get("thinking").is_none());
+
+    let k26 = build_upstream_request(&custom_request("openai", "title", "https://api.moonshot.ai/v1"), "sk-test", "kimi-k2.6").unwrap();
+    let body: serde_json::Value = serde_json::from_str(&k26.body).unwrap();
+    assert_eq!(body["thinking"]["type"], "disabled");
+    assert!(body.get("reasoning_effort").is_none());
+
+    assert!(build_upstream_request(&custom_request("claude", "", "https://api.moonshot.cn/v1"), "sk-test", "kimi-k3").is_err());
+    assert!(build_upstream_request(&custom_request("openai", "", "http://api.moonshot.cn/v1"), "sk-test", "kimi-k3").is_err());
+}
+
+#[test]
+fn test_compat_vendor_detection_and_domestic_routing() {
+    use yachiyo_desktop_lib::gateway::providers::compat_vendor::{is_domestic_endpoint, CompatVendor};
+
+    assert_eq!(CompatVendor::detect("https://ark.cn-beijing.volces.com/api/v3"), Some(CompatVendor::Ark));
+    assert_eq!(CompatVendor::detect("https://ws-1.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"), Some(CompatVendor::Dashscope));
+    assert_eq!(CompatVendor::detect("https://api.minimax.cn/v1"), Some(CompatVendor::MiniMax));
+    assert_eq!(CompatVendor::detect("https://evilmoonshot.cn/v1"), None);
+    assert_eq!(CompatVendor::resolve(None, "https://open.bigmodel.cn/api/paas/v4/chat/completions"), Some(CompatVendor::Zhipu));
+    assert_eq!(CompatVendor::resolve(Some("https://api.z.ai/api/paas/v4"), "https://api.openai.com/v1/chat/completions"), Some(CompatVendor::Zhipu));
+    assert_eq!(CompatVendor::resolve(None, "https://api.openai.com/v1/chat/completions"), None);
+
+    assert!(is_domestic_endpoint("https://ark.cn-beijing.volces.com/api/v3"));
+    assert!(is_domestic_endpoint("https://api.moonshot.cn/v1"));
+    assert!(!is_domestic_endpoint("https://api.moonshot.ai/v1"));
+    assert!(!is_domestic_endpoint("https://openrouter.ai/api/v1"));
+}
+
+#[test]
+fn test_compat_vendor_body_patches_match_web_rules() {
+    use yachiyo_desktop_lib::gateway::providers::compat_vendor::{body_patch, CompatVendor, RequestPurpose};
+
+    let patch = |vendor, model, purpose| -> serde_json::Value {
+        serde_json::Value::Object(body_patch(Some(vendor), model, purpose).into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+    };
+    use serde_json::json;
+    assert_eq!(patch(CompatVendor::Dashscope, "qwen3.8-flash", RequestPurpose::Auxiliary), json!({ "enable_thinking": false }));
+    assert_eq!(patch(CompatVendor::Dashscope, "qwen3.7-plus-2026-05-26", RequestPurpose::Auxiliary), json!({ "enable_thinking": false }));
+    assert_eq!(patch(CompatVendor::Dashscope, "qwen3.8-max-preview", RequestPurpose::Auxiliary), json!({}));
+    assert_eq!(patch(CompatVendor::Dashscope, "qwen3.7-max-2026-05-17", RequestPurpose::Auxiliary), json!({}));
+    assert_eq!(patch(CompatVendor::Dashscope, "qwen3.8-max", RequestPurpose::Chat), json!({ "reasoning_effort": "low" }));
+    assert_eq!(patch(CompatVendor::Dashscope, "qwen3.8-max", RequestPurpose::Agent), json!({}));
+    assert_eq!(patch(CompatVendor::MiniMax, "MiniMax-M3", RequestPurpose::Auxiliary), json!({ "reasoning_split": true, "thinking": { "type": "disabled" } }));
+    assert_eq!(patch(CompatVendor::MiniMax, "MiniMax-M3", RequestPurpose::Agent), json!({ "reasoning_split": true }));
+    assert_eq!(patch(CompatVendor::MiniMax, "MiniMax-M3.1-Flash", RequestPurpose::Chat), json!({ "reasoning_effort": "low" }));
+    assert_eq!(patch(CompatVendor::Moonshot, "kimi-k3", RequestPurpose::Agent), json!({}));
+    assert_eq!(patch(CompatVendor::Moonshot, "kimi-k2.7-code", RequestPurpose::Auxiliary), json!({}));
+}
+
+#[test]
+fn test_openai_delta_parser_splits_inline_thinking_and_details_snapshots() {
+    use yachiyo_desktop_lib::gateway::stream::OpenAiDeltaParser;
+
+    let chunk = |delta: serde_json::Value| serde_json::json!({ "choices": [{ "index": 0, "delta": delta }] }).to_string();
+    let mut parser = OpenAiDeltaParser::default();
+    let first = parser.parse(&chunk(serde_json::json!({ "reasoning_details": [{ "type": "reasoning.text", "text": "先想" }] }))).unwrap();
+    assert_eq!(first.thought.as_deref(), Some("先想"));
+    let second = parser.parse(&chunk(serde_json::json!({ "reasoning_details": [{ "type": "reasoning.text", "text": "先想一想" }] }))).unwrap();
+    assert_eq!(second.thought.as_deref(), Some("一想"));
+
+    let mut parser = OpenAiDeltaParser::default();
+    let held = parser.parse(&chunk(serde_json::json!({ "content": "<thi" }))).unwrap();
+    assert!(held.content.is_none() && held.thought.is_none());
+    let thinking = parser.parse(&chunk(serde_json::json!({ "content": "nk>用户在问候。</th" }))).unwrap();
+    assert_eq!(thinking.thought.as_deref(), Some("用户在问候。"));
+    assert!(thinking.content.is_none());
+    let answer = parser.parse(&chunk(serde_json::json!({ "content": "ink>\n\n你好" }))).unwrap();
+    assert_eq!(answer.content.as_deref(), Some("你好"));
+    let later = parser.parse(&chunk(serde_json::json!({ "content": "<think>不是思考" }))).unwrap();
+    assert_eq!(later.content.as_deref(), Some("<think>不是思考"));
+
+    let mut parser = OpenAiDeltaParser::default();
+    let plain = parser.parse(&chunk(serde_json::json!({ "content": "<b>你好</b>" }))).unwrap();
+    assert_eq!(plain.content.as_deref(), Some("<b>你好</b>"));
 }

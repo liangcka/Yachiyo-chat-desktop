@@ -1,5 +1,9 @@
 use crate::crypto::keys::KeyStore;
 use crate::gateway::agent::checkpoint::CheckpointStore;
+use crate::gateway::agent::loop_guard::{
+    RepetitionDetector, ToolLoopDetector, ToolLoopVerdict, DONE_REASON_LOOP_DETECTED, REPETITION_LOOP_DETECTED,
+    TOOL_LOOP_NUDGE,
+};
 use crate::gateway::agent::messages::{history_to_agent_messages, AgentMessage};
 use crate::gateway::agent::permission::{approval_key, ApprovalRegistry};
 use crate::gateway::agent::pruner::{
@@ -33,14 +37,15 @@ pub enum LoopEmit {
 
 #[derive(Debug, Clone)]
 pub struct AgentLoopConfig {
-    pub max_turns: u32,
+    /// 轮次上限；None 表示不限，运行由模型自行结束或循环检测叫停
+    pub max_turns: Option<u32>,
     pub permission_timeout_secs: u64,
     pub execution_mode: AgentExecutionMode,
 }
 
 impl Default for AgentLoopConfig {
     fn default() -> Self {
-        Self { max_turns: 12, permission_timeout_secs: 300, execution_mode: AgentExecutionMode::Confirm }
+        Self { max_turns: None, permission_timeout_secs: 300, execution_mode: AgentExecutionMode::Confirm }
     }
 }
 
@@ -65,6 +70,8 @@ pub trait TurnExecutor: Send + Sync {
 pub enum LoopOutcome {
     Completed { usage: TokenUsage },
     MaxTurnsReached { usage: TokenUsage },
+    /// 检测到没有进展的工具循环或输出复读，提前结束
+    LoopDetected { usage: TokenUsage },
     Cancelled,
 }
 
@@ -132,7 +139,13 @@ pub async fn run_agent_loop_ext(
         .map(|c| c.run_id().to_string())
         .unwrap_or_else(|| format!("no-workspace-{:016x}", rand::random::<u64>()));
 
-    for turn in 1..=config.max_turns {
+    let mut loop_detector = ToolLoopDetector::default();
+    let mut turn: u32 = 0;
+    loop {
+        turn += 1;
+        if config.max_turns.is_some_and(|max| turn > max) {
+            return Ok(LoopOutcome::MaxTurnsReached { usage });
+        }
         let mut turn_checkpoint_created = false;
         if cancelled.load(Ordering::Relaxed) {
             return Ok(LoopOutcome::Cancelled);
@@ -145,7 +158,10 @@ pub async fn run_agent_loop_ext(
             DEFAULT_PRUNE_HEAD_CHARS,
             DEFAULT_PRUNE_TAIL_CHARS,
         );
-        let outcome = executor.execute(&pruned_messages, sink).await?;
+        let outcome = match executor.execute(&pruned_messages, sink).await {
+            Err(error) if error == REPETITION_LOOP_DETECTED => return Ok(LoopOutcome::LoopDetected { usage }),
+            other => other?,
+        };
         accumulate_usage(&mut usage, &outcome.usage);
 
         if outcome.tool_calls.is_empty() {
@@ -159,6 +175,7 @@ pub async fn run_agent_loop_ext(
             native: outcome.native.clone(),
         });
 
+        let mut turn_outputs: Vec<String> = Vec::with_capacity(outcome.tool_calls.len());
         for call in &outcome.tool_calls {
             if cancelled.load(Ordering::Relaxed) { return Ok(LoopOutcome::Cancelled); }
             sink(LoopEmit::Event(ClientStreamEvent::ToolCall {
@@ -303,14 +320,25 @@ pub async fn run_agent_loop_ext(
                 is_error,
                 duration_ms,
             }));
+            turn_outputs.push(model_output.clone());
             messages.push(AgentMessage::ToolResult {
                 tool_call_id: call.id.clone(),
                 name: call.name.clone(),
                 content: model_output,
             });
         }
+
+        match loop_detector.record(&outcome.tool_calls, &turn_outputs) {
+            ToolLoopVerdict::Progressing => {}
+            ToolLoopVerdict::Nudge => {
+                // 提醒附在工具结果末尾而不是另起一条用户消息，各家协议的消息交替约束都不受影响
+                if let Some(AgentMessage::ToolResult { content, .. }) = messages.last_mut() {
+                    content.push_str(TOOL_LOOP_NUDGE);
+                }
+            }
+            ToolLoopVerdict::Stop => return Ok(LoopOutcome::LoopDetected { usage }),
+        }
     }
-    Ok(LoopOutcome::MaxTurnsReached { usage })
 }
 
 /// 真实执行器：走上游 HTTP 流式接口，透传 thought/delta/sources 事件
@@ -433,8 +461,11 @@ impl TurnExecutor for HttpTurnExecutor {
 
             let mut agg = crate::gateway::agent::stream_agg::ToolCallAggregator::new();
             let mut native = NativeTurnCollector::for_protocol(protocol);
+            let mut openai_parser = crate::gateway::stream::OpenAiDeltaParser::default();
             let mut full_text = String::new();
             let mut reasoning = String::new();
+            let mut thought_repetition = RepetitionDetector::default();
+            let mut text_repetition = RepetitionDetector::default();
             let mut usage: Option<TokenUsage> = None;
             let mut buffer = String::new();
             let mut byte_stream = res.bytes_stream();
@@ -463,7 +494,7 @@ impl TurnExecutor for HttpTurnExecutor {
                     }
                     native.push(&data_str);
                     let delta = match protocol {
-                        WireProtocol::ChatCompletions => crate::gateway::stream::extract_openai_delta(&data_str),
+                        WireProtocol::ChatCompletions => openai_parser.parse(&data_str),
                         WireProtocol::Responses => crate::gateway::providers::openai_responses::extract_openai_responses_delta(&data_str),
                         WireProtocol::Anthropic => crate::gateway::providers::anthropic::extract_anthropic_delta(&data_str),
                         WireProtocol::Gemini => crate::gateway::providers::gemini::extract_gemini_delta(&data_str),
@@ -480,13 +511,22 @@ impl TurnExecutor for HttpTurnExecutor {
                     if let Some(thought) = delta.thought {
                         if !thought.is_empty() {
                             reasoning.push_str(&thought);
+                            let repeating = thought_repetition.push(&thought);
                             sink(LoopEmit::Event(ClientStreamEvent::Thought { text: thought }));
+                            // 丢弃响应流即断开上游连接，不再为退化输出继续计费
+                            if repeating {
+                                return Err(REPETITION_LOOP_DETECTED.to_string());
+                            }
                         }
                     }
                     if let Some(content) = delta.content {
                         if !content.is_empty() {
                             full_text.push_str(&content);
+                            let repeating = text_repetition.push(&content);
                             sink(LoopEmit::Event(ClientStreamEvent::Delta { text: content }));
+                            if repeating {
+                                return Err(REPETITION_LOOP_DETECTED.to_string());
+                            }
                         }
                     }
                     for tc in &delta.tool_calls {
@@ -660,7 +700,7 @@ pub fn run_agent_chat_stream(
         };
 
         let agent_config = request.agent.as_ref()
-            .map(|a| AgentLoopConfig { max_turns: a.max_turns.unwrap_or(12), permission_timeout_secs: 300, execution_mode: a.execution_mode })
+            .map(|a| AgentLoopConfig { max_turns: a.max_turns, permission_timeout_secs: 300, execution_mode: a.execution_mode })
             .unwrap_or_default();
         let run_id = format!(
             "{}-{}",
@@ -705,13 +745,16 @@ pub fn run_agent_chat_stream(
         match handle.await {
             Ok(Ok(outcome)) => match outcome {
                 LoopOutcome::Completed { usage } => {
-                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: false, usage: Some(usage) }));
+                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: false, usage: Some(usage), reason: None }));
                 }
                 LoopOutcome::MaxTurnsReached { usage } => {
-                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: true, usage: Some(usage) }));
+                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: true, usage: Some(usage), reason: None }));
+                }
+                LoopOutcome::LoopDetected { usage } => {
+                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: false, usage: Some(usage), reason: Some(DONE_REASON_LOOP_DETECTED.to_string()) }));
                 }
                 LoopOutcome::Cancelled => {
-                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: true, usage: None }));
+                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: true, usage: None, reason: None }));
                 }
             },
             Ok(Err(e)) => {

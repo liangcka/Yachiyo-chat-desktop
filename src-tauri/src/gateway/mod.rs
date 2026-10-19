@@ -5,7 +5,7 @@ pub mod stream;
 
 use crate::crypto::keys::KeyStore;
 use crate::gateway::providers::registry::get_provider_config;
-use crate::gateway::stream::{encode_client_event, extract_openai_delta};
+use crate::gateway::stream::{encode_client_event, OpenAiDeltaParser};
 use crate::tools::WorkspaceManager;
 use crate::types::{ClientChatRequest, ClientStreamEvent, ProviderId, TokenUsage};
 use async_stream::stream;
@@ -241,6 +241,7 @@ pub fn handle_chat_stream(
         let mut byte_stream = upstream_res.bytes_stream();
         let mut buffer = String::new();
         let mut accumulated_usage: Option<TokenUsage> = None;
+        let mut openai_parser = OpenAiDeltaParser::default();
 
         while let Some(chunk_res) = byte_stream.next().await {
             let chunk = match chunk_res {
@@ -284,7 +285,7 @@ pub fn handle_chat_stream(
 
                 let delta = match provider_id {
                     ProviderId::Stepfun | ProviderId::Deepseek | ProviderId::Glm | ProviderId::Openai => {
-                        extract_openai_delta(&data_str)
+                        openai_parser.parse(&data_str)
                     }
                     ProviderId::Claude => {
                         providers::anthropic::extract_anthropic_delta(&data_str)
@@ -329,6 +330,7 @@ pub fn handle_chat_stream(
                                 yield Ok(encode_client_event(&ClientStreamEvent::Done {
                                     truncated: true,
                                     usage: accumulated_usage,
+                                    reason: None,
                                 }));
                                 return;
                             }
@@ -341,6 +343,7 @@ pub fn handle_chat_stream(
         yield Ok(encode_client_event(&ClientStreamEvent::Done {
             truncated: false,
             usage: accumulated_usage,
+            reason: None,
         }));
     }
 }

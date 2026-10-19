@@ -55,6 +55,7 @@ export interface UiCopy {
   readonly exitHint: string;
   readonly conversationLimit: string;
   readonly truncated: string;
+  readonly loopStopped: string;
   readonly llmSettings: string;
   readonly llmSettingsEntry: string;
   readonly llmActive: string;
@@ -224,6 +225,7 @@ const chinese = Object.freeze({
   exitHint: "再按一次返回键退出",
   conversationLimit: "本地最多保留 30 段对话，请先删除一段。",
   truncated: "回复太长，已截断显示。",
+  loopStopped: "检测到重复循环，已自动停止。",
   llmSettings: "LLM 设置",
   llmSettingsEntry: "LLM 设置",
   llmActive: "当前使用",
@@ -393,6 +395,7 @@ const japanese = Object.freeze({
   exitHint: "もう一度戻ると終了します",
   conversationLimit: "会話は端末に30件まで保存できます。先に1件削除してください。",
   truncated: "返答が長すぎたため、途中まで表示しています。",
+  loopStopped: "同じ処理の繰り返しを検知したため、自動で停止しました。",
   llmSettings: "LLM 設定",
   llmSettingsEntry: "LLM 設定",
   llmActive: "現在使用中",

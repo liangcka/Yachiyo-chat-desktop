@@ -660,6 +660,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       errorCode?: string,
       truncated?: boolean,
       usage?: TokenUsage,
+      loopStopped?: boolean,
     ): Promise<void> => {
       if (run.finishing !== undefined) return run.finishing;
       run.finishing = (async () => {
@@ -684,6 +685,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           contentStartedAtMs: run.contentStartedAtMs,
           ...(status === "stopped" ? { interrupted: true } : {}),
           ...(truncated === true ? { truncated: true } : {}),
+          ...(loopStopped === true ? { loopStopped: true } : {}),
           ...(run.sources !== undefined ? { sources: run.sources } : {}),
           ...(run.toolSteps.length > 0
             ? { toolSteps: run.toolSteps.map((step) => ({ ...step })) }
@@ -691,7 +693,15 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         };
         if (mountedRef.current) {
           if (status === "complete") {
-            emit({ messageId: run.assistant.id, type: "completed", usage: finalUsage, latencyMs, contentSegments: run.contentSegments, contentStartedAtMs: run.contentStartedAtMs });
+            emit({
+              messageId: run.assistant.id,
+              type: "completed",
+              usage: finalUsage,
+              latencyMs,
+              contentSegments: run.contentSegments,
+              contentStartedAtMs: run.contentStartedAtMs,
+              ...(loopStopped === true ? { loopStopped: true } : {}),
+            });
           } else if (status === "stopped") {
             emit({ messageId: run.assistant.id, type: "stopped", latencyMs, contentSegments: run.contentSegments });
           } else {
@@ -990,12 +1000,16 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           await finishRun(run, "stopped");
           return;
         }
+        const loopStopped = result.stopReason === "loop_detected";
+        // 循环叫停时已执行的工具步骤仍有价值，即使没有正文也按完成落盘
+        const failed = run.text.length === 0 && !loopStopped;
         await finishRun(
           run,
-          run.text.length === 0 ? "failed" : "complete",
-          run.text.length === 0 ? "PROVIDER_ERROR" : undefined,
-          run.text.length === 0 ? undefined : result.truncated,
+          failed ? "failed" : "complete",
+          failed ? "PROVIDER_ERROR" : undefined,
+          failed ? undefined : result.truncated,
           result.usage,
+          loopStopped,
         );
       } catch (error) {
         if (activeRef.current?.token !== run.token) return;

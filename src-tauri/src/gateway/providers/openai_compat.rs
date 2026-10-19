@@ -1,7 +1,7 @@
 use crate::gateway::agent::messages::AgentMessage;
 use crate::gateway::prompt::build_system_prompt;
 use crate::gateway::providers::compat_vendor::{self, CompatVendor, ReasoningPassback, RequestPurpose};
-use crate::gateway::providers::registry::ProviderConfig;
+use crate::gateway::providers::registry::{get_provider_config, ProviderConfig};
 use crate::types::{ClientChatRequest, ProviderId, RequestMode};
 use serde_json::json;
 
@@ -28,12 +28,6 @@ pub fn resolve_chat_endpoint(base_url: Option<&str>, default_endpoint: &str) -> 
         Some(base) => format!("{}/chat/completions", base.trim_end_matches('/')),
         None => default_endpoint.to_string(),
     }
-}
-
-/// GLM-4.7 起的强制思考模型支持保留式思考：`clear_thinking: false` 时服务端保留回传的 reasoning_content，
-/// 跨工具轮次延续同一任务的推理；更早的混合或非思考模型（glm-4.6、glm-4v-flash）不发送该开关
-fn glm_preserves_thinking(model: &str) -> bool {
-    model.starts_with("glm-5") || model.starts_with("glm-4.7")
 }
 
 pub fn build_openai_messages(
@@ -122,7 +116,8 @@ pub fn build_openai_compat_body(
     }
 
     let purpose = if auxiliary { RequestPurpose::Auxiliary } else { RequestPurpose::Chat };
-    for (field, value) in compat_vendor::body_patch(CompatVendor::detect(request.base_url.as_deref()), model, purpose) {
+    let vendor = CompatVendor::resolve(request.base_url.as_deref(), config.endpoint);
+    for (field, value) in compat_vendor::body_patch(vendor, model, purpose) {
         body[field] = value;
     }
 
@@ -139,21 +134,26 @@ pub fn build_openai_agent_body(
     tools: &[serde_json::Value],
 ) -> serde_json::Value {
     let deepseek = provider == ProviderId::Deepseek;
-    let glm_preserved = provider == ProviderId::Glm && glm_preserves_thinking(model);
-    let vendor = CompatVendor::detect(base_url);
+    let vendor = CompatVendor::resolve(base_url, get_provider_config(provider).endpoint);
     let passback = if deepseek {
         // DeepSeek 思考模式要求 assistant 消息回传 reasoning_content，工具轮次缺失会被上游 400 拒绝；
         // 客户端重放的历史不含思维链时回传空串（对齐 DSH reasoning passback 与 pi-ai 的 DeepSeek 兼容规则）
         Some(ReasoningPassback::EveryAssistant)
-    } else if glm_preserved {
-        // GLM 保留式思考要求按原顺序回传未修改的 reasoning_content，但不得为没有思维链的历史轮次补写空串
-        Some(ReasoningPassback::NonEmpty)
     } else {
         compat_vendor::reasoning_passback(vendor, model)
     };
     let reasoning_field = |message: &mut serde_json::Value, reasoning: &str| match passback {
         Some(ReasoningPassback::EveryAssistant) => message["reasoning_content"] = json!(reasoning),
         Some(ReasoningPassback::NonEmpty) if !reasoning.is_empty() => message["reasoning_content"] = json!(reasoning),
+        Some(ReasoningPassback::MiniMaxDetails) if !reasoning.is_empty() => {
+            message["reasoning_details"] = json!([{
+                "type": "reasoning.text",
+                "id": "reasoning-text-1",
+                "format": "MiniMax-response-v1",
+                "index": 0,
+                "text": reasoning
+            }]);
+        }
         _ => {}
     };
     let mut out = vec![json!({ "role": "system", "content": system_prompt })];
@@ -222,9 +222,6 @@ pub fn build_openai_agent_body(
     });
     if deepseek {
         body["max_tokens"] = json!(DEEPSEEK_AGENT_MAX_TOKENS);
-    }
-    if glm_preserved {
-        body["thinking"] = json!({ "type": "enabled", "clear_thinking": false });
     }
     for (field, value) in compat_vendor::body_patch(vendor, model, RequestPurpose::Agent) {
         body[field] = value;

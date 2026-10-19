@@ -137,6 +137,9 @@ pub enum ClientStreamEvent {
         truncated: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         usage: Option<TokenUsage>,
+        /// 非正常结束的原因（如 loop_detected），正常完成时省略
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     #[serde(rename = "error")]
     Error { code: String },

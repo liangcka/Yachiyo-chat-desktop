@@ -12,10 +12,13 @@ pub fn encode_client_event(event: &ClientStreamEvent) -> String {
         ClientStreamEvent::Sources { sources } => {
             format!("event: sources\ndata: {}\n\n", json!({ "sources": sources }))
         }
-        ClientStreamEvent::Done { truncated, usage } => {
+        ClientStreamEvent::Done { truncated, usage, reason } => {
             let mut payload = json!({ "truncated": truncated });
             if let Some(u) = usage {
                 payload["usage"] = json!(u);
+            }
+            if let Some(reason) = reason {
+                payload["reason"] = json!(reason);
             }
             format!("event: done\ndata: {}\n\n", payload)
         }
@@ -57,8 +60,24 @@ pub fn encode_ping() -> &'static str {
     ": ping\n\n"
 }
 
+/// MiniMax reasoning_split 模式的 reasoning_details[].text 拼接；不同实现分别按累计快照或增量下发
+fn reasoning_details_text(delta_obj: &serde_json::Value) -> Option<String> {
+    let text: String = delta_obj
+        .get("reasoning_details")?
+        .as_array()?
+        .iter()
+        .filter_map(|item| item.get("text").and_then(|v| v.as_str()))
+        .collect();
+    (!text.is_empty()).then_some(text)
+}
+
+/// 无状态解析：reasoning_details 按增量处理，正文原样透传
 pub fn extract_openai_delta(data: &str) -> Option<crate::types::ExtractedDelta> {
     let parsed: serde_json::Value = serde_json::from_str(data).ok()?;
+    extract_openai_delta_value(&parsed)
+}
+
+fn extract_openai_delta_value(parsed: &serde_json::Value) -> Option<crate::types::ExtractedDelta> {
     let mut delta = crate::types::ExtractedDelta::default();
 
     if let Some(usage) = parsed.get("usage") {
@@ -91,6 +110,9 @@ pub fn extract_openai_delta(data: &str) -> Option<crate::types::ExtractedDelta> 
                         delta.thought = Some(thought.to_string());
                     }
                 }
+                if delta.thought.is_none() {
+                    delta.thought = reasoning_details_text(delta_obj);
+                }
                 if let Some(tool_calls) = delta_obj.get("tool_calls").and_then(|v| v.as_array()) {
                     for tc in tool_calls {
                         let index = tc.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -121,6 +143,129 @@ pub fn extract_openai_delta(data: &str) -> Option<crate::types::ExtractedDelta> 
     if delta.content.is_none() && delta.thought.is_none() && delta.usage.is_none() && delta.tool_calls.is_empty() {
         None
     } else {
+        Some(delta)
+    }
+}
+
+const THINK_OPEN_TAG: &str = "<think>";
+const THINK_CLOSE_TAG: &str = "</think>";
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum ThinkPhase {
+    #[default]
+    Start,
+    Thinking,
+    AfterThink,
+    Content,
+}
+
+/// text 末尾与 tag 前缀重合的最长字节长度，用于保留被拆到下一个 chunk 的半个标签
+fn partial_tag_suffix_len(text: &str, tag: &str) -> usize {
+    (1..tag.len().min(text.len() + 1))
+        .rev()
+        .find(|&len| text.is_char_boundary(text.len() - len) && tag.starts_with(&text[text.len() - len..]))
+        .unwrap_or(0)
+}
+
+/// 正文开头的 <think>…</think> 拆分器（与 Web 端 createThinkTagSplitter 一致）：部分厂商把思考混在 content 里，
+/// 只识别正文最开始的思考块，之后的内容原样透传；开头单独出现的 </think> 直接丢弃
+#[derive(Debug, Default)]
+pub struct ThinkTagSplitter {
+    phase: ThinkPhase,
+    pending: String,
+}
+
+impl ThinkTagSplitter {
+    /// 返回 (正文, 思考)
+    pub fn push(&mut self, chunk: &str) -> (String, String) {
+        let mut content = String::new();
+        let mut thought = String::new();
+        let mut text = std::mem::take(&mut self.pending);
+        text.push_str(chunk);
+        while !text.is_empty() {
+            match self.phase {
+                ThinkPhase::Content => {
+                    content.push_str(&text);
+                    break;
+                }
+                ThinkPhase::Start => {
+                    let lead = text.trim_start();
+                    if let Some(rest) = lead.strip_prefix(THINK_OPEN_TAG) {
+                        self.phase = ThinkPhase::Thinking;
+                        text = rest.to_string();
+                    } else if let Some(rest) = lead.strip_prefix(THINK_CLOSE_TAG) {
+                        self.phase = ThinkPhase::AfterThink;
+                        text = rest.to_string();
+                    } else if THINK_OPEN_TAG.starts_with(lead) || THINK_CLOSE_TAG.starts_with(lead) {
+                        self.pending = text;
+                        break;
+                    } else {
+                        self.phase = ThinkPhase::Content;
+                    }
+                }
+                ThinkPhase::Thinking => {
+                    if let Some(end) = text.find(THINK_CLOSE_TAG) {
+                        thought.push_str(&text[..end]);
+                        text = text[end + THINK_CLOSE_TAG.len()..].to_string();
+                        self.phase = ThinkPhase::AfterThink;
+                    } else {
+                        let keep = partial_tag_suffix_len(&text, THINK_CLOSE_TAG);
+                        let split = text.len() - keep;
+                        thought.push_str(&text[..split]);
+                        self.pending = text[split..].to_string();
+                        break;
+                    }
+                }
+                ThinkPhase::AfterThink => {
+                    // 思考块之后的空行属于标签排版，不计入正文
+                    text = text.trim_start().to_string();
+                    if !text.is_empty() {
+                        self.phase = ThinkPhase::Content;
+                    }
+                }
+            }
+        }
+        (content, thought)
+    }
+}
+
+/// 有状态解析（每个请求一份，与 Web 端 createOpenAIDeltaExtractor 一致）：
+/// reasoning_details 同时兼容累计快照与增量两种下发方式，正文开头混入的思考块转为思考流
+#[derive(Debug, Default)]
+pub struct OpenAiDeltaParser {
+    details_seen: String,
+    splitter: ThinkTagSplitter,
+}
+
+impl OpenAiDeltaParser {
+    pub fn parse(&mut self, data: &str) -> Option<crate::types::ExtractedDelta> {
+        let parsed: serde_json::Value = serde_json::from_str(data).ok()?;
+        let mut delta = extract_openai_delta_value(&parsed)?;
+        let delta_obj = parsed.pointer("/choices/0/delta");
+        let has_reasoning_field = delta_obj
+            .and_then(|d| d.get("reasoning_content").or_else(|| d.get("reasoning")))
+            .and_then(|v| v.as_str())
+            .is_some_and(|text| !text.is_empty());
+        if let Some(details) = delta_obj.and_then(reasoning_details_text) {
+            let cumulative = !self.details_seen.is_empty() && details.starts_with(&self.details_seen);
+            let increment = if cumulative { details[self.details_seen.len()..].to_string() } else { details.clone() };
+            if cumulative {
+                self.details_seen = details;
+            } else {
+                self.details_seen.push_str(&increment);
+            }
+            // 同一 delta 同时带 reasoning_content 与 reasoning_details 时以前者为准，避免重复计入
+            if !has_reasoning_field {
+                delta.thought = (!increment.is_empty()).then_some(increment);
+            }
+        }
+        if let Some(content) = delta.content.take() {
+            let (content, inline_thought) = self.splitter.push(&content);
+            if !inline_thought.is_empty() {
+                delta.thought = Some(delta.thought.unwrap_or_default() + &inline_thought);
+            }
+            delta.content = (!content.is_empty()).then_some(content);
+        }
         Some(delta)
     }
 }
