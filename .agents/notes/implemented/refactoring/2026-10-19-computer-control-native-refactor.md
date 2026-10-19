@@ -69,3 +69,28 @@ Status: implemented
 - `cargo check --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-gnu --lib`：通过。
 - `npm run typecheck`、`npm run lint`：0 errors（唯一的 warning 来自既有的 `ConversationView.tsx`）。
 - `npm run test:unit`：全部通过，新增 `control-tools`、`ControlOverlayWindow` 用例；DesktopLayout 用例改为断言系统级遮罩调用与 Esc 接管。
+
+## 后续迭代（实测反馈：点击不准、无反馈、agent 卡死，遮罩不美观）
+
+首轮在 Windows 实测（GLM-5.3-Flash 让八千代给 QQ 联系人发表情包）暴露的问题与处理：
+
+### 点击准确性与实时反馈（根因修复）
+
+模型看不到截图，只能凭窗口位置猜坐标点击搜索框、联系人、表情按钮，几乎必然点偏；为了"看清"界面，它转而用 `run_command` 跑一长串 `Add-Type -AssemblyName UIAutomationClient …` 的 PowerShell 脚本去读界面文本，该脚本耗时长、输出大，最终把 agent 拖到卡死停摆。
+
+- 新增 `mcp__windows_mcp__inspect`（`src-tauri/src/computer/uia.rs`）：用 UI Automation 枚举前台窗口的可点击元素（按钮、编辑框、链接、列表项、菜单项、标签页等），每个给出类型、名称与中心坐标（优先 `get_clickable_point`，否则包围盒中心）。模型据此拿到真实坐标再点，不再估算。依赖 `uiautomation` crate（COM 多线程模型，跑在 `spawn_blocking` 线程）。
+- `click` 在点击前用 `element_from_point` 识别目标元素，把"实际点中的元素名"随结果回传（`已在 (x,y) 左键单击 → 按钮「表情」`），形成"inspect 看坐标 → click → 反馈核对"的闭环；点错可立即重新 inspect。
+- `snapshot` 末尾、`inspect`/`click` 的工具说明、以及 Agent 提示词都明确：点击窗口内元素前必须先 inspect，禁止用 run_command 跑 PowerShell UIAutomation 读界面。这同时消除了 agent 卡死的根因。
+- 前台是八千代自身窗口时 inspect 拒绝；全自绘、未暴露无障碍信息的窗口返回可读提示，引导改用 screenshot 或请彩叶描述。
+
+### 遮罩重构（单行、蓝色、独立光标）
+
+- 状态条简化为一行「八千代正在控制你的电脑」+ 接管按钮，去掉原来的双行动作详情。
+- 主题色由紫色（`139,92,246`/`168,85,247`）改为蓝色（`59,130,246`/`96,165,250`）；接管按钮保留红色（停止语义）。
+- 新增类似 Codex 的独立光标：后端在遮罩轮询循环里顺带把全局光标位置（遮罩客户区物理像素）通过 `control_cursor_move` 推给遮罩，遮罩渲染一个蓝色发光环直接跟随，光标移动只改 DOM 样式不触发 React 重渲染。
+
+### 验证（补充）
+
+- `cargo check --target x86_64-pc-windows-gnu --lib`：通过（含 `uiautomation`）。
+- `cargo test`、`npm run test:unit`（含更新后的 `ControlOverlayWindow` 单行+光标用例）、`npm run test:functions`、`typecheck`、`lint`：全部通过。
+- UI Automation 的运行时行为（各类应用能否枚举到元素、坐标准确度）仍只在 Windows 实测验证，未在本环境运行。

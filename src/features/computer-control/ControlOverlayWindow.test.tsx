@@ -7,6 +7,7 @@ import { ControlOverlayWindow } from "./ControlOverlayWindow";
 const bridge = vi.hoisted(() => ({
   current: null as ControlOverlayState | null,
   push: undefined as ((state: ControlOverlayState) => void) | undefined,
+  moveCursor: undefined as ((position: { x: number; y: number }) => void) | undefined,
   setHitRegion: vi.fn<(region: unknown) => Promise<boolean>>(async () => true),
   stop: vi.fn(async () => true),
 }));
@@ -17,6 +18,12 @@ vi.mock("../../services/desktop-bridge", () => ({
     bridge.push = callback;
     return () => {
       bridge.push = undefined;
+    };
+  }),
+  onOverlayCursorMove: vi.fn(async (callback: (position: { x: number; y: number }) => void) => {
+    bridge.moveCursor = callback;
+    return () => {
+      bridge.moveCursor = undefined;
     };
   }),
   setOverlayHitRegion: bridge.setHitRegion,
@@ -46,12 +53,19 @@ describe("ControlOverlayWindow", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("restores the current state on load and reports the banner hit region", async () => {
+  it("shows the single-line status, reports the banner hit region, and follows the cursor", async () => {
     bridge.current = { active: true, toolName: "mcp__windows_mcp__click", detail: "正在模拟鼠标点击 (1, 2)" };
     render(<ControlOverlayWindow />);
 
-    expect(await screen.findByText("正在模拟鼠标点击 (1, 2)")).toBeInTheDocument();
+    expect(await screen.findByText("八千代正在控制你的电脑")).toBeInTheDocument();
     await waitFor(() => expect(bridge.setHitRegion).toHaveBeenCalledWith(expect.objectContaining({ x: 0, y: 0 })));
+
+    // 收到坐标后独立光标显示并定位
+    await waitFor(() => expect(bridge.moveCursor).toBeDefined());
+    bridge.moveCursor?.({ x: 120, y: 80 });
+    const cursor = document.querySelector<HTMLElement>(".fullscreen-control-window__cursor");
+    expect(cursor?.style.transform).toBe("translate(120px, 80px)");
+    expect(cursor?.style.opacity).toBe("1");
   });
 
   it("takes over on click and clears the hit region once inactive", async () => {

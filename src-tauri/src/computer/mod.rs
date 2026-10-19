@@ -7,6 +7,8 @@ mod bmp;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod input;
 #[cfg(windows)]
+mod uia;
+#[cfg(windows)]
 mod win;
 
 use crate::mcp::McpTool;
@@ -68,6 +70,8 @@ pub enum Action {
     Shortcut { label: String, keys: Vec<Key> },
     Screenshot,
     Snapshot,
+    /// 枚举前台窗口的可点击元素及其中心坐标，供模型据此精确点击
+    Inspect,
 }
 
 fn coordinate(args: &serde_json::Value, field: &str) -> Result<Option<i32>, String> {
@@ -134,6 +138,7 @@ pub fn parse_action(tool: &str, args: &serde_json::Value) -> Result<Action, Stri
         }
         "screenshot" => Ok(Action::Screenshot),
         "snapshot" => Ok(Action::Snapshot),
+        "inspect" => Ok(Action::Inspect),
         other => Err(format!("未知的桌面控制工具: {}", other)),
     }
 }
@@ -145,7 +150,7 @@ fn settle_after(action: &Action) -> Duration {
         Action::App { mode: AppMode::Launch, .. } => 1500,
         Action::App { .. } => 400,
         Action::Click { .. } | Action::Type { .. } | Action::Shortcut { .. } => 150,
-        Action::Screenshot | Action::Snapshot => 0,
+        Action::Screenshot | Action::Snapshot | Action::Inspect => 0,
     })
 }
 
@@ -200,8 +205,13 @@ pub fn tools() -> Vec<McpTool> {
             }),
         ),
         tool(
+            "inspect",
+            "分析前台窗口的可点击元素，返回每个元素的类型、名称与中心坐标。点击前先用它拿到准确坐标，不要凭猜测或估算坐标点击",
+            json!({ "type": "object", "properties": {} }),
+        ),
+        tool(
             "click",
-            "在屏幕物理像素坐标处点击鼠标；省略 x/y 时在光标当前位置点击。坐标可参考 snapshot 返回的窗口位置",
+            "在屏幕物理像素坐标处点击鼠标；省略 x/y 时在光标当前位置点击。坐标必须来自 inspect 返回的元素中心，不要自己估算；点击后会回传实际点中的元素名作为反馈",
             json!({
                 "type": "object",
                 "properties": {
@@ -291,6 +301,7 @@ mod tests {
         ));
         assert!(parse_action("shortcut", &json!({})).is_err());
         assert!(parse_action("powershell", &json!({})).is_err());
+        assert_eq!(parse_action("inspect", &json!({})).unwrap(), Action::Inspect);
     }
 
     #[test]

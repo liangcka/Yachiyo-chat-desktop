@@ -1,5 +1,5 @@
 /* ==========================================================================
-   全屏系统级电脑控制覆盖层样式 (Codex 风格系统级置顶全屏覆盖)
+   全屏系统级电脑控制覆盖层：蓝色发光边框 + 单行状态条 + 跟随动作的独立光标
    ========================================================================== */
 
 html.overlay-window,
@@ -27,7 +27,7 @@ body.overlay-window {
   box-sizing: border-box;
 }
 
-/* ── 1. 全屏幕四周激光发光外环 (Codex 视界) ─────────────────────── */
+/* ── 1. 四周蓝色发光边框 ──────────────────────────────────────── */
 
 .fullscreen-control-window__glow-rim {
   position: absolute;
@@ -35,36 +35,36 @@ body.overlay-window {
   box-sizing: border-box;
   pointer-events: none;
   box-shadow:
-    inset 0 0 0 2px rgba(139, 92, 246, 0.85),
-    inset 0 0 24px rgba(139, 92, 246, 0.4),
-    inset 0 0 60px rgba(59, 130, 246, 0.22);
+    inset 0 0 0 2px rgba(59, 130, 246, 0.85),
+    inset 0 0 24px rgba(59, 130, 246, 0.4),
+    inset 0 0 60px rgba(37, 99, 235, 0.22);
   animation: fullscreenControlPulse 2.4s ease-in-out infinite alternate;
 }
 
 @keyframes fullscreenControlPulse {
   0% {
     box-shadow:
-      inset 0 0 0 2px rgba(139, 92, 246, 0.75),
-      inset 0 0 20px rgba(139, 92, 246, 0.3),
-      inset 0 0 45px rgba(59, 130, 246, 0.15);
+      inset 0 0 0 2px rgba(59, 130, 246, 0.7),
+      inset 0 0 20px rgba(59, 130, 246, 0.3),
+      inset 0 0 45px rgba(37, 99, 235, 0.15);
   }
   100% {
     box-shadow:
-      inset 0 0 0 2.5px rgba(168, 85, 247, 0.95),
-      inset 0 0 35px rgba(168, 85, 247, 0.55),
-      inset 0 0 80px rgba(59, 130, 246, 0.32);
+      inset 0 0 0 2.5px rgba(96, 165, 250, 0.95),
+      inset 0 0 35px rgba(96, 165, 250, 0.5),
+      inset 0 0 80px rgba(37, 99, 235, 0.3);
   }
 }
 
-/* 四角 HUD 激光折角 */
+/* 四角折角 */
 .fullscreen-control-window__corner {
   position: absolute;
-  width: 28px;
-  height: 28px;
-  border-color: #c084fc;
+  width: 26px;
+  height: 26px;
+  border-color: #60a5fa;
   border-style: solid;
   pointer-events: none;
-  filter: drop-shadow(0 0 6px #a855f7);
+  filter: drop-shadow(0 0 6px #3b82f6);
 }
 
 .fullscreen-control-window__corner--tl {
@@ -95,38 +95,28 @@ body.overlay-window {
   border-bottom-right-radius: 4px;
 }
 
-/* ── 2. 屏幕顶部居中悬浮控制状态胶囊 ───────────────────────────── */
+/* ── 2. 顶部单行状态条 ───────────────────────────────────────── */
 
 .fullscreen-control-window__banner {
-  margin-top: 24px;
+  margin-top: 22px;
   pointer-events: auto;
   display: inline-flex;
   align-items: center;
-  gap: 16px;
-  max-width: min(780px, calc(100vw - 48px));
-  padding: 10px 18px 10px 14px;
-  background: rgba(15, 17, 26, 0.92);
-  backdrop-filter: blur(28px) saturate(190%);
-  -webkit-backdrop-filter: blur(28px) saturate(190%);
-  border: 1px solid rgba(168, 85, 247, 0.42);
+  gap: 12px;
+  max-width: min(640px, calc(100vw - 48px));
+  padding: 8px 10px 8px 16px;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid rgba(59, 130, 246, 0.45);
   border-radius: 9999px;
   box-shadow:
-    0 16px 40px rgba(0, 0, 0, 0.55),
-    0 0 30px rgba(139, 92, 246, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    0 14px 38px rgba(0, 0, 0, 0.5),
+    0 0 28px rgba(59, 130, 246, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
   color: #f1f5f9;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   animation: bannerSlideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.fullscreen-control-window__banner:hover {
-  transform: translateY(1px);
-  border-color: rgba(168, 85, 247, 0.65);
-  box-shadow:
-    0 20px 48px rgba(0, 0, 0, 0.65),
-    0 0 36px rgba(139, 92, 246, 0.38),
-    inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
 @keyframes bannerSlideDown {
@@ -140,85 +130,42 @@ body.overlay-window {
   }
 }
 
-/* 状态微章与脉冲指示灯 */
-.fullscreen-control-window__badge {
-  position: relative;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(59, 130, 246, 0.2));
-  border: 1px solid rgba(168, 85, 247, 0.45);
-  display: flex;
+/* 单行状态文字：一个脉冲点 + 一行字 */
+.fullscreen-control-window__status {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: #c084fc;
-}
-
-.fullscreen-control-window__pulse-dot {
-  position: absolute;
-  top: 1px;
-  right: 1px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #ec4899;
-  box-shadow: 0 0 8px #ec4899;
-  animation: pulseDot 1.4s ease-in-out infinite;
-}
-
-@keyframes pulseDot {
-  0%, 100% {
-    transform: scale(0.9);
-    opacity: 0.8;
-  }
-  50% {
-    transform: scale(1.3);
-    opacity: 1;
-    box-shadow: 0 0 12px #ec4899;
-  }
-}
-
-/* 文字信息区 */
-.fullscreen-control-window__info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.fullscreen-control-window__title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  gap: 9px;
   font-size: 13.5px;
-  line-height: 1.25;
-}
-
-.fullscreen-control-window__software {
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  background: linear-gradient(135deg, #e9d5ff, #c084fc, #93c5fd);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.fullscreen-control-window__status-text {
   font-weight: 600;
-  color: #f8fafc;
-}
-
-.fullscreen-control-window__desc {
-  font-size: 11.5px;
-  color: #94a3b8;
+  line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 440px;
-  line-height: 1.25;
 }
 
-/* 红色紧急接管按钮 */
+.fullscreen-control-window__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #3b82f6;
+  box-shadow: 0 0 8px #3b82f6;
+  animation: fullscreenControlDot 1.4s ease-in-out infinite;
+}
+
+@keyframes fullscreenControlDot {
+  0%, 100% {
+    transform: scale(0.85);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 1;
+    box-shadow: 0 0 12px #60a5fa;
+  }
+}
+
+/* 紧急接管按钮（红色为停止语义，不随主题改蓝） */
 .fullscreen-control-window__takeover-btn {
   display: inline-flex;
   align-items: center;
@@ -232,7 +179,7 @@ body.overlay-window {
   font-weight: 600;
   cursor: pointer;
   flex-shrink: 0;
-  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.16s ease, background 0.16s ease;
   box-shadow: 0 2px 10px rgba(220, 38, 38, 0.4);
   outline: none;
 }
@@ -245,4 +192,55 @@ body.overlay-window {
 
 .fullscreen-control-window__takeover-btn:active {
   transform: scale(0.98);
+}
+
+/* ── 3. 跟随动作的独立光标（类似 Codex） ──────────────────────── */
+
+.fullscreen-control-window__cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  pointer-events: none;
+  /* 由组件写入 translate(x, y)；轻微过渡让光标平滑跟随 */
+  transition: transform 0.08s linear;
+  will-change: transform;
+}
+
+.fullscreen-control-window__cursor::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(96, 165, 250, 0.95);
+  box-shadow:
+    0 0 10px rgba(59, 130, 246, 0.8),
+    inset 0 0 6px rgba(59, 130, 246, 0.5);
+  animation: fullscreenControlCursor 1.6s ease-in-out infinite;
+}
+
+.fullscreen-control-window__cursor::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: #3b82f6;
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.9);
+}
+
+@keyframes fullscreenControlCursor {
+  0%, 100% {
+    transform: scale(0.82);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
 }
