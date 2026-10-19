@@ -1,3 +1,4 @@
+use crate::computer;
 use crate::mcp::client::{execute_server_tool, fetch_server_tools};
 use crate::mcp::types::{
     ClaudeDesktopConfig, ClaudeDesktopServerEntry, McpServerConfig, McpServerStatus, McpTool,
@@ -50,11 +51,12 @@ impl McpManager {
         }
     }
 
+    /// 内置桌面控制的服务条目：执行由 `computer` 模块在进程内完成，transport 仅为保持配置格式兼容
     pub fn default_windows_mcp_config() -> McpServerConfig {
         McpServerConfig {
-            id: "windows_mcp".to_string(),
+            id: computer::BUILTIN_SERVER_ID.to_string(),
             name: "Windows 桌面控制 (Windows MCP)".to_string(),
-            description: Some("内置 Windows MCP 桌面控制服务，支持模拟鼠标按键、截图与窗口控制".to_string()),
+            description: Some("内置桌面控制：启动与切换应用、模拟鼠标键盘、列出窗口与截图，无需额外安装".to_string()),
             enabled: true,
             transport: McpTransportConfig::Stdio {
                 command: "npx".to_string(),
@@ -173,6 +175,10 @@ impl McpManager {
         &self,
         config: &McpServerConfig,
     ) -> Result<Vec<McpTool>, String> {
+        if config.id == computer::BUILTIN_SERVER_ID {
+            computer::availability()?;
+            return Ok(computer::tools());
+        }
         let tools = fetch_server_tools(config, &self.http_client).await?;
         if let Ok(mut cache) = self.tools_cache.write() {
             cache.insert(config.id.clone(), tools.clone());
@@ -185,6 +191,17 @@ impl McpManager {
         let config = self
             .get_server(id)
             .ok_or_else(|| format!("未找到服务 '{}'", id))?;
+
+        if config.id == computer::BUILTIN_SERVER_ID {
+            let tools = computer::tools();
+            return Ok(McpServerStatus {
+                tool_count: tools.len(),
+                tools,
+                is_online: computer::is_supported(),
+                last_error: computer::availability().err(),
+                config,
+            });
+        }
 
         // 尝试测试连接
         match fetch_server_tools(&config, &self.http_client).await {
@@ -270,75 +287,6 @@ impl McpManager {
         Ok(count)
     }
 
-    /// 内置 Windows MCP 桌面控制工具列表声明（用于离线/连接前提供完备 Schema）
-    pub fn default_windows_mcp_tools() -> Vec<McpTool> {
-        vec![
-            McpTool {
-                name: "app".to_string(),
-                description: Some("启动或激活指定的 Windows 应用程序窗口（如 QQ, 微信, Notepad, Chrome 等）".to_string()),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "name": { "type": "string", "description": "应用程序名称或可执行文件名，如 QQ, wechat, notepad, msedge" },
-                        "action": { "type": "string", "enum": ["launch", "focus", "close"], "description": "操作类型，默认为 launch" }
-                    },
-                    "required": ["name"]
-                }),
-            },
-            McpTool {
-                name: "click".to_string(),
-                description: Some("在屏幕指定坐标模拟鼠标单击、双击或右键点击".to_string()),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "x": { "type": "number", "description": "屏幕绝对坐标 X" },
-                        "y": { "type": "number", "description": "屏幕绝对坐标 Y" },
-                        "button": { "type": "string", "enum": ["left", "right", "middle"], "description": "鼠标按键，默认 left" },
-                        "clicks": { "type": "number", "description": "点击次数，1 为单击，2 为双击" }
-                    }
-                }),
-            },
-            McpTool {
-                name: "type".to_string(),
-                description: Some("向当前焦点窗口模拟键盘键入文本字符串".to_string()),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "text": { "type": "string", "description": "要输入的文本内容" }
-                    },
-                    "required": ["text"]
-                }),
-            },
-            McpTool {
-                name: "shortcut".to_string(),
-                description: Some("模拟触发 Windows 系统快捷键（如 enter, ctrl+v, alt+f4, win+d）".to_string()),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "shortcut": { "type": "string", "description": "快捷键组合，如 enter, ctrl+v, ctrl+a" }
-                    },
-                    "required": ["shortcut"]
-                }),
-            },
-            McpTool {
-                name: "screenshot".to_string(),
-                description: Some("截取当前 Windows 桌面屏幕画面".to_string()),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {}
-                }),
-            },
-            McpTool {
-                name: "snapshot".to_string(),
-                description: Some("获取当前桌面运行中的窗口列表与标题".to_string()),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {}
-                }),
-            },
-        ]
-    }
-
     /// 获取所有启用服务的工具 Schema，用于 Agent 循环
     pub async fn get_agent_tools_schema(&self) -> Vec<serde_json::Value> {
         let active_servers: Vec<McpServerConfig> = self
@@ -350,8 +298,10 @@ impl McpManager {
         let mut all_schemas = Vec::new();
 
         for server in active_servers {
-            // 优先查缓存，若无缓存则异步拉取；对于内置 windows_mcp 提供可靠兜底
-            let tools = {
+            // 内置桌面控制不经外部进程；其余服务优先查缓存，无缓存再拉取
+            let tools = if server.id == computer::BUILTIN_SERVER_ID {
+                computer::tools()
+            } else {
                 let cache_opt = self
                     .tools_cache
                     .read()
@@ -366,13 +316,7 @@ impl McpManager {
                             }
                             t
                         }
-                        _ => {
-                            if server.id == "windows_mcp" {
-                                Self::default_windows_mcp_tools()
-                            } else {
-                                Vec::new()
-                            }
-                        }
+                        _ => Vec::new(),
                     },
                 }
             };
@@ -404,67 +348,6 @@ impl McpManager {
         name.starts_with("mcp__")
     }
 
-    /// Windows 本地原生控制兜底执行（通过 PowerShell / Win32 API 执行窗口与输入模拟）
-    pub async fn execute_fallback_windows_tool(
-        tool_name: &str,
-        args: &serde_json::Value,
-    ) -> Result<String, String> {
-        let fallback_cwd = crate::tools::get_fallback_cwd();
-        match tool_name {
-            "app" => {
-                let name = args.get("name").and_then(|v| v.as_str()).ok_or("缺少应用名称 'name'")?;
-                let script = format!(
-                    "try {{ Start-Process '{name}' -ErrorAction Stop; '已成功启动应用程序: {name}' }} catch {{ cmd.exe /c start '' '{name}'; '已通过系统 Shell 启动应用程序: {name}' }}"
-                );
-                crate::tools::shell::run_command(&script, &fallback_cwd, Some(15)).await
-            }
-            "type" => {
-                let text = args.get("text").and_then(|v| v.as_str()).ok_or("缺少文本内容 'text'")?;
-                let escaped = text.replace('\'', "''");
-                let script = format!(
-                    "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{escaped}'); '已成功模拟键盘键入文本'"
-                );
-                crate::tools::shell::run_command(&script, &fallback_cwd, Some(10)).await
-            }
-            "shortcut" => {
-                let shortcut = args.get("shortcut").and_then(|v| v.as_str()).ok_or("缺少快捷键 'shortcut'")?;
-                let lower = shortcut.to_lowercase();
-                let sendkeys_str: &str = match lower.as_str() {
-                    "enter" => "{ENTER}",
-                    "esc" | "escape" => "{ESC}",
-                    "tab" => "{TAB}",
-                    "backspace" => "{BACKSPACE}",
-                    "ctrl+v" => "^v",
-                    "ctrl+c" => "^c",
-                    "ctrl+a" => "^a",
-                    "ctrl+s" => "^s",
-                    _ => shortcut,
-                };
-                let script = format!(
-                    "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{sendkeys_str}'); '已触发快捷键 [{shortcut}]'"
-                );
-                crate::tools::shell::run_command(&script, &fallback_cwd, Some(10)).await
-            }
-            "snapshot" => {
-                let script = "Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object -Property Id, ProcessName, MainWindowTitle | Format-Table -AutoSize | Out-String";
-                crate::tools::shell::run_command(script, &fallback_cwd, Some(10)).await
-            }
-            "screenshot" => {
-                let script = "Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height; $gfx = [System.Drawing.Graphics]::FromImage($bmp); $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size); $temp = [System.IO.Path]::GetTempFileName() + '.png'; $bmp.Save($temp, [System.Drawing.Imaging.ImageFormat]::Png); $gfx.Dispose(); $bmp.Dispose(); '屏幕截图已保存至临时文件: ' + $temp";
-                crate::tools::shell::run_command(script, &fallback_cwd, Some(15)).await
-            }
-            "click" => {
-                let x = args.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as i32;
-                let y = args.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as i32;
-                let script = format!(
-                    "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point({x}, {y}); '已定位光标并模拟鼠标点击 ({x}, {y})'"
-                );
-                crate::tools::shell::run_command(&script, &fallback_cwd, Some(10)).await
-            }
-            other => Err(format!("未实现的 Windows 本地兜底工具: {}", other)),
-        }
-    }
-
     /// 执行 MCP 工具调用并返回纯文本结果
     pub async fn execute_tool(
         &self,
@@ -487,15 +370,11 @@ impl McpManager {
             return Err(format!("MCP 服务 '{}' 当前已被禁用", server.name));
         }
 
-        let result = match execute_server_tool(&server, tool_name, args, &self.http_client).await {
-            Ok(res) => res,
-            Err(e) => {
-                if server_id == "windows_mcp" {
-                    return Self::execute_fallback_windows_tool(tool_name, args).await;
-                }
-                return Err(e);
-            }
-        };
+        if server_id == computer::BUILTIN_SERVER_ID {
+            return computer::execute(tool_name, args).await;
+        }
+
+        let result = execute_server_tool(&server, tool_name, args, &self.http_client).await?;
 
         if result.is_error {
             Err(result.to_plain_text())

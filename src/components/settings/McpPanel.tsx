@@ -20,6 +20,7 @@ import React, { useEffect, useState } from "react";
 import type { Locale } from "../../domain/chat";
 import { useLocale } from "../../i18n/locale-context";
 import {
+  BUILTIN_DESKTOP_CONTROL_ID,
   deleteMcpServer,
   exportClaudeMcpConfig,
   importClaudeMcpConfig,
@@ -866,9 +867,13 @@ export const McpPanel: React.FC<McpPanelProps> = ({ showToast }) => {
                             marginTop: "2px",
                           }}
                         >
-                          {s.transport.type === "stdio"
-                            ? `${s.transport.command} ${s.transport.args.join(" ")}`
-                            : s.transport.url}
+                          {s.id === BUILTIN_DESKTOP_CONTROL_ID
+                            ? locale === "ja-JP"
+                              ? "内蔵（アプリ内でネイティブ実行、追加インストール不要）"
+                              : "内置（应用内原生执行，无需额外安装）"
+                            : s.transport.type === "stdio"
+                              ? `${s.transport.command} ${s.transport.args.join(" ")}`
+                              : s.transport.url}
                         </div>
 
                         {testErr && (

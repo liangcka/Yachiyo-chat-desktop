@@ -9,6 +9,15 @@ import { projectManager } from "../../services/project-manager";
 import type { SharedViewProps } from "../layout-types";
 import { DesktopLayout } from "./DesktopLayout";
 
+const overlayBridge = vi.hoisted(() => ({
+  show: vi.fn<(toolName: string, detail: string) => Promise<boolean>>(async () => true),
+  hide: vi.fn(async () => true),
+}));
+
+vi.mock("../../services/desktop-bridge", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../services/desktop-bridge")>();
+  return { ...actual, showControlOverlay: overlayBridge.show, hideControlOverlay: overlayBridge.hide };
+});
 
 describe("DesktopLayout", () => {
   const copy = copyFor("zh-CN");
@@ -434,7 +443,8 @@ describe("DesktopLayout", () => {
     expect(screen.queryByRole("complementary", { name: "成果与多功能审阅面板" })).not.toBeInTheDocument();
   });
 
-  it("does not render ComputerControlOverlay when pendingPermission exists", () => {
+  it("yields the screen to the permission card instead of showing the control overlay", () => {
+    overlayBridge.show.mockClear();
     const props = createMockProps();
     props.controller.phase = "streaming";
     props.controller.pendingPermission = {
@@ -461,10 +471,11 @@ describe("DesktopLayout", () => {
     ];
 
     render(<DesktopLayout {...props} />);
-    expect(screen.queryByRole("alert", { name: /正在控制你的电脑/i })).not.toBeInTheDocument();
+    expect(overlayBridge.show).not.toHaveBeenCalled();
   });
 
-  it("renders ComputerControlOverlay when control tool is streaming without pendingPermission", () => {
+  it("shows the system control overlay and lets Esc take over while a control tool runs", () => {
+    overlayBridge.show.mockClear();
     const props = createMockProps();
     props.controller.phase = "streaming";
     props.controller.pendingPermission = undefined;
@@ -487,10 +498,13 @@ describe("DesktopLayout", () => {
     ];
 
     render(<DesktopLayout {...props} />);
-    expect(screen.getByRole("alert", { name: /正在控制你的电脑/i })).toBeInTheDocument();
+    expect(overlayBridge.show).toHaveBeenCalledWith("mcp__windows_mcp__click", "正在模拟鼠标点击 (100, 100)");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(props.controller.stop).toHaveBeenCalled();
   });
 
-  it("does not render ComputerControlOverlay for run_command during streaming", () => {
+  it("does not show the control overlay for run_command during streaming", () => {
+    overlayBridge.show.mockClear();
     const props = createMockProps();
     props.controller.phase = "streaming";
     props.controller.pendingPermission = undefined;
@@ -513,6 +527,6 @@ describe("DesktopLayout", () => {
     ];
 
     render(<DesktopLayout {...props} />);
-    expect(screen.queryByRole("alert", { name: /正在控制你的电脑/i })).not.toBeInTheDocument();
+    expect(overlayBridge.show).not.toHaveBeenCalled();
   });
 });

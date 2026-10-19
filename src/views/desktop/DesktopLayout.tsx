@@ -1,12 +1,6 @@
 import { CommandPalette, type PaletteCommand } from "../../components/desktop/CommandPalette";
-import { ComputerControlOverlay } from "../../components/desktop/ComputerControlOverlay";
-import { formatComputerControlAction, isComputerControlTool } from "../../services/mcp-manager";
-import {
-  showControlOverlay,
-  hideControlOverlay,
-  onEmergencyStopControl,
-} from "../../services/desktop-bridge";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useComputerControlSession } from "../../features/computer-control/use-computer-control-session";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import DragHandle from "../../components/DragHandle";
 import { useTheme } from "../../app/use-theme";
 import { useEditorWorkspace } from "../../app/use-editor-workspace";
@@ -322,62 +316,8 @@ export function DesktopLayout(props: SharedViewProps) {
     ).map(([tab, label]) => ({ id: `settings-${tab}`, label, group: paletteJa ? "設定" : "设置", run: () => handleOpenSettings(tab) })),
   ];
 
-  // 监测 AI 是否正在控制电脑（执行 Windows MCP / 系统控制工具）
-  const activeControlStep = useMemo(() => {
-    if (props.controller.pendingPermission) return null;
-    const isStreaming = props.controller.streaming !== undefined || props.controller.phase === "streaming";
-    if (!isStreaming) return null;
-    const msgs = props.controller.messages;
-    const lastMsg = msgs[msgs.length - 1];
-    if (!lastMsg || lastMsg.role !== "assistant" || !lastMsg.toolSteps || lastMsg.toolSteps.length === 0) {
-      return null;
-    }
-    const currentStep = lastMsg.toolSteps.find((s) => s.result === undefined);
-    if (!currentStep) return null;
-    if (isComputerControlTool(currentStep.name)) {
-      let argsObj: Record<string, unknown> | undefined;
-      try {
-        argsObj = JSON.parse(currentStep.argumentsJson);
-      } catch {
-        /* ignore parse error */
-      }
-      return {
-        name: currentStep.name,
-        args: argsObj,
-      };
-    }
-    return null;
-  }, [props.controller.streaming, props.controller.phase, props.controller.messages, props.controller.pendingPermission]);
-
-  // 监听来自系统级全屏 Overlay 或全局广播的紧急接管停止事件
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    void onEmergencyStopControl(() => {
-      void props.controller.stop();
-    }).then((fn) => {
-      unlisten = fn;
-    });
-    return () => {
-      if (unlisten) unlisten();
-    };
-  }, [props.controller]);
-
-  // 当检测到当前步骤正在控制电脑时，触发系统级全屏置顶发光覆盖窗口 (类似 Codex 全屏接管)
-  useEffect(() => {
-    if (activeControlStep) {
-      const detail = formatComputerControlAction(
-        activeControlStep.name,
-        activeControlStep.args,
-        props.controller.locale,
-      );
-      void showControlOverlay(activeControlStep.name, detail);
-    } else {
-      void hideControlOverlay();
-    }
-    return () => {
-      void hideControlOverlay();
-    };
-  }, [activeControlStep, props.controller.locale]);
+  // AI 控制电脑期间由系统级全屏遮罩提示并提供紧急接管
+  useComputerControlSession(props.controller);
 
   /* ── 渲染 ─────────────────────────────────────────── */
 
@@ -523,15 +463,6 @@ export function DesktopLayout(props: SharedViewProps) {
           />
         </Suspense>
       ) : null}
-
-      {/* AI 控制电脑时的全局发光边框与控制状态悬浮弹窗 (类似 Codex) */}
-      <ComputerControlOverlay
-        active={activeControlStep !== null}
-        toolName={activeControlStep?.name}
-        toolArgs={activeControlStep?.args}
-        softwareName={paletteJa ? "月見八千代" : "月见八千代"}
-        onStop={() => void props.controller.stop()}
-      />
 
       {/* shell 级浮层层：全局弹层 / toast 的挂载槽位，默认不拦截交互 */}
       <div className="desktop-shell__overlay" />
