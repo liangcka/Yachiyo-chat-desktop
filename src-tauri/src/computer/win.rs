@@ -40,7 +40,20 @@ pub fn perform(action: Action) -> Result<String, String> {
         Action::Shortcut { label, keys } => shortcut(&label, &keys),
         Action::Screenshot => screenshot(),
         Action::Snapshot => Ok(snapshot()),
+        Action::Inspect => inspect(),
     }
+}
+
+/// 枚举前台窗口的可点击元素；前台是八千代自身时拒绝
+fn inspect() -> Result<String, String> {
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.is_null() {
+        return Err("当前没有前台窗口，请先用 app 启动或切换到目标应用".to_string());
+    }
+    if is_own_window(hwnd) {
+        return Err("当前前台窗口是月见八千代自身，请先用 app（launch 或 focus）切换到目标应用再 inspect".to_string());
+    }
+    super::uia::inspect(hwnd as isize, &window_title(hwnd))
 }
 
 fn wide(s: &str) -> Vec<u16> {
@@ -231,6 +244,8 @@ fn click(point: Option<(i32, i32)>, button: MouseButton, clicks: u32) -> Result<
         None => cursor_position(),
     };
     ensure_point_not_self(x, y)?;
+    // 点击前先识别目标元素，作为"点中了什么"的实时反馈
+    let target = super::uia::describe_point(x, y);
     let (down, up, label) = match button {
         MouseButton::Left => (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, "左键"),
         MouseButton::Right => (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, "右键"),
@@ -249,7 +264,10 @@ fn click(point: Option<(i32, i32)>, button: MouseButton, clicks: u32) -> Result<
         2 => "双击",
         _ => "三击",
     };
-    Ok(format!("已在 ({}, {}) {}{}", x, y, label, times))
+    match target {
+        Some(target) => Ok(format!("已在 ({}, {}) {}{} → {}", x, y, label, times, target)),
+        None => Ok(format!("已在 ({}, {}) {}{}", x, y, label, times)),
+    }
 }
 
 fn type_text(text: &str) -> Result<String, String> {
@@ -379,6 +397,7 @@ fn snapshot() -> String {
     if windows.len() > MAX_LISTED_WINDOWS {
         out.push_str(&format!("（另有 {} 个窗口未列出）\n", windows.len() - MAX_LISTED_WINDOWS));
     }
+    out.push_str("要点击窗口内的按钮或输入框，请用 inspect 获取元素的准确坐标，不要凭窗口位置估算。\n");
     out
 }
 

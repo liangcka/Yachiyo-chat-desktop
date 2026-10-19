@@ -301,6 +301,25 @@ export async function onControlOverlayStateChange(
   }
 }
 
+/** 遮罩客户区内的光标位置，物理像素 */
+export interface OverlayCursorPosition {
+  x: number;
+  y: number;
+}
+
+/** 订阅后端推送的光标位置，用于渲染跟随动作的独立光标 */
+export async function onOverlayCursorMove(
+  callback: (position: OverlayCursorPosition) => void,
+): Promise<() => void> {
+  if (!isDesktopApp()) return () => {};
+  try {
+    const { listen } = await import("@tauri-apps/api/event");
+    return await listen<OverlayCursorPosition>("control_cursor_move", (event) => callback(event.payload));
+  } catch {
+    return () => {};
+  }
+}
+
 /**
  * 上报接管横幅区域：遮罩默认鼠标穿透、收不到悬停事件，
  * 由后端轮询光标进入该区域时临时关闭穿透；传 null 表示没有可点击区域

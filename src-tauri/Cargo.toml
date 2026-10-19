@@ -49,6 +49,8 @@ windows-sys = { version = "0.60", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+# UI Automation：枚举前台窗口的可点击元素，避免模型靠猜坐标点击
+uiautomation = "0.25"
 
 [dev-dependencies]
 tempfile = "3"

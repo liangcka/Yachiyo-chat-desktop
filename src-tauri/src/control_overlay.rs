@@ -12,6 +12,8 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 const OVERLAY_LABEL: &str = "control_overlay";
 const STATE_EVENT: &str = "control_state_change";
 const EMERGENCY_STOP_EVENT: &str = "emergency_stop_control";
+/// 遮罩显示期间，后端把全局光标位置推给遮罩，驱动一个跟随动作的独立光标
+const CURSOR_EVENT: &str = "control_cursor_move";
 const HIT_TEST_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
@@ -20,6 +22,14 @@ pub struct ControlOverlayPayload {
     pub active: bool,
     pub tool_name: String,
     pub detail: String,
+}
+
+/// 遮罩客户区内的光标位置（物理像素），遮罩据此渲染跟随动作的发光光标
+#[derive(Serialize, Clone, Copy, Debug)]
+#[serde(rename_all = "camelCase")]
+struct CursorPosition {
+    x: f64,
+    y: f64,
 }
 
 /// 接管横幅在遮罩窗口客户区内的矩形（物理像素），由遮罩页面按自身布局上报
@@ -93,6 +103,12 @@ fn start_hit_testing(app: AppHandle) {
             let Some(overlay) = app.get_webview_window(OVERLAY_LABEL) else { break };
             if !state.is_active() {
                 break;
+            }
+            if let (Ok(cursor), Ok(origin)) = (overlay.cursor_position(), overlay.inner_position()) {
+                let _ = overlay.emit(
+                    CURSOR_EVENT,
+                    CursorPosition { x: cursor.x - origin.x as f64, y: cursor.y - origin.y as f64 },
+                );
             }
             let want = !computer::synthetic_input_active() && cursor_over_banner(&overlay, &state);
             if want != interactive {
