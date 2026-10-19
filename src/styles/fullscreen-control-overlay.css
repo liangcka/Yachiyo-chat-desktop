@@ -1,5 +1,6 @@
 /* ==========================================================================
-   全屏系统级电脑控制覆盖层：蓝色发光边框 + 单行状态条 + 跟随动作的独立光标
+   全屏系统级电脑控制覆盖层：细边框 + 浅蓝单行状态条 + 八千代光标
+   遮罩全程鼠标穿透，所有元素都不接收指针事件
    ========================================================================== */
 
 html.overlay-window,
@@ -27,102 +28,47 @@ body.overlay-window {
   box-sizing: border-box;
 }
 
-/* ── 1. 四周蓝色发光边框 ──────────────────────────────────────── */
+/* ── 1. 屏幕四周细边框 ───────────────────────────────────────── */
 
-.fullscreen-control-window__glow-rim {
+.fullscreen-control-window__frame {
   position: absolute;
   inset: 0;
   box-sizing: border-box;
+  border: 2px solid #60a5fa;
   pointer-events: none;
-  box-shadow:
-    inset 0 0 0 2px rgba(59, 130, 246, 0.85),
-    inset 0 0 24px rgba(59, 130, 246, 0.4),
-    inset 0 0 60px rgba(37, 99, 235, 0.22);
-  animation: fullscreenControlPulse 2.4s ease-in-out infinite alternate;
 }
 
-@keyframes fullscreenControlPulse {
-  0% {
-    box-shadow:
-      inset 0 0 0 2px rgba(59, 130, 246, 0.7),
-      inset 0 0 20px rgba(59, 130, 246, 0.3),
-      inset 0 0 45px rgba(37, 99, 235, 0.15);
-  }
-  100% {
-    box-shadow:
-      inset 0 0 0 2.5px rgba(96, 165, 250, 0.95),
-      inset 0 0 35px rgba(96, 165, 250, 0.5),
-      inset 0 0 80px rgba(37, 99, 235, 0.3);
-  }
-}
-
-/* 四角折角 */
-.fullscreen-control-window__corner {
-  position: absolute;
-  width: 26px;
-  height: 26px;
-  border-color: #60a5fa;
-  border-style: solid;
-  pointer-events: none;
-  filter: drop-shadow(0 0 6px #3b82f6);
-}
-
-.fullscreen-control-window__corner--tl {
-  top: 0;
-  left: 0;
-  border-width: 4px 0 0 4px;
-  border-top-left-radius: 4px;
-}
-
-.fullscreen-control-window__corner--tr {
-  top: 0;
-  right: 0;
-  border-width: 4px 4px 0 0;
-  border-top-right-radius: 4px;
-}
-
-.fullscreen-control-window__corner--bl {
-  bottom: 0;
-  left: 0;
-  border-width: 0 0 4px 4px;
-  border-bottom-left-radius: 4px;
-}
-
-.fullscreen-control-window__corner--br {
-  bottom: 0;
-  right: 0;
-  border-width: 0 4px 4px 0;
-  border-bottom-right-radius: 4px;
-}
-
-/* ── 2. 顶部单行状态条 ───────────────────────────────────────── */
+/* ── 2. 顶部单行状态条：纯浅蓝底 + 白字 ─────────────────────── */
 
 .fullscreen-control-window__banner {
-  margin-top: 22px;
-  pointer-events: auto;
+  margin-top: 20px;
   display: inline-flex;
   align-items: center;
-  gap: 12px;
-  max-width: min(640px, calc(100vw - 48px));
-  padding: 8px 10px 8px 16px;
-  background: rgba(15, 23, 42, 0.92);
-  backdrop-filter: blur(28px) saturate(180%);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
-  border: 1px solid rgba(59, 130, 246, 0.45);
+  gap: 10px;
+  max-width: calc(100vw - 48px);
+  padding: 7px 18px;
+  background: #60a5fa;
   border-radius: 9999px;
-  box-shadow:
-    0 14px 38px rgba(0, 0, 0, 0.5),
-    0 0 28px rgba(59, 130, 246, 0.26),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  color: #f1f5f9;
+  color: #ffffff;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
   animation: bannerSlideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.fullscreen-control-window__hint {
+  padding-left: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.6);
+  font-weight: 500;
 }
 
 @keyframes bannerSlideDown {
   from {
     opacity: 0;
-    transform: translateY(-20px);
+    transform: translateY(-16px);
   }
   to {
     opacity: 1;
@@ -130,117 +76,27 @@ body.overlay-window {
   }
 }
 
-/* 单行状态文字：一个脉冲点 + 一行字 */
-.fullscreen-control-window__status {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  font-size: 13.5px;
-  font-weight: 600;
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.fullscreen-control-window__dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: #3b82f6;
-  box-shadow: 0 0 8px #3b82f6;
-  animation: fullscreenControlDot 1.4s ease-in-out infinite;
-}
-
-@keyframes fullscreenControlDot {
-  0%, 100% {
-    transform: scale(0.85);
-    opacity: 0.8;
-  }
-  50% {
-    transform: scale(1.25);
-    opacity: 1;
-    box-shadow: 0 0 12px #60a5fa;
-  }
-}
-
-/* 紧急接管按钮（红色为停止语义，不随主题改蓝） */
-.fullscreen-control-window__takeover-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border-radius: 9999px;
-  background: linear-gradient(135deg, #ef4444, #dc2626);
-  color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.16s ease, background 0.16s ease;
-  box-shadow: 0 2px 10px rgba(220, 38, 38, 0.4);
-  outline: none;
-}
-
-.fullscreen-control-window__takeover-btn:hover {
-  background: linear-gradient(135deg, #f87171, #ef4444);
-  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.6);
-  transform: scale(1.02);
-}
-
-.fullscreen-control-window__takeover-btn:active {
-  transform: scale(0.98);
-}
-
-/* ── 3. 跟随动作的独立光标（类似 Codex） ──────────────────────── */
+/* ── 3. 八千代光标：箭头尖端对准真实光标位置 ─────────────────── */
 
 .fullscreen-control-window__cursor {
   position: absolute;
   top: 0;
   left: 0;
-  width: 26px;
-  height: 26px;
-  margin: -13px 0 0 -13px;
+  width: 18px;
+  height: 24px;
+  /* 箭头尖端在 SVG 的 (1, 1) */
+  margin: -1px 0 0 -1px;
   pointer-events: none;
-  /* 由组件写入 translate(x, y)；轻微过渡让光标平滑跟随 */
+  /* 由组件写入 translate(x, y)；轻微过渡让跳转的点击位置也能看出移动轨迹 */
   transition: transform 0.08s linear;
   will-change: transform;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
 }
 
-.fullscreen-control-window__cursor::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 2px solid rgba(96, 165, 250, 0.95);
-  box-shadow:
-    0 0 10px rgba(59, 130, 246, 0.8),
-    inset 0 0 6px rgba(59, 130, 246, 0.5);
-  animation: fullscreenControlCursor 1.6s ease-in-out infinite;
-}
-
-.fullscreen-control-window__cursor::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 6px;
-  height: 6px;
-  margin: -3px 0 0 -3px;
-  border-radius: 50%;
-  background: #3b82f6;
-  box-shadow: 0 0 8px rgba(59, 130, 246, 0.9);
-}
-
-@keyframes fullscreenControlCursor {
-  0%, 100% {
-    transform: scale(0.82);
-    opacity: 0.85;
-  }
-  50% {
-    transform: scale(1.08);
-    opacity: 1;
-  }
+.fullscreen-control-window__cursor svg {
+  display: block;
+  fill: #60a5fa;
+  stroke: #ffffff;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
 }

@@ -1,17 +1,14 @@
-import { Square } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LOCALE_MIRROR_KEY } from "../../i18n/locale-context";
 import {
   getControlOverlayState,
   onControlOverlayStateChange,
   onOverlayCursorMove,
-  setOverlayHitRegion,
-  stopActiveControl,
   type ControlOverlayState,
 } from "../../services/desktop-bridge";
 import "../../styles/fullscreen-control-overlay.css";
 
-const INACTIVE: ControlOverlayState = { active: false, toolName: "", detail: "" };
+const INACTIVE: ControlOverlayState = { active: false, paused: false };
 
 /** 遮罩是独立 webview，拿不到主窗口的 React 状态；主窗口把界面语言镜像到同源 localStorage */
 function readMirroredLocale(): string | null {
@@ -22,10 +19,12 @@ function readMirroredLocale(): string | null {
   }
 }
 
-/** 系统级全屏电脑控制遮罩：蓝色发光边框 + 顶部单行状态条 + 跟随动作的独立光标 */
+/**
+ * 系统级全屏电脑控制遮罩：细边框 + 顶部单行状态条 + 八千代光标。
+ * 遮罩全程鼠标穿透、拿不到焦点，Esc 取消由后端轮询物理按键完成
+ */
 export function ControlOverlayWindow() {
   const [state, setState] = useState<ControlOverlayState>(INACTIVE);
-  const bannerRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -58,7 +57,7 @@ export function ControlOverlayWindow() {
     };
   }, []);
 
-  // 独立光标跟随后端推送的全局光标位置（物理像素→CSS 像素），直接改样式不触发 React 重渲染
+  // 系统光标被隐藏期间，八千代光标跟随后端推送的真实位置（物理像素→CSS 像素），直接改样式不触发重渲染
   useEffect(() => {
     if (!state.active) return;
     let disposed = false;
@@ -79,84 +78,28 @@ export function ControlOverlayWindow() {
     };
   }, [state.active]);
 
-  // 遮罩处于鼠标穿透时收不到悬停事件，把状态条区域交给后端按全局光标位置切换穿透
-  useEffect(() => {
-    const banner = bannerRef.current;
-    if (!state.active || banner === null) return;
-    const report = () => {
-      const rect = banner.getBoundingClientRect();
-      const scale = window.devicePixelRatio || 1;
-      void setOverlayHitRegion({
-        x: rect.left * scale,
-        y: rect.top * scale,
-        width: rect.width * scale,
-        height: rect.height * scale,
-      });
-    };
-    report();
-    // 入场动画带位移，ResizeObserver 感知不到 transform，动画结束后按最终位置再报一次
-    const observer = new ResizeObserver(report);
-    observer.observe(banner);
-    banner.addEventListener("animationend", report);
-    window.addEventListener("resize", report);
-    return () => {
-      observer.disconnect();
-      banner.removeEventListener("animationend", report);
-      window.removeEventListener("resize", report);
-      void setOverlayHitRegion(null);
-    };
-  }, [state.active]);
-
-  const takeOver = useCallback(() => {
-    setState(INACTIVE);
-    void stopActiveControl();
-  }, []);
-
-  // 点击状态条后遮罩获得焦点，此时 Esc 同样可以接管
-  useEffect(() => {
-    if (!state.active) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      takeOver();
-    };
-    window.addEventListener("keydown", handleKeyDown, { capture: true });
-    return () => window.removeEventListener("keydown", handleKeyDown, { capture: true });
-  }, [state.active, takeOver]);
-
   if (!state.active) return null;
 
   const ja = readMirroredLocale() === "ja-JP";
   const statusText = ja ? "月見八千代が PC を操作しています" : "八千代正在控制你的电脑";
-  const takeoverText = ja ? "操作を取り戻す (Esc)" : "立即接管 (Esc)";
+  const hintText = ja ? "Esc で操作をキャンセル" : "按 Esc 取消控制";
 
   return (
-    <div className="fullscreen-control-window" role="alert" aria-live="assertive" aria-label={statusText}>
-      <div className="fullscreen-control-window__glow-rim" aria-hidden="true">
-        <div className="fullscreen-control-window__corner fullscreen-control-window__corner--tl" />
-        <div className="fullscreen-control-window__corner fullscreen-control-window__corner--tr" />
-        <div className="fullscreen-control-window__corner fullscreen-control-window__corner--bl" />
-        <div className="fullscreen-control-window__corner fullscreen-control-window__corner--br" />
-      </div>
+    <div className="fullscreen-control-window" role="alert" aria-live="assertive">
+      <div className="fullscreen-control-window__frame" aria-hidden="true" />
 
-      {/* 跟随动作的独立光标：初始透明，收到首个坐标后显示 */}
-      <div ref={cursorRef} className="fullscreen-control-window__cursor" style={{ opacity: 0 }} aria-hidden="true" />
+      {/* 等待审批时系统光标已交还彩叶，不再绘制八千代光标；初始透明，收到首个坐标后显示 */}
+      {!state.paused && (
+        <div ref={cursorRef} className="fullscreen-control-window__cursor" style={{ opacity: 0 }} aria-hidden="true">
+          <svg width="18" height="24" viewBox="0 0 18 24">
+            <path d="M1 1 L1 19 L6 14.5 L9.5 22 L12.5 20.7 L9 13.3 L15.5 13.3 Z" />
+          </svg>
+        </div>
+      )}
 
-      <div ref={bannerRef} className="fullscreen-control-window__banner">
-        <span className="fullscreen-control-window__status">
-          <span className="fullscreen-control-window__dot" aria-hidden="true" />
-          {statusText}
-        </span>
-        <button
-          type="button"
-          className="fullscreen-control-window__takeover-btn"
-          onClick={takeOver}
-          title={ja ? "クリックまたは Esc キーで PC の操作を取り戻す" : "点击或按 Esc 键立即接管电脑控制"}
-          aria-label={ja ? "PC の操作をすぐに取り戻す" : "立即接管电脑控制"}
-        >
-          <Square size={13} fill="currentColor" />
-          <span>{takeoverText}</span>
-        </button>
+      <div className="fullscreen-control-window__banner">
+        <span>{statusText}</span>
+        <span className="fullscreen-control-window__hint">{hintText}</span>
       </div>
     </div>
   );

@@ -94,3 +94,40 @@ Status: implemented
 - `cargo check --target x86_64-pc-windows-gnu --lib`：通过（含 `uiautomation`）。
 - `cargo test`、`npm run test:unit`（含更新后的 `ControlOverlayWindow` 单行+光标用例）、`npm run test:functions`、`typecheck`、`lint`：全部通过。
 - UI Automation 的运行时行为（各类应用能否枚举到元素、坐标准确度）仍只在 Windows 实测验证，未在本环境运行。
+
+## 第三轮迭代（隐藏系统鼠标、状态条贯穿整个运行、Esc 取消、agent 中途停止）
+
+实测反馈：agent 做到一半停止；遮罩在两步之间闪断；控制时屏幕上同时有系统鼠标和八千代光标；状态条仍不美观，接管按钮多余。
+
+### agent 中途停止
+
+根因是 `AgentLoopConfig` 默认 `max_turns` 为 12：一次"打开应用 → inspect → 点击 → 核对 → 输入 → 发送"的桌面任务每步一轮，12 轮不够，循环以 `MaxTurnsReached` 结束，表现为最后一轮工具已执行但 agent 不再继续。默认值改为 `DEFAULT_MAX_TURNS = 50`。
+
+### 状态条贯穿整个运行
+
+- `deriveControlSession` 由"最近一次工具调用是控制动作"改为"本次运行的助手消息里执行过控制动作"，运行结束才收起。中途的 inspect、snapshot、读文件与模型思考不再让遮罩闪断。
+- 等待审批时不再收起遮罩，而是进入 `paused`：状态条保留，系统光标恢复，彩叶可以正常点击审批卡片。
+- 遮罩状态收敛为 `{ active, paused }`，去掉不再展示的动作详情 `toolName`/`detail`。
+
+### 隐藏系统鼠标
+
+- `active && !paused` 时用 `SetSystemCursor` 把 13 种系统光标逐个替换为 32x32 空白光标（`SetSystemCursor` 会接管并销毁句柄，每个 ID 单独创建）；其余状态用 `SystemParametersInfoW(SPI_SETCURSORS)` 重载用户的光标方案。`CURSOR_HIDDEN` 原子标志保证重复调用无副作用。
+- 兜底：应用 `RunEvent::Exit` 时恢复；启动时无条件重载一次，覆盖上次在控制中途被强制结束、系统光标停留在空白的情况。
+- 遮罩绘制箭头形状的八千代光标，尖端对准后端推送的真实光标位置；`paused` 时不绘制。
+
+### Esc 取消与状态条样式
+
+- 遮罩全程鼠标穿透、拿不到焦点，删除横幅命中区域与穿透切换（`set_overlay_hit_region`）以及接管按钮（`stop_active_control`）。
+- 后端在遮罩轮询循环（30ms）里用 `GetAsyncKeyState(VK_ESCAPE)` 检测物理 Esc，命中即广播 `emergency_stop_control` 并收起遮罩；合成输入期间（`synthetic_input_active`）不计，避免模型自己发送的 Esc 把运行停掉。主窗口有焦点时另有 keydown 兜底。
+- 状态条改为纯浅蓝底（`#60a5fa`）白字单行：「八千代正在控制你的电脑 | 按 Esc 取消控制」；屏幕四周保留同色 2px 细边框，去掉发光脉冲与四角折角。
+
+### 取舍
+
+- 曾考虑只在遮罩上画光标、不隐藏系统光标：两个指针同时出现，正是本轮反馈的问题。
+- 曾考虑用 `ShowCursor(FALSE)`：它只影响调用线程所属的窗口，对其他应用无效，只能替换系统光标。
+- 曾考虑注册全局快捷键：会吞掉其他应用的 Esc；轮询只读取按键状态，不影响 Esc 在目标应用中的原有作用。
+
+### 验证（第三轮）
+
+- `cargo test`、`cargo check --target x86_64-pc-windows-gnu --lib`、`npm run typecheck`、`npm run lint`、`npm run test:unit`、`npm run test:functions`：见提交记录。
+- 光标替换与恢复、全局 Esc 检测仍需在 Windows 上实测（含多显示器、高缩放比例）。

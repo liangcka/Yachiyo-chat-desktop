@@ -18,19 +18,71 @@ use windows_sys::Win32::System::Threading::{
     PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_EXTENDEDKEY,
-    KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN,
-    MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEINPUT, MOUSE_EVENT_FLAGS,
+    GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS,
+    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
+    MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEINPUT,
+    MOUSE_EVENT_FLAGS, VK_ESCAPE,
 };
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetAncestor, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindowRect, GetWindowTextW,
-    GetWindowThreadProcessId, IsIconic, IsWindowVisible, PostMessageW, SetCursorPos, SetForegroundWindow, ShowWindow,
-    WindowFromPoint, GA_ROOT, SM_CXSCREEN, SM_CXVIRTUALSCREEN, SM_CYSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
-    SM_YVIRTUALSCREEN, SW_RESTORE, SW_SHOWNORMAL, WM_CLOSE,
+    CreateCursor, EnumWindows, GetAncestor, GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindowRect,
+    GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, PostMessageW, SetCursorPos,
+    SetForegroundWindow, SetSystemCursor, ShowWindow, SystemParametersInfoW, WindowFromPoint, GA_ROOT, OCR_APPSTARTING,
+    OCR_CROSS, OCR_HAND, OCR_IBEAM, OCR_NO, OCR_NORMAL, OCR_SIZEALL, OCR_SIZENESW, OCR_SIZENS, OCR_SIZENWSE,
+    OCR_SIZEWE, OCR_UP, OCR_WAIT, SM_CXSCREEN, SM_CXVIRTUALSCREEN, SM_CYSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+    SM_YVIRTUALSCREEN, SPI_SETCURSORS, SW_RESTORE, SW_SHOWNORMAL, SYSTEM_CURSOR_ID, WM_CLOSE,
 };
 
 const MAX_LISTED_WINDOWS: usize = 40;
+
+/// 需要替换为空白的标准系统光标（箭头、文本、手形、等待、缩放等），覆盖鼠标可能显示的全部形态
+const SYSTEM_CURSORS: [SYSTEM_CURSOR_ID; 13] = [
+    OCR_NORMAL,
+    OCR_IBEAM,
+    OCR_WAIT,
+    OCR_CROSS,
+    OCR_UP,
+    OCR_SIZENWSE,
+    OCR_SIZENESW,
+    OCR_SIZEWE,
+    OCR_SIZENS,
+    OCR_SIZEALL,
+    OCR_NO,
+    OCR_HAND,
+    OCR_APPSTARTING,
+];
+
+/// 把所有标准系统光标替换成 32x32 全透明光标（AND 掩码全 1、XOR 掩码全 0）
+pub fn hide_system_cursor() {
+    let and_mask = [0xFFu8; 32 * 32 / 8];
+    let xor_mask = [0u8; 32 * 32 / 8];
+    for id in SYSTEM_CURSORS {
+        unsafe {
+            // SetSystemCursor 会接管并销毁传入的光标句柄，每个 ID 都要单独创建一份
+            let blank = CreateCursor(
+                null_mut(),
+                0,
+                0,
+                32,
+                32,
+                and_mask.as_ptr() as *const c_void,
+                xor_mask.as_ptr() as *const c_void,
+            );
+            if !blank.is_null() {
+                SetSystemCursor(blank, id);
+            }
+        }
+    }
+}
+
+/// 从注册表重新加载用户的光标方案，撤销 hide_system_cursor 的替换
+pub fn reload_system_cursors() {
+    unsafe { SystemParametersInfoW(SPI_SETCURSORS, 0, null_mut(), 0) };
+}
+
+pub fn escape_key_down() -> bool {
+    (unsafe { GetAsyncKeyState(VK_ESCAPE as i32) } as u16) & 0x8000 != 0
+}
 
 pub fn perform(action: Action) -> Result<String, String> {
     match action {

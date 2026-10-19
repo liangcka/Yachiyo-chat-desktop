@@ -1,30 +1,31 @@
-//! 全屏电脑控制遮罩：显示与隐藏、状态同步、接管横幅的可点击区域。
-//! 遮罩窗口默认鼠标穿透，而穿透状态下 webview 收不到任何鼠标事件，横幅无法自行感知悬停；
-//! 因此由后端轮询全局光标：进入横幅区域时关闭穿透以便点击接管，离开或合成输入期间恢复穿透。
+//! 全屏电脑控制遮罩：显示与隐藏、状态同步、控制期间的光标与 Esc 取消。
+//! 遮罩始终鼠标穿透，不拦截任何点击。控制进行时系统光标替换为空白，由遮罩绘制跟随真实位置的八千代光标；
+//! 遮罩窗口拿不到焦点，因此由后端轮询物理 Esc 键实现全局取消。
 
 use crate::computer;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 const OVERLAY_LABEL: &str = "control_overlay";
 const STATE_EVENT: &str = "control_state_change";
 const EMERGENCY_STOP_EVENT: &str = "emergency_stop_control";
-/// 遮罩显示期间，后端把全局光标位置推给遮罩，驱动一个跟随动作的独立光标
+/// 后端把全局光标位置推给遮罩，驱动八千代光标
 const CURSOR_EVENT: &str = "control_cursor_move";
-const HIT_TEST_INTERVAL: Duration = Duration::from_millis(50);
+/// 30ms 一次：光标跟随足够平滑，也能捕获一次正常时长的 Esc 按键
+const TRACK_INTERVAL: Duration = Duration::from_millis(30);
 
+/// paused 表示运行仍在进行但正在等待彩叶审批：状态条保留，系统光标恢复以便点击审批卡片
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ControlOverlayPayload {
     pub active: bool,
-    pub tool_name: String,
-    pub detail: String,
+    pub paused: bool,
 }
 
-/// 遮罩客户区内的光标位置（物理像素），遮罩据此渲染跟随动作的发光光标
+/// 遮罩客户区内的光标位置（物理像素）
 #[derive(Serialize, Clone, Copy, Debug)]
 #[serde(rename_all = "camelCase")]
 struct CursorPosition {
@@ -32,31 +33,15 @@ struct CursorPosition {
     y: f64,
 }
 
-/// 接管横幅在遮罩窗口客户区内的矩形（物理像素），由遮罩页面按自身布局上报
-#[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
-pub struct HitRegion {
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
-}
-
-impl HitRegion {
-    pub fn contains(&self, x: f64, y: f64) -> bool {
-        x >= self.x && x < self.x + self.width && y >= self.y && y < self.y + self.height
-    }
-}
-
 #[derive(Default)]
 pub struct ControlOverlayState {
     payload: Mutex<ControlOverlayPayload>,
-    hit_region: Mutex<Option<HitRegion>>,
-    hit_testing: AtomicBool,
+    tracking: AtomicBool,
 }
 
 impl ControlOverlayState {
-    fn is_active(&self) -> bool {
-        self.payload.lock().map(|p| p.active).unwrap_or(false)
+    fn current(&self) -> ControlOverlayPayload {
+        self.payload.lock().map(|p| p.clone()).unwrap_or_default()
     }
 
     /// 写入新状态；与当前状态相同时返回 false，调用方据此跳过重复的事件与窗口操作
@@ -71,12 +56,22 @@ impl ControlOverlayState {
     }
 }
 
+/// 控制进行且未暂停时才隐藏系统光标；其余状态一律恢复
+fn sync_system_cursor(payload: &ControlOverlayPayload) {
+    if payload.active && !payload.paused {
+        computer::hide_system_cursor();
+    } else {
+        computer::restore_system_cursor();
+    }
+}
+
 fn publish(app: &AppHandle, payload: &ControlOverlayPayload) {
     let _ = app.emit_to(OVERLAY_LABEL, STATE_EVENT, payload);
 }
 
 fn deactivate(app: &AppHandle, state: &ControlOverlayState) {
     let payload = ControlOverlayPayload::default();
+    computer::restore_system_cursor();
     if state.replace(payload.clone()) {
         publish(app, &payload);
         if let Some(overlay) = app.get_webview_window(OVERLAY_LABEL) {
@@ -85,68 +80,62 @@ fn deactivate(app: &AppHandle, state: &ControlOverlayState) {
     }
 }
 
-fn cursor_over_banner(overlay: &WebviewWindow, state: &ControlOverlayState) -> bool {
-    let Some(region) = state.hit_region.lock().ok().and_then(|r| *r) else { return false };
-    let (Ok(cursor), Ok(origin)) = (overlay.cursor_position(), overlay.inner_position()) else { return false };
-    region.contains(cursor.x - origin.x as f64, cursor.y - origin.y as f64)
+/// 紧急取消：通知主窗口中止当前运行并收起遮罩
+fn emergency_stop(app: &AppHandle, state: &ControlOverlayState) {
+    let _ = app.emit(EMERGENCY_STOP_EVENT, ());
+    deactivate(app, state);
 }
 
-fn start_hit_testing(app: AppHandle) {
-    if app.state::<ControlOverlayState>().hit_testing.swap(true, Ordering::SeqCst) {
+fn start_tracking(app: AppHandle) {
+    if app.state::<ControlOverlayState>().tracking.swap(true, Ordering::SeqCst) {
         return;
     }
     tauri::async_runtime::spawn(async move {
-        let mut interactive = false;
         loop {
-            tokio::time::sleep(HIT_TEST_INTERVAL).await;
+            tokio::time::sleep(TRACK_INTERVAL).await;
             let state = app.state::<ControlOverlayState>();
-            let Some(overlay) = app.get_webview_window(OVERLAY_LABEL) else { break };
-            if !state.is_active() {
+            let payload = state.current();
+            if !payload.active {
                 break;
             }
-            if let (Ok(cursor), Ok(origin)) = (overlay.cursor_position(), overlay.inner_position()) {
-                let _ = overlay.emit(
-                    CURSOR_EVENT,
-                    CursorPosition { x: cursor.x - origin.x as f64, y: cursor.y - origin.y as f64 },
-                );
+            if computer::escape_pressed() {
+                emergency_stop(&app, &state);
+                break;
             }
-            let want = !computer::synthetic_input_active() && cursor_over_banner(&overlay, &state);
-            if want != interactive {
-                let _ = overlay.set_ignore_cursor_events(!want);
-                interactive = want;
+            let Some(overlay) = app.get_webview_window(OVERLAY_LABEL) else { break };
+            if !payload.paused {
+                if let (Ok(cursor), Ok(origin)) = (overlay.cursor_position(), overlay.inner_position()) {
+                    let _ = overlay.emit(
+                        CURSOR_EVENT,
+                        CursorPosition { x: cursor.x - origin.x as f64, y: cursor.y - origin.y as f64 },
+                    );
+                }
             }
-        }
-        if let Some(overlay) = app.get_webview_window(OVERLAY_LABEL) {
-            let _ = overlay.set_ignore_cursor_events(true);
         }
         let state = app.state::<ControlOverlayState>();
-        state.hit_testing.store(false, Ordering::SeqCst);
-        // 退出期间若遮罩被重新显示，补启一轮，避免横幅失去点击能力
-        if state.is_active() {
-            start_hit_testing(app.clone());
+        state.tracking.store(false, Ordering::SeqCst);
+        // 退出期间若遮罩被重新显示，补启一轮，避免光标与 Esc 失去响应
+        if state.current().active {
+            start_tracking(app.clone());
         }
     });
 }
 
-/// 显示遮罩并同步当前动作；相同状态重复调用不产生事件
+/// 显示遮罩；paused 为 true 时保留状态条但恢复系统光标。相同状态重复调用不产生事件
 #[tauri::command]
-pub fn show_control_overlay(
-    app: AppHandle,
-    state: State<ControlOverlayState>,
-    tool_name: String,
-    detail: String,
-) -> Result<(), String> {
-    let payload = ControlOverlayPayload { active: true, tool_name, detail };
+pub fn show_control_overlay(app: AppHandle, state: State<ControlOverlayState>, paused: bool) -> Result<(), String> {
+    let payload = ControlOverlayPayload { active: true, paused };
     if !state.replace(payload.clone()) {
         return Ok(());
     }
+    sync_system_cursor(&payload);
     publish(&app, &payload);
     if let Some(overlay) = app.get_webview_window(OVERLAY_LABEL) {
         let _ = overlay.set_ignore_cursor_events(true);
         let _ = overlay.show();
         let _ = overlay.set_always_on_top(true);
     }
-    start_hit_testing(app);
+    start_tracking(app);
     Ok(())
 }
 
@@ -159,21 +148,7 @@ pub fn hide_control_overlay(app: AppHandle, state: State<ControlOverlayState>) -
 /// 遮罩页面加载时拉取当前状态，避免错过加载前推送的事件
 #[tauri::command]
 pub fn get_control_overlay_state(state: State<ControlOverlayState>) -> ControlOverlayPayload {
-    state.payload.lock().map(|p| p.clone()).unwrap_or_default()
-}
-
-#[tauri::command]
-pub fn set_overlay_hit_region(state: State<ControlOverlayState>, region: Option<HitRegion>) -> Result<(), String> {
-    *state.hit_region.lock().map_err(|e| e.to_string())? = region;
-    Ok(())
-}
-
-/// 紧急接管：通知主窗口中止当前运行并收起遮罩
-#[tauri::command]
-pub fn stop_active_control(app: AppHandle, state: State<ControlOverlayState>) -> Result<(), String> {
-    let _ = app.emit(EMERGENCY_STOP_EVENT, ());
-    deactivate(&app, &state);
-    Ok(())
+    state.current()
 }
 
 #[cfg(test)]
@@ -181,23 +156,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn hit_region_uses_half_open_bounds() {
-        let region = HitRegion { x: 100.0, y: 20.0, width: 300.0, height: 60.0 };
-        assert!(region.contains(100.0, 20.0));
-        assert!(region.contains(399.9, 79.9));
-        assert!(!region.contains(400.0, 50.0));
-        assert!(!region.contains(250.0, 80.0));
-        assert!(!region.contains(99.9, 50.0));
-    }
-
-    #[test]
     fn replace_reports_only_real_changes() {
         let state = ControlOverlayState::default();
-        let payload = ControlOverlayPayload { active: true, tool_name: "click".to_string(), detail: "点击".to_string() };
-        assert!(state.replace(payload.clone()));
-        assert!(!state.replace(payload));
-        assert!(state.is_active());
+        let running = ControlOverlayPayload { active: true, paused: false };
+        assert!(state.replace(running.clone()));
+        assert!(!state.replace(running));
+        assert!(state.current().active);
+        assert!(state.replace(ControlOverlayPayload { active: true, paused: true }));
         assert!(state.replace(ControlOverlayPayload::default()));
-        assert!(!state.is_active());
+        assert!(!state.current().active);
     }
 }

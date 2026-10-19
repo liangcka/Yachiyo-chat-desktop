@@ -397,6 +397,8 @@ pub fn run() {
         .manage(desktop_state)
         .manage(control_overlay::ControlOverlayState::default())
         .setup(move |app| {
+            // 上次若在电脑控制中途被强制结束，系统光标会停留在空白状态，启动时先恢复
+            computer::recover_system_cursor();
             // 同步完成端口绑定再进入事件循环：前端经 get_server_port 拼网关地址，
             // 若异步绑定尚未完成，端口漂移（28888 被占用）时首批请求会打到错误端口
             match tauri::async_runtime::block_on(start_local_server(
@@ -488,9 +490,13 @@ pub fn run() {
             control_overlay::show_control_overlay,
             control_overlay::hide_control_overlay,
             control_overlay::get_control_overlay_state,
-            control_overlay::set_overlay_hit_region,
-            control_overlay::stop_active_control,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // 托盘退出等路径不会经过遮罩的隐藏流程，退出前确保系统光标已恢复
+            if let tauri::RunEvent::Exit = event {
+                computer::restore_system_cursor();
+            }
+        });
 }

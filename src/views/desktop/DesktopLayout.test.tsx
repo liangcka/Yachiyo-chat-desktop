@@ -10,7 +10,7 @@ import type { SharedViewProps } from "../layout-types";
 import { DesktopLayout } from "./DesktopLayout";
 
 const overlayBridge = vi.hoisted(() => ({
-  show: vi.fn<(toolName: string, detail: string) => Promise<boolean>>(async () => true),
+  show: vi.fn<(paused: boolean) => Promise<boolean>>(async () => true),
   hide: vi.fn(async () => true),
 }));
 
@@ -443,7 +443,7 @@ describe("DesktopLayout", () => {
     expect(screen.queryByRole("complementary", { name: "成果与多功能审阅面板" })).not.toBeInTheDocument();
   });
 
-  it("yields the screen to the permission card instead of showing the control overlay", () => {
+  it("keeps the control status bar but pauses control while a permission card is pending", () => {
     overlayBridge.show.mockClear();
     const props = createMockProps();
     props.controller.phase = "streaming";
@@ -471,10 +471,10 @@ describe("DesktopLayout", () => {
     ];
 
     render(<DesktopLayout {...props} />);
-    expect(overlayBridge.show).not.toHaveBeenCalled();
+    expect(overlayBridge.show).toHaveBeenCalledWith(true);
   });
 
-  it("shows the system control overlay and lets Esc take over while a control tool runs", () => {
+  it("shows the system control overlay and lets Esc cancel while a control tool runs", () => {
     overlayBridge.show.mockClear();
     const props = createMockProps();
     props.controller.phase = "streaming";
@@ -498,7 +498,7 @@ describe("DesktopLayout", () => {
     ];
 
     render(<DesktopLayout {...props} />);
-    expect(overlayBridge.show).toHaveBeenCalledWith("mcp__windows_mcp__click", "正在模拟鼠标点击 (100, 100)");
+    expect(overlayBridge.show).toHaveBeenCalledWith(false);
     fireEvent.keyDown(window, { key: "Escape" });
     expect(props.controller.stop).toHaveBeenCalled();
   });
