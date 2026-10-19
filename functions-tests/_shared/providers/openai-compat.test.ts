@@ -233,3 +233,46 @@ describe("buildOpenAICompatAdapter", () => {
     expect(built.url).toBe("https://api.siliconflow.cn/v1/chat/completions");
   });
 });
+
+describe("DeepSeek thinking toggle", () => {
+  const apiKey = "sk-" + "a".repeat(40);
+  const deepseek = buildOpenAICompatAdapter("deepseek", {
+    endpoint: "https://api.deepseek.com/v1/chat/completions",
+    defaultModel: "deepseek-v4-flash",
+    allowedModels: ["deepseek-v4-flash"],
+    supportsImage: false,
+    imageModels: [],
+    deepseekThinking: true,
+  });
+  const thinkingOf = (body: string) => (JSON.parse(body) as { thinking?: unknown }).thinking;
+
+  it("disables thinking for title, summary and judge requests", () => {
+    for (const mode of ["title", "summary"] as const) {
+      const built = deepseek.buildRequest({
+        request: { ...textRequest, mode },
+        apiKey,
+        model: "deepseek-v4-flash",
+      });
+      expect(thinkingOf(built.body)).toEqual({ type: "disabled" });
+    }
+    const judge = deepseek.buildJudgeRequest({
+      apiKey,
+      model: "deepseek-v4-flash",
+      systemPrompt: "judge",
+      messages: [{ role: "user", text: "上海天气" }],
+    });
+    expect(thinkingOf(judge.body)).toEqual({ type: "disabled" });
+  });
+
+  it("keeps the provider default thinking for chat requests", () => {
+    const built = deepseek.buildRequest({ request: textRequest, apiKey, model: "deepseek-v4-flash" });
+    expect(thinkingOf(built.body)).toBeUndefined();
+  });
+
+  it("leaves other providers untouched", () => {
+    const body = buildOpenAICompatBody({ ...textRequest, mode: "title" }, "step-3.7-flash", true, true) as {
+      thinking?: unknown;
+    };
+    expect(body.thinking).toBeUndefined();
+  });
+});

@@ -17,6 +17,8 @@ export interface OpenAICompatConfig {
   readonly imageModels: readonly string[];
   /** 该 provider 的模型为推理型且支持 OpenAI 风格 reasoning_effort 参数（思考 token 计入 max_tokens，需显式控制） */
   readonly reasoningEffort?: boolean;
+  /** 该 provider 使用 DeepSeek 格式的 thinking 开关（thinking.type），默认开启思考，辅助请求需显式关闭 */
+  readonly deepseekThinking?: boolean;
 }
 
 interface OpenAITextPart {
@@ -64,7 +66,9 @@ export function buildOpenAICompatBody(
   model: string,
   supportsImage: boolean,
   reasoningEffort = false,
+  deepseekThinking = false,
 ): unknown {
+  const auxiliary = request.mode === "title" || request.mode === "summary";
   const containsImage = request.messages.some((message) => message.imageDataUrl !== undefined);
   return {
     model,
@@ -85,6 +89,8 @@ export function buildOpenAICompatBody(
     // 推理模型的思考 token 计入 max_tokens 预算，过小会被思考耗尽导致正文为空
     max_tokens: request.mode === "title" ? 512 : request.mode === "summary" ? 4096 : 8192,
     ...(reasoningEffort ? { reasoning_effort: containsImage ? "medium" : "low" } : {}),
+    // 标题与摘要预算有限，默认开启的思考会先耗尽 max_tokens（对齐 DSH 辅助调用的 thinking.disabled）
+    ...(deepseekThinking && auxiliary ? { thinking: { type: "disabled" as const } } : {}),
   };
 }
 
@@ -193,6 +199,7 @@ export function buildOpenAICompatAdapter(
         input.model,
         config.supportsImage,
         config.reasoningEffort === true,
+        config.deepseekThinking === true,
       );
       return {
         url: resolveEndpoint(input.baseUrl, config.endpoint),
@@ -216,6 +223,7 @@ export function buildOpenAICompatAdapter(
         // 推理模型的思考 token 计入 max_tokens 预算，512 足够 YES/NO 输出
         max_tokens: 512,
         ...(config.reasoningEffort === true ? { reasoning_effort: "low" as const } : {}),
+        ...(config.deepseekThinking === true ? { thinking: { type: "disabled" as const } } : {}),
       };
       return {
         url: resolveEndpoint(input.baseUrl, config.endpoint),

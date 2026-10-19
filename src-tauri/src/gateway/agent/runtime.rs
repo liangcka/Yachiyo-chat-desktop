@@ -46,6 +46,8 @@ impl Default for AgentLoopConfig {
 
 pub struct TurnOutcome {
     pub text: String,
+    /// 本轮思维链原文，随 assistant 消息回传给需要 reasoning replay 的 provider
+    pub reasoning: String,
     pub tool_calls: Vec<ToolInvocation>,
     pub usage: Option<TokenUsage>,
 }
@@ -150,6 +152,7 @@ pub async fn run_agent_loop_ext(
 
         messages.push(AgentMessage::Assistant {
             text: outcome.text.clone(),
+            reasoning: outcome.reasoning.clone(),
             tool_calls: outcome.tool_calls.clone(),
         });
 
@@ -341,7 +344,7 @@ impl TurnExecutor for HttpTurnExecutor {
                     (
                         config.endpoint.to_string(),
                         crate::gateway::providers::openai_compat::build_openai_agent_body(
-                            &model, &messages, &system_prompt, &tools_schema,
+                            provider_id, &model, &messages, &system_prompt, &tools_schema,
                         ),
                     )
                 }
@@ -416,6 +419,7 @@ impl TurnExecutor for HttpTurnExecutor {
 
             let mut agg = crate::gateway::agent::stream_agg::ToolCallAggregator::new();
             let mut full_text = String::new();
+            let mut reasoning = String::new();
             let mut usage: Option<TokenUsage> = None;
             let mut buffer = String::new();
             let mut byte_stream = res.bytes_stream();
@@ -458,6 +462,7 @@ impl TurnExecutor for HttpTurnExecutor {
                     }
                     if let Some(thought) = delta.thought {
                         if !thought.is_empty() {
+                            reasoning.push_str(&thought);
                             sink(LoopEmit::Event(ClientStreamEvent::Thought { text: thought }));
                         }
                     }
@@ -473,7 +478,7 @@ impl TurnExecutor for HttpTurnExecutor {
                 }
             }
 
-            Ok(TurnOutcome { text: full_text, tool_calls: agg.finish(), usage })
+            Ok(TurnOutcome { text: full_text, reasoning, tool_calls: agg.finish(), usage })
         })
     }
 }

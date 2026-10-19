@@ -173,6 +173,26 @@ fn test_agent_request_deserialization() {
 }
 
 #[test]
+fn test_deepseek_auxiliary_requests_disable_thinking() {
+    use yachiyo_desktop_lib::gateway::providers::openai_compat::build_openai_compat_body;
+    use yachiyo_desktop_lib::gateway::providers::registry::get_provider_config;
+    use yachiyo_desktop_lib::types::{ClientChatRequest, ProviderId};
+
+    let request = |mode: &str| -> ClientChatRequest {
+        let mode = if mode.is_empty() { String::new() } else { format!(r#","mode":"{}""#, mode) };
+        serde_json::from_str(&format!(r#"{{"locale":"zh-CN","messages":[{{"role":"user","text":"你好"}}]{}}}"#, mode)).unwrap()
+    };
+    let deepseek = get_provider_config(ProviderId::Deepseek);
+    for mode in ["title", "summary"] {
+        let body = build_openai_compat_body(&request(mode), "deepseek-v4-flash", deepseek);
+        assert_eq!(body["thinking"]["type"], "disabled", "mode {mode}");
+    }
+    assert!(build_openai_compat_body(&request(""), "deepseek-v4-flash", deepseek).get("thinking").is_none());
+    let stepfun = get_provider_config(ProviderId::Stepfun);
+    assert!(build_openai_compat_body(&request("title"), "step-3.7-flash", stepfun).get("thinking").is_none());
+}
+
+#[test]
 fn test_plain_request_still_parses_without_agent_fields() {
     use yachiyo_desktop_lib::types::ClientChatRequest;
 

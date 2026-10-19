@@ -75,6 +75,7 @@ const openaiCompatProviders = {
     allowedModels: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
     supportsImage: true,
     imageModels: ["deepseek-v4-flash-vision-exp"],
+    deepseekThinking: true,
   },
   glm: {
     endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",

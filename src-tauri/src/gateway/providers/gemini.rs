@@ -158,7 +158,7 @@ pub fn build_gemini_agent_body(
                 }
                 contents.push(json!({ "role": "user", "parts": parts }));
             }
-            AgentMessage::Assistant { text, tool_calls } => {
+            AgentMessage::Assistant { text, tool_calls, .. } => {
                 let mut parts: Vec<serde_json::Value> = Vec::new();
                 if !text.is_empty() {
                     parts.push(json!({ "text": text }));

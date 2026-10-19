@@ -173,7 +173,7 @@ pub fn build_anthropic_agent_body(
                 }
                 mapped.push(json!({ "role": "user", "content": blocks }));
             }
-            AgentMessage::Assistant { text, tool_calls } => {
+            AgentMessage::Assistant { text, tool_calls, .. } => {
                 let mut blocks: Vec<serde_json::Value> = Vec::new();
                 if !text.is_empty() {
                     blocks.push(json!({ "type": "text", "text": text }));

@@ -9,6 +9,8 @@ pub enum AgentMessage {
     },
     Assistant {
         text: String,
+        /// 本轮思维链原文；DeepSeek 思考模式要求工具轮次回传，客户端历史不携带时为空
+        reasoning: String,
         tool_calls: Vec<ToolInvocation>,
     },
     ToolResult {
@@ -30,6 +32,7 @@ pub fn history_to_agent_messages(history: &[ClientHistoryMessage]) -> Vec<AgentM
             },
             "assistant" => AgentMessage::Assistant {
                 text: msg.text.clone(),
+                reasoning: String::new(),
                 tool_calls: msg.tool_calls.clone().unwrap_or_default(),
             },
             _ => AgentMessage::User {
