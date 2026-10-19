@@ -31,6 +31,9 @@ pub enum LoopEmit {
     Ping,
 }
 
+/// 默认最大轮数：桌面操作一次点击或输入就占一轮，发一条消息往往要十几轮，12 轮会在任务中途截断
+pub const DEFAULT_MAX_TURNS: u32 = 50;
+
 #[derive(Debug, Clone)]
 pub struct AgentLoopConfig {
     pub max_turns: u32,
@@ -40,7 +43,7 @@ pub struct AgentLoopConfig {
 
 impl Default for AgentLoopConfig {
     fn default() -> Self {
-        Self { max_turns: 12, permission_timeout_secs: 300, execution_mode: AgentExecutionMode::Confirm }
+        Self { max_turns: DEFAULT_MAX_TURNS, permission_timeout_secs: 300, execution_mode: AgentExecutionMode::Confirm }
     }
 }
 
@@ -629,7 +632,7 @@ pub fn run_agent_chat_stream(
         };
 
         let agent_config = request.agent.as_ref()
-            .map(|a| AgentLoopConfig { max_turns: a.max_turns.unwrap_or(12), permission_timeout_secs: 300, execution_mode: a.execution_mode })
+            .map(|a| AgentLoopConfig { max_turns: a.max_turns.unwrap_or(DEFAULT_MAX_TURNS), permission_timeout_secs: 300, execution_mode: a.execution_mode })
             .unwrap_or_default();
         let run_id = format!(
             "{}-{}",

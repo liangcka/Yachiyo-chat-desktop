@@ -316,7 +316,7 @@ export function DesktopLayout(props: SharedViewProps) {
     ).map(([tab, label]) => ({ id: `settings-${tab}`, label, group: paletteJa ? "設定" : "设置", run: () => handleOpenSettings(tab) })),
   ];
 
-  // AI 控制电脑期间由系统级全屏遮罩提示并提供紧急接管
+  // AI 控制电脑期间由系统级全屏遮罩提示，按 Esc 取消控制
   useComputerControlSession(props.controller);
 
   /* ── 渲染 ─────────────────────────────────────────── */

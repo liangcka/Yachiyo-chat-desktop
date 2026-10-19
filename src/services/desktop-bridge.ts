@@ -238,27 +238,18 @@ export async function closeDesktopWindow(): Promise<boolean> {
   return exitDesktopApp();
 }
 
-/** 电脑控制遮罩的状态，与 Rust 端 ControlOverlayPayload 对齐 */
+/** 电脑控制遮罩的状态，与 Rust 端 ControlOverlayPayload 对齐；paused 表示等待审批，状态条保留但交还鼠标 */
 export interface ControlOverlayState {
   active: boolean;
-  toolName: string;
-  detail: string;
+  paused: boolean;
 }
 
-/** 接管横幅在遮罩窗口客户区内的矩形，物理像素 */
-export interface OverlayHitRegion {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-/** 显示系统级全屏控制遮罩并同步当前动作；后端对相同状态去重 */
-export async function showControlOverlay(toolName: string, detail: string): Promise<boolean> {
+/** 显示系统级全屏控制遮罩；后端对相同状态去重 */
+export async function showControlOverlay(paused: boolean): Promise<boolean> {
   if (!isDesktopApp()) return false;
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("show_control_overlay", { toolName, detail });
+    await invoke("show_control_overlay", { paused });
     return true;
   } catch {
     return false;
@@ -320,34 +311,7 @@ export async function onOverlayCursorMove(
   }
 }
 
-/**
- * 上报接管横幅区域：遮罩默认鼠标穿透、收不到悬停事件，
- * 由后端轮询光标进入该区域时临时关闭穿透；传 null 表示没有可点击区域
- */
-export async function setOverlayHitRegion(region: OverlayHitRegion | null): Promise<boolean> {
-  if (!isDesktopApp()) return false;
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("set_overlay_hit_region", { region });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** 紧急接管：通知主窗口中止当前运行并收起遮罩 */
-export async function stopActiveControl(): Promise<boolean> {
-  if (!isDesktopApp()) return false;
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("stop_active_control");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** 监听来自 Overlay 或全局的中止控制广播事件 */
+/** 监听后端检测到全局 Esc 时广播的取消控制事件 */
 export async function onEmergencyStopControl(callback: () => void): Promise<() => void> {
   if (!isDesktopApp()) return () => {};
   try {
