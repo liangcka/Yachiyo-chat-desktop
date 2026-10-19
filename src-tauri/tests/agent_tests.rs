@@ -11,7 +11,7 @@ use yachiyo_desktop_lib::gateway::providers::openai_compat::build_openai_agent_b
 use yachiyo_desktop_lib::gateway::stream::extract_openai_delta;
 use yachiyo_desktop_lib::tools::get_agent_tools_schema;
 use yachiyo_desktop_lib::types::{
-    AgentExecutionMode, ClientHistoryMessage, ClientStreamEvent, TokenUsage, ToolInvocation,
+    AgentExecutionMode, ClientHistoryMessage, ClientStreamEvent, ProviderId, TokenUsage, ToolInvocation,
 };
 
 struct TestWorkspace { _directory: tempfile::TempDir, root: std::path::PathBuf }
@@ -62,7 +62,7 @@ fn test_history_to_agent_messages() {
     assert_eq!(agent_msgs.len(), 3);
     assert!(matches!(&agent_msgs[0], AgentMessage::User { text, .. } if text == "看下项目"));
     match &agent_msgs[1] {
-        AgentMessage::Assistant { text, tool_calls } => {
+        AgentMessage::Assistant { text, tool_calls, .. } => {
             assert_eq!(text, "我先列目录");
             assert_eq!(tool_calls.len(), 1);
             assert_eq!(tool_calls[0].name, "list_directory");
@@ -79,6 +79,7 @@ fn test_openai_agent_body_structure() {
         AgentMessage::User { text: "读 a.rs".to_string(), image_data_url: None },
         AgentMessage::Assistant {
             text: "好的".to_string(),
+            reasoning: String::new(),
             tool_calls: vec![ToolInvocation {
                 id: "call-1".to_string(),
                 name: "read_file".to_string(),
@@ -95,7 +96,7 @@ fn test_openai_agent_body_structure() {
         "type": "function",
         "function": {"name": "read_file", "description": "read", "parameters": {"type": "object", "properties": {}}}
     })];
-    let body = build_openai_agent_body("test-model", &messages, "系统提示", &tools);
+    let body = build_openai_agent_body(ProviderId::Openai, "test-model", &messages, "系统提示", &tools);
     assert_eq!(body["model"], "test-model");
     assert_eq!(body["tool_choice"], "auto");
     assert_eq!(body["tools"].as_array().unwrap().len(), 1);
@@ -107,6 +108,33 @@ fn test_openai_agent_body_structure() {
     assert_eq!(msgs[2]["tool_calls"][0]["function"]["arguments"], "{\"path\":\"a.rs\"}");
     assert_eq!(msgs[3]["role"], "tool");
     assert_eq!(msgs[3]["tool_call_id"], "call-1");
+    assert!(msgs[2].get("reasoning_content").is_none());
+    assert!(body.get("max_tokens").is_none());
+}
+
+#[test]
+fn test_deepseek_agent_body_replays_reasoning_and_sets_output_budget() {
+    let call = |id: &str| ToolInvocation {
+        id: id.to_string(),
+        name: "read_file".to_string(),
+        arguments: serde_json::json!({"path": "a.rs"}),
+    };
+    let messages = vec![
+        AgentMessage::User { text: "读 a.rs".to_string(), image_data_url: None },
+        // 客户端重放的上一轮工具调用不含思维链
+        AgentMessage::Assistant { text: String::new(), reasoning: String::new(), tool_calls: vec![call("call-0")] },
+        AgentMessage::ToolResult { tool_call_id: "call-0".to_string(), name: "read_file".to_string(), content: "旧".to_string() },
+        AgentMessage::Assistant { text: "读过了".to_string(), reasoning: String::new(), tool_calls: vec![] },
+        AgentMessage::User { text: "再读一次".to_string(), image_data_url: None },
+        AgentMessage::Assistant { text: String::new(), reasoning: "需要重新读取".to_string(), tool_calls: vec![call("call-1")] },
+        AgentMessage::ToolResult { tool_call_id: "call-1".to_string(), name: "read_file".to_string(), content: "新".to_string() },
+    ];
+    let body = build_openai_agent_body(ProviderId::Deepseek, "deepseek-v4-flash", &messages, "系统提示", &[]);
+    let msgs = body["messages"].as_array().unwrap();
+    assert_eq!(msgs[2]["reasoning_content"], "");
+    assert_eq!(msgs[4]["reasoning_content"], "");
+    assert_eq!(msgs[6]["reasoning_content"], "需要重新读取");
+    assert_eq!(body["max_tokens"], 256_000);
 }
 
 #[test]
@@ -156,6 +184,7 @@ fn test_anthropic_agent_body_structure() {
         AgentMessage::User { text: "读 a.rs".to_string(), image_data_url: None },
         AgentMessage::Assistant {
             text: "好的".to_string(),
+            reasoning: String::new(),
             tool_calls: vec![ToolInvocation {
                 id: "toolu_1".to_string(),
                 name: "read_file".to_string(),
@@ -221,6 +250,7 @@ fn test_gemini_agent_body_structure() {
         AgentMessage::User { text: "读 a.rs".to_string(), image_data_url: None },
         AgentMessage::Assistant {
             text: "好的".to_string(),
+            reasoning: String::new(),
             tool_calls: vec![ToolInvocation {
                 id: "call-gemini-0".to_string(),
                 name: "read_file".to_string(),
@@ -376,6 +406,7 @@ fn collector() -> (yachiyo_desktop_lib::gateway::agent::runtime::EventSink, Arc<
 
 fn read_call(id: &str, path: &str) -> TurnOutcome {
     TurnOutcome {
+        reasoning: String::new(),
         text: "我先读文件".to_string(),
         tool_calls: vec![ToolInvocation {
             id: id.to_string(),
@@ -390,6 +421,7 @@ fn read_call(id: &str, path: &str) -> TurnOutcome {
 async fn test_loop_plain_text_completion() {
     let dir = temp_workspace();
     let executor = ScriptedExecutor::new(vec![TurnOutcome {
+        reasoning: String::new(),
         text: "任务完成".to_string(),
         tool_calls: vec![],
         usage: None,
@@ -426,7 +458,7 @@ async fn test_loop_multi_turn_chain() {
     std::fs::write(dir.path().join("a.txt"), "内容").unwrap();
     let executor = ScriptedExecutor::new(vec![
         read_call("call-1", "a.txt"),
-        TurnOutcome { text: "读完了".to_string(), tool_calls: vec![], usage: None },
+        TurnOutcome { reasoning: String::new(), text: "读完了".to_string(), tool_calls: vec![], usage: None },
     ]);
     let (sink, events) = collector();
     let gate = ApprovalRegistry::new();
@@ -459,10 +491,46 @@ async fn test_loop_multi_turn_chain() {
 }
 
 #[tokio::test]
+async fn test_loop_carries_turn_reasoning_into_next_request() {
+    let dir = temp_workspace();
+    std::fs::write(dir.path().join("a.txt"), "内容").unwrap();
+    let mut first = read_call("call-1", "a.txt");
+    first.reasoning = "先读文件确认现状".to_string();
+    let executor = ScriptedExecutor::new(vec![
+        first,
+        TurnOutcome { reasoning: String::new(), text: "读完了".to_string(), tool_calls: vec![], usage: None },
+    ]);
+    let (sink, _events) = collector();
+    let gate = ApprovalRegistry::new();
+    let mut checkpoint = Some(checkpoint_store(dir.path(), "run-reasoning"));
+    let cancelled = AtomicBool::new(false);
+    let http = reqwest::Client::new();
+
+    run_agent_loop(
+        vec![AgentMessage::User { text: "读 a.txt".to_string(), image_data_url: None }],
+        get_agent_tools_schema(),
+        AgentLoopConfig::default(),
+        &executor,
+        &gate,
+        &mut checkpoint,
+        &cancelled,
+        &sink,
+        Some(dir.path()),
+        &http,
+    )
+    .await
+    .unwrap();
+
+    let second = &executor.seen.lock().unwrap()[1];
+    assert!(matches!(&second[1], AgentMessage::Assistant { reasoning, .. } if reasoning == "先读文件确认现状"));
+}
+
+#[tokio::test]
 async fn test_loop_write_permission_denied() {
     let dir = temp_workspace();
     let executor = ScriptedExecutor::new(vec![
         TurnOutcome {
+            reasoning: String::new(),
             text: "我要写文件".to_string(),
             tool_calls: vec![ToolInvocation {
                 id: "call-w".to_string(),
@@ -471,7 +539,7 @@ async fn test_loop_write_permission_denied() {
             }],
             usage: None,
         },
-        TurnOutcome { text: "好的，那我不写了".to_string(), tool_calls: vec![], usage: None },
+        TurnOutcome { reasoning: String::new(), text: "好的，那我不写了".to_string(), tool_calls: vec![], usage: None },
     ]);
     let (sink, events) = collector();
     let gate = Arc::new(ApprovalRegistry::new());
@@ -512,6 +580,7 @@ async fn test_loop_write_permission_denied() {
 async fn test_loop_remembered_file_permission_does_not_approve_other_paths() {
     let dir = temp_workspace();
     let write_call = |id: &str| TurnOutcome {
+        reasoning: String::new(),
         text: "写".to_string(),
         tool_calls: vec![ToolInvocation {
             id: id.to_string(),
@@ -523,7 +592,7 @@ async fn test_loop_remembered_file_permission_does_not_approve_other_paths() {
     let executor = ScriptedExecutor::new(vec![
         write_call("w1"),
         write_call("w2"),
-        TurnOutcome { text: "完成".to_string(), tool_calls: vec![], usage: None },
+        TurnOutcome { reasoning: String::new(), text: "完成".to_string(), tool_calls: vec![], usage: None },
     ]);
     let (sink, events) = collector();
     let gate = Arc::new(ApprovalRegistry::new());
@@ -572,6 +641,7 @@ async fn test_loop_permission_timeout_treated_as_denied() {
     let dir = temp_workspace();
     let executor = ScriptedExecutor::new(vec![
         TurnOutcome {
+            reasoning: String::new(),
             text: "写".to_string(),
             tool_calls: vec![ToolInvocation {
                 id: "w1".to_string(),
@@ -580,7 +650,7 @@ async fn test_loop_permission_timeout_treated_as_denied() {
             }],
             usage: None,
         },
-        TurnOutcome { text: "超时了".to_string(), tool_calls: vec![], usage: None },
+        TurnOutcome { reasoning: String::new(), text: "超时了".to_string(), tool_calls: vec![], usage: None },
     ]);
     let (sink, events) = collector();
     let gate = ApprovalRegistry::new();
@@ -639,6 +709,7 @@ async fn test_loop_cancel_between_turns() {
 async fn test_loop_usage_accumulates() {
     let dir = temp_workspace();
     let executor = ScriptedExecutor::new(vec![TurnOutcome {
+        reasoning: String::new(),
         text: "a".to_string(),
         tool_calls: vec![],
         usage: Some(TokenUsage {
@@ -677,6 +748,7 @@ async fn test_loop_usage_accumulates() {
 async fn test_loop_without_workspace_plain_completion() {
     // 无工作区时（无项目），模型直接输出文本回答（如“你能长任务运行吗”），Agent 模式应平滑完成
     let executor = ScriptedExecutor::new(vec![TurnOutcome {
+        reasoning: String::new(),
         text: "我当然可以帮你执行长任务啦～".to_string(),
         tool_calls: vec![],
         usage: Some(TokenUsage {
@@ -718,6 +790,7 @@ async fn test_loop_without_workspace_tool_interception() {
     let executor = ScriptedExecutor::new(vec![
         read_call("call-no-ws", "package.json"),
         TurnOutcome {
+            reasoning: String::new(),
             text: "彩叶，请先在上方打开工作区文件夹哦～".to_string(),
             tool_calls: vec![],
             usage: None,
@@ -759,6 +832,7 @@ async fn test_loop_without_workspace_tool_interception() {
 async fn test_loop_without_workspace_run_command_allowed_in_full_auto() {
     let executor = ScriptedExecutor::new(vec![
         TurnOutcome {
+            reasoning: String::new(),
             text: "我来查看系统状态～".to_string(),
             tool_calls: vec![ToolInvocation {
                 id: "cmd1".to_string(),
@@ -768,6 +842,7 @@ async fn test_loop_without_workspace_run_command_allowed_in_full_auto() {
             usage: None,
         },
         TurnOutcome {
+            reasoning: String::new(),
             text: "系统检查完成啦！".to_string(),
             tool_calls: vec![],
             usage: None,

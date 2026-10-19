@@ -176,11 +176,11 @@ async fn edit_file_loop_shares_approval_and_checkpoint_protection() {
             }
         });
         let executor = FileEditExecutor(Mutex::new(std::collections::VecDeque::from([
-            TurnOutcome { text: String::new(), usage: None, tool_calls: vec![
+            TurnOutcome { reasoning: String::new(), text: String::new(), usage: None, tool_calls: vec![
                 ToolInvocation { id: "read".into(), name: "read_file".into(), arguments: json!({"path": "test.txt"}) },
                 ToolInvocation { id: "edit".into(), name: "edit_file".into(), arguments: args },
             ] },
-            TurnOutcome { text: "完成".into(), usage: None, tool_calls: vec![] },
+            TurnOutcome { reasoning: String::new(), text: "完成".into(), usage: None, tool_calls: vec![] },
         ])));
         let mut checkpoint = Some(CheckpointStore::with_storage(&root, "edit-run", &temporary.path().join("checkpoints")));
         let outcome = run_agent_loop(vec![], get_agent_tools_schema(), AgentLoopConfig::default(), &executor, &gate,

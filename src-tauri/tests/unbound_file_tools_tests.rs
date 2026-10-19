@@ -32,10 +32,10 @@ async fn unbound_reads_follow_permission_mode_and_denials() {
         ] {
             let path = if tool == "read_file" { file.as_path() } else { directory.path() };
             let executor = Turns(Mutex::new(VecDeque::from([
-                TurnOutcome { text: String::new(), tool_calls: vec![ToolInvocation {
+                TurnOutcome { reasoning: String::new(), text: String::new(), tool_calls: vec![ToolInvocation {
                     id: "read-1".into(), name: tool.into(), arguments: serde_json::json!({"path": path}),
                 }], usage: None },
-                TurnOutcome { text: "完成".into(), tool_calls: vec![], usage: None },
+                TurnOutcome { reasoning: String::new(), text: "完成".into(), tool_calls: vec![], usage: None },
             ])));
             let gate = Arc::new(ApprovalRegistry::new());
             let requests = Arc::new(Mutex::new(0));
@@ -72,12 +72,12 @@ async fn unbound_reads_follow_permission_mode_and_denials() {
 async fn invalid_unbound_paths_and_writes_return_errors_without_permission_wait() {
     for mode in [AgentExecutionMode::Confirm, AgentExecutionMode::Readonly, AgentExecutionMode::FullAuto] {
         let executor = Turns(Mutex::new(VecDeque::from([
-            TurnOutcome { text: String::new(), tool_calls: vec![
+            TurnOutcome { reasoning: String::new(), text: String::new(), tool_calls: vec![
                 ToolInvocation { id: "read".into(), name: "read_file".into(), arguments: serde_json::json!({"path": "README.md"}) },
                 ToolInvocation { id: "list".into(), name: "list_directory".into(), arguments: serde_json::json!({"path": "."}) },
                 ToolInvocation { id: "write".into(), name: "write_file".into(), arguments: serde_json::json!({"path": "new.md", "content": "内容"}) },
             ], usage: None },
-            TurnOutcome { text: "完成".into(), tool_calls: vec![], usage: None },
+            TurnOutcome { reasoning: String::new(), text: "完成".into(), tool_calls: vec![], usage: None },
         ])));
         let results = Arc::new(Mutex::new(Vec::new()));
         let sink: EventSink = {
