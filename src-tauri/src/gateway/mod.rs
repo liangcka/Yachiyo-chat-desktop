@@ -86,6 +86,7 @@ pub fn build_upstream_request(
 
 pub fn handle_chat_stream(
     client: reqwest::Client,
+    fallback_client: Option<reqwest::Client>,
     request: ClientChatRequest,
     key_store: Arc<KeyStore>,
     workspace_manager: Arc<WorkspaceManager>,
@@ -96,7 +97,7 @@ pub fn handle_chat_stream(
         // Agent 模式分流：多步循环由专用运行时承载，本函数只保留纯聊天路径
         if request.agent.as_ref().map(|a| a.enabled).unwrap_or(false) {
             let mut inner = Box::pin(agent::runtime::run_agent_chat_stream(
-                client, request, key_store, workspace_manager, approvals, mcp_manager,
+                client, fallback_client, request, key_store, workspace_manager, approvals, mcp_manager,
             ));
             while let Some(item) = inner.next().await {
                 yield item;
@@ -144,13 +145,56 @@ pub fn handle_chat_stream(
             }
         };
 
-        let upstream_res = match client
+        let first_attempt = client
             .post(&built_req.url)
-            .headers(built_req.headers)
-            .body(built_req.body)
+            .headers(built_req.headers.clone())
+            .body(built_req.body.clone())
             .send()
-            .await
-        {
+            .await;
+
+        let upstream_res = match first_attempt {
+            Ok(res) if res.status().is_success() => res,
+            Err(err) if fallback_client.is_some() => {
+                tracing::warn!("主 HTTP 客户端上游请求网络错误 ({})，尝试备用客户端重试...", err);
+                let fallback = fallback_client.as_ref().unwrap();
+                match fallback
+                    .post(&built_req.url)
+                    .headers(built_req.headers)
+                    .body(built_req.body)
+                    .send()
+                    .await
+                {
+                    Ok(res) => res,
+                    Err(fallback_err) => {
+                        error!("备用 HTTP 客户端上游网络错误: {}", fallback_err);
+                        yield Ok(encode_client_event(&ClientStreamEvent::Error {
+                            code: "PROVIDER_STREAM_ERROR".to_string(),
+                        }));
+                        return;
+                    }
+                }
+            }
+            Ok(res)
+                if fallback_client.is_some()
+                    && (res.status().is_server_error()
+                        || res.status() == reqwest::StatusCode::FORBIDDEN) =>
+            {
+                tracing::warn!(
+                    "主 HTTP 客户端返回异常状态码 ({})，尝试备用客户端重试...",
+                    res.status()
+                );
+                let fallback = fallback_client.as_ref().unwrap();
+                match fallback
+                    .post(&built_req.url)
+                    .headers(built_req.headers)
+                    .body(built_req.body)
+                    .send()
+                    .await
+                {
+                    Ok(fb_res) if fb_res.status().is_success() => fb_res,
+                    _ => res,
+                }
+            }
             Ok(res) => res,
             Err(err) => {
                 error!("Upstream network error: {}", err);

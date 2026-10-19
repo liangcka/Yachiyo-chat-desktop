@@ -38,10 +38,40 @@ pub struct AppState {
     pub key_store: Arc<KeyStore>,
     pub workspace_manager: Arc<WorkspaceManager>,
     pub http_client: reqwest::Client,
+    pub direct_client: reqwest::Client,
     pub port: u16,
     pub token: String,
     pub approvals: Arc<crate::gateway::agent::permission::ApprovalRegistry>,
     pub mcp_manager: Arc<crate::mcp::McpManager>,
+}
+
+/// 判断提供商是否属于国内大模型服务商（智谱 GLM、DeepSeek、阶跃星辰 Stepfun）
+/// 其服务部署在中国大陆境内，在开启网络代理（尤其是全局代理或未分流规则）时，
+/// 极易被代理拦截出海导致高延迟或被境外 WAF 阻断，因此优先使用直连客户端。
+pub fn is_domestic_provider(provider: crate::types::ProviderId) -> bool {
+    matches!(
+        provider,
+        crate::types::ProviderId::Glm
+            | crate::types::ProviderId::Deepseek
+            | crate::types::ProviderId::Stepfun
+    )
+}
+
+impl AppState {
+    /// 依据服务商选择主用和备用客户端：
+    /// - 国内模型优先使用强制直连（no_proxy）客户端，以代理客户端作为备选重试；
+    /// - 海外模型（OpenAI/Claude/Gemini）优先使用代理客户端，以直连客户端作为备选重试。
+    pub fn select_clients(
+        &self,
+        provider: Option<crate::types::ProviderId>,
+    ) -> (reqwest::Client, Option<reqwest::Client>) {
+        let provider = provider.unwrap_or(crate::types::ProviderId::Stepfun);
+        if is_domestic_provider(provider) {
+            (self.direct_client.clone(), Some(self.http_client.clone()))
+        } else {
+            (self.http_client.clone(), Some(self.direct_client.clone()))
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -89,8 +119,10 @@ async fn handle_chat(
     State(state): State<AppState>,
     Json(payload): Json<ClientChatRequest>,
 ) -> Response {
+    let (primary_client, fallback_client) = state.select_clients(payload.provider);
     let stream = handle_chat_stream(
-        state.http_client,
+        primary_client,
+        fallback_client,
         payload,
         state.key_store,
         state.workspace_manager,
@@ -385,10 +417,17 @@ pub async fn start_local_server(
         .build()
         .unwrap_or_default();
 
+    let direct_client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .unwrap_or_default();
+
     let state = AppState {
         key_store,
         workspace_manager,
         http_client,
+        direct_client,
         port: selected_port,
         token: gateway_token,
         approvals: Arc::new(crate::gateway::agent::permission::ApprovalRegistry::with_storage(
@@ -448,5 +487,17 @@ mod tests {
         ] {
             assert!(origins.iter().any(|o| o == expected), "缺少允许源: {}", expected);
         }
+    }
+
+    #[test]
+    fn domestic_provider_classification() {
+        use crate::types::ProviderId;
+        assert!(is_domestic_provider(ProviderId::Glm));
+        assert!(is_domestic_provider(ProviderId::Deepseek));
+        assert!(is_domestic_provider(ProviderId::Stepfun));
+
+        assert!(!is_domestic_provider(ProviderId::Openai));
+        assert!(!is_domestic_provider(ProviderId::Claude));
+        assert!(!is_domestic_provider(ProviderId::Gemini));
     }
 }

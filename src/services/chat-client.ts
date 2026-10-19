@@ -84,7 +84,7 @@ function streamErrorEvent(code: string, detail?: string): ChatClientError {
   return new ChatClientError("PROVIDER_ERROR", undefined, `${code}${detail === undefined ? "" : ` ${detail}`}`);
 }
 
-export const DEFAULT_STREAM_INACTIVITY_TIMEOUT_MS = 15_000;
+export const DEFAULT_STREAM_INACTIVITY_TIMEOUT_MS = 45_000;
 
 export interface StreamChatOptions {
   onDelta: (text: string) => void;
@@ -104,7 +104,7 @@ export interface StreamChatOptions {
   onTurn?: (turn: { index: number; usage?: TokenUsage }) => void;
   signal?: AbortSignal;
   fetcher?: typeof fetch;
-  /** 单次分片读取超时（毫秒），默认 15000ms；0 或负数表示不设超时 */
+  /** 单次分片读取超时（毫秒），默认 45000ms；0 或负数表示不设超时 */
   inactivityTimeoutMs?: number;
 }
 

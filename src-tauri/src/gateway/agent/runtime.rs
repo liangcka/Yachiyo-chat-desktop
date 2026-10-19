@@ -310,6 +310,7 @@ pub async fn run_agent_loop_ext(
 /// 真实执行器：走上游 HTTP 流式接口，透传 thought/delta/sources 事件
 pub struct HttpTurnExecutor {
     pub client: reqwest::Client,
+    pub fallback_client: Option<reqwest::Client>,
     pub provider_id: ProviderId,
     pub api_key: String,
     pub model: String,
@@ -324,6 +325,7 @@ impl TurnExecutor for HttpTurnExecutor {
         sink: &EventSink,
     ) -> futures::future::BoxFuture<'_, Result<TurnOutcome, String>> {
         let client = self.client.clone();
+        let fallback_client = self.fallback_client.clone();
         let provider_id = self.provider_id;
         let api_key = self.api_key.clone();
         let model = self.model.clone();
@@ -374,13 +376,38 @@ impl TurnExecutor for HttpTurnExecutor {
                 }
             }
 
-            let res = client
+            let first_attempt = client
                 .post(&url)
-                .headers(headers)
+                .headers(headers.clone())
                 .body(body.to_string())
                 .send()
-                .await
-                .map_err(|e| format!("上游网络错误: {}", e))?;
+                .await;
+
+            let res = match first_attempt {
+                Ok(res) if res.status().is_success() => Ok(res),
+                Err(err) if fallback_client.is_some() => {
+                    tracing::warn!("Agent 主 HTTP 客户端网络错误 ({})，尝试备用客户端重试...", err);
+                    let fallback = fallback_client.as_ref().unwrap();
+                    fallback.post(&url).headers(headers).body(body.to_string()).send().await
+                }
+                Ok(res)
+                    if fallback_client.is_some()
+                        && (res.status().is_server_error()
+                            || res.status() == reqwest::StatusCode::FORBIDDEN) =>
+                {
+                    tracing::warn!(
+                        "Agent 主 HTTP 客户端状态异常 ({})，尝试备用客户端重试...",
+                        res.status()
+                    );
+                    let fallback = fallback_client.as_ref().unwrap();
+                    match fallback.post(&url).headers(headers).body(body.to_string()).send().await {
+                        Ok(fb_res) if fb_res.status().is_success() => Ok(fb_res),
+                        _ => Ok(res),
+                    }
+                }
+                other => other,
+            }
+            .map_err(|e| format!("上游网络错误: {}", e))?;
             if !res.status().is_success() {
                 let status = res.status();
                 let text = res.text().await.unwrap_or_default();
@@ -454,6 +481,7 @@ impl TurnExecutor for HttpTurnExecutor {
 /// Agent 模式的 /api/chat 入口：SSE 流承载完整多轮运行
 pub fn run_agent_chat_stream(
     client: reqwest::Client,
+    fallback_client: Option<reqwest::Client>,
     request: ClientChatRequest,
     key_store: Arc<KeyStore>,
     workspace_manager: Arc<WorkspaceManager>,
@@ -530,6 +558,7 @@ pub fn run_agent_chat_stream(
         let system_prompt = build_agent_system_prompt(request.locale, request.current_time.as_deref(), root.as_deref());
         let executor = HttpTurnExecutor {
             client: client.clone(),
+            fallback_client,
             provider_id,
             api_key,
             model,
