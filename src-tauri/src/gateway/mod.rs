@@ -21,6 +21,20 @@ pub struct BuiltRequest {
     pub provider_id: ProviderId,
 }
 
+/// 自定义端点只对 OpenAI 兼容厂商开放（Claude/Gemini 为原生协议），与 Web 端 /api/chat 的校验一致
+pub fn validated_base_url(request: &ClientChatRequest) -> Result<Option<&str>, String> {
+    let Some(base_url) = request.base_url.as_deref() else {
+        return Ok(None);
+    };
+    if !providers::openai_compat::is_valid_base_url(base_url) {
+        return Err("自定义端点需为 https:// 开头且不含空白".to_string());
+    }
+    if matches!(request.provider, Some(ProviderId::Claude | ProviderId::Gemini)) {
+        return Err("自定义端点仅支持 OpenAI 兼容协议".to_string());
+    }
+    Ok(Some(base_url))
+}
+
 pub fn build_upstream_request(
     request: &ClientChatRequest,
     api_key: &str,
@@ -28,6 +42,7 @@ pub fn build_upstream_request(
 ) -> Result<BuiltRequest, String> {
     let provider_id = request.provider.unwrap_or(ProviderId::Stepfun);
     let config = get_provider_config(provider_id);
+    let base_url = validated_base_url(request)?;
 
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
@@ -48,7 +63,7 @@ pub fn build_upstream_request(
                     .map_err(|e| e.to_string())?,
             );
             let body = providers::openai_compat::build_openai_compat_body(request, model, config);
-            (config.endpoint.to_string(), body)
+            (providers::openai_compat::resolve_chat_endpoint(base_url, config.endpoint), body)
         }
         ProviderId::Claude => {
             headers.insert(

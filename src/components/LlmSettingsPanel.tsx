@@ -18,6 +18,7 @@ import {
   KEYSTORE_MANAGED_API_KEY,
   MODEL_VENDORS,
   PROVIDER_METADATA,
+  findVendorForEntry,
   getProviderMeta,
   isValidApiKey,
   isValidBaseUrl,
@@ -197,6 +198,8 @@ export function LlmSettingsPanel({
   const [isCustomModel, setIsCustomModel] = useState(false);
   const [customBaseUrl, setCustomBaseUrl] = useState("");
   const [customModelName, setCustomModelName] = useState("");
+  // 从共用存储槽的其他厂商卡片切换过来时，槽内已存的 Key 属于别家，不能留空沿用
+  const [reuseStoredKey, setReuseStoredKey] = useState(true);
 
   const { render, closing } = useClosing(open, 300);
 
@@ -213,6 +216,7 @@ export function LlmSettingsPanel({
       setFeedback(undefined);
       setShowKey(false);
       setModalMode(null);
+      setReuseStoredKey(true);
     }
   }
 
@@ -261,7 +265,13 @@ export function LlmSettingsPanel({
     setIsCustomModel(false);
     setSelectedProvider(vendor.mappedProvider);
     setPrevSyncKey({ provider: vendor.mappedProvider, entries });
-    const entry = entries.find((item) => item.provider === vendor.mappedProvider);
+    const stored = entries.find((item) => item.provider === vendor.mappedProvider);
+    // 槽内配置属于其他卡片时，其模型名与端点对当前厂商无效，改用卡片预设
+    const entry =
+      stored !== undefined && findVendorForEntry(stored.provider, stored.baseUrl)?.id === vendor.id
+        ? stored
+        : undefined;
+    setReuseStoredKey(stored === undefined || entry !== undefined);
     setApiKeyInput(keyInputFor(entry));
     setModelInput(entry?.model || vendor.defaultModel);
     setCustomBaseUrl(entry?.baseUrl ?? vendor.defaultBaseUrl ?? "");
@@ -271,6 +281,7 @@ export function LlmSettingsPanel({
   const handleSelectCustomModel = () => {
     setIsCustomModel(true);
     setTargetVendor(null);
+    setReuseStoredKey(true);
     setSelectedProvider("openai");
     setPrevSyncKey({ provider: "openai", entries });
     const entry = entries.find((item) => item.provider === "openai");
@@ -282,13 +293,16 @@ export function LlmSettingsPanel({
   };
 
   const handleEditEntry = (providerId: ProviderId, currentModelName: string) => {
+    const entry = entries.find((item) => item.provider === providerId);
     const vendor =
-      MODEL_VENDORS.find((v) => v.mappedProvider === providerId) ?? MODEL_VENDORS[0];
+      findVendorForEntry(providerId, entry?.baseUrl) ??
+      MODEL_VENDORS.find((v) => v.mappedProvider === providerId) ??
+      MODEL_VENDORS[0];
     setTargetVendor(vendor);
     setIsCustomModel(false);
+    setReuseStoredKey(true);
     setSelectedProvider(providerId);
     setPrevSyncKey({ provider: providerId, entries });
-    const entry = entries.find((item) => item.provider === providerId);
     setApiKeyInput(keyInputFor(entry));
     setModelInput(currentModelName || entry?.model || vendor.defaultModel);
     setCustomBaseUrl(entry?.baseUrl ?? vendor.defaultBaseUrl ?? "");
@@ -349,6 +363,7 @@ export function LlmSettingsPanel({
 
   const currentMeta = getProviderMeta(selectedProvider);
   const hasStoredKey =
+    reuseStoredKey &&
     entries.find((entry) => entry.provider === selectedProvider)?.apiKey === KEYSTORE_MANAGED_API_KEY;
   const keyToSave = hasStoredKey && apiKeyInput.trim() === "" ? KEYSTORE_MANAGED_API_KEY : apiKeyInput;
   const isKeyValid = isValidApiKey(keyToSave);

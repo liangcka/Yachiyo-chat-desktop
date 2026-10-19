@@ -60,13 +60,19 @@ pub fn is_domestic_provider(provider: crate::types::ProviderId) -> bool {
 impl AppState {
     /// 依据服务商选择主用和备用客户端：
     /// - 国内模型优先使用强制直连（no_proxy）客户端，以代理客户端作为备选重试；
-    /// - 海外模型（OpenAI/Claude/Gemini）优先使用代理客户端，以直连客户端作为备选重试。
+    /// - 海外模型（OpenAI/Claude/Gemini）优先使用代理客户端，以直连客户端作为备选重试；
+    /// - 自定义端点按主机归属判断，火山、百炼等国内厂商卡片虽映射到 OpenAI 也走直连优先。
     pub fn select_clients(
         &self,
         provider: Option<crate::types::ProviderId>,
+        base_url: Option<&str>,
     ) -> (reqwest::Client, Option<reqwest::Client>) {
         let provider = provider.unwrap_or(crate::types::ProviderId::Stepfun);
-        if is_domestic_provider(provider) {
+        let domestic = match base_url {
+            Some(base_url) => crate::gateway::providers::compat_vendor::is_domestic_endpoint(base_url),
+            None => is_domestic_provider(provider),
+        };
+        if domestic {
             (self.direct_client.clone(), Some(self.http_client.clone()))
         } else {
             (self.http_client.clone(), Some(self.direct_client.clone()))
@@ -119,7 +125,8 @@ async fn handle_chat(
     State(state): State<AppState>,
     Json(payload): Json<ClientChatRequest>,
 ) -> Response {
-    let (primary_client, fallback_client) = state.select_clients(payload.provider);
+    let (primary_client, fallback_client) =
+        state.select_clients(payload.provider, payload.base_url.as_deref());
     let stream = handle_chat_stream(
         primary_client,
         fallback_client,

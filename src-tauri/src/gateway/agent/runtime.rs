@@ -318,6 +318,8 @@ pub struct HttpTurnExecutor {
     pub client: reqwest::Client,
     pub fallback_client: Option<reqwest::Client>,
     pub provider_id: ProviderId,
+    /// 已校验的自定义 OpenAI 兼容端点；存在时 OpenAI 也改走 Chat Completions
+    pub base_url: Option<String>,
     pub api_key: String,
     pub model: String,
     pub system_prompt: String,
@@ -333,6 +335,7 @@ impl TurnExecutor for HttpTurnExecutor {
         let client = self.client.clone();
         let fallback_client = self.fallback_client.clone();
         let provider_id = self.provider_id;
+        let base_url = self.base_url.clone();
         let api_key = self.api_key.clone();
         let model = self.model.clone();
         let system_prompt = self.system_prompt.clone();
@@ -341,29 +344,28 @@ impl TurnExecutor for HttpTurnExecutor {
         let sink = Arc::clone(sink);
         Box::pin(async move {
             let config = get_provider_config(provider_id);
+            let protocol = WireProtocol::resolve(provider_id, base_url.as_deref());
 
-            let (url, body) = match provider_id {
-                ProviderId::Stepfun | ProviderId::Deepseek | ProviderId::Glm => {
-                    (
-                        config.endpoint.to_string(),
-                        crate::gateway::providers::openai_compat::build_openai_agent_body(
-                            provider_id, &model, &messages, &system_prompt, &tools_schema,
-                        ),
-                    )
-                }
-                ProviderId::Openai => (
+            let (url, body) = match protocol {
+                WireProtocol::ChatCompletions => (
+                    crate::gateway::providers::openai_compat::resolve_chat_endpoint(base_url.as_deref(), config.endpoint),
+                    crate::gateway::providers::openai_compat::build_openai_agent_body(
+                        provider_id, base_url.as_deref(), &model, &messages, &system_prompt, &tools_schema,
+                    ),
+                ),
+                WireProtocol::Responses => (
                     crate::gateway::providers::openai_responses::OPENAI_RESPONSES_ENDPOINT.to_string(),
                     crate::gateway::providers::openai_responses::build_openai_responses_agent_body(
                         &model, &messages, &system_prompt, &tools_schema,
                     ),
                 ),
-                ProviderId::Claude => (
+                WireProtocol::Anthropic => (
                     config.endpoint.to_string(),
                     crate::gateway::providers::anthropic::build_anthropic_agent_body(
                         &model, &messages, &system_prompt, &tools_schema,
                     ),
                 ),
-                ProviderId::Gemini => (
+                WireProtocol::Gemini => (
                     format!("{}/models/{}:streamGenerateContent?alt=sse", config.endpoint, model),
                     crate::gateway::providers::gemini::build_gemini_agent_body(
                         &model, &messages, &system_prompt, &tools_schema,
@@ -430,7 +432,7 @@ impl TurnExecutor for HttpTurnExecutor {
             }
 
             let mut agg = crate::gateway::agent::stream_agg::ToolCallAggregator::new();
-            let mut native = NativeTurnCollector::for_provider(provider_id);
+            let mut native = NativeTurnCollector::for_protocol(protocol);
             let mut full_text = String::new();
             let mut reasoning = String::new();
             let mut usage: Option<TokenUsage> = None;
@@ -460,11 +462,11 @@ impl TurnExecutor for HttpTurnExecutor {
                         continue;
                     }
                     native.push(&data_str);
-                    let delta = match provider_id {
-                        ProviderId::Stepfun | ProviderId::Deepseek | ProviderId::Glm => crate::gateway::stream::extract_openai_delta(&data_str),
-                        ProviderId::Openai => crate::gateway::providers::openai_responses::extract_openai_responses_delta(&data_str),
-                        ProviderId::Claude => crate::gateway::providers::anthropic::extract_anthropic_delta(&data_str),
-                        ProviderId::Gemini => crate::gateway::providers::gemini::extract_gemini_delta(&data_str),
+                    let delta = match protocol {
+                        WireProtocol::ChatCompletions => crate::gateway::stream::extract_openai_delta(&data_str),
+                        WireProtocol::Responses => crate::gateway::providers::openai_responses::extract_openai_responses_delta(&data_str),
+                        WireProtocol::Anthropic => crate::gateway::providers::anthropic::extract_anthropic_delta(&data_str),
+                        WireProtocol::Gemini => crate::gateway::providers::gemini::extract_gemini_delta(&data_str),
                     };
                     let Some(delta) = delta else { continue };
                     if let Some(sources) = delta.sources {
@@ -499,7 +501,27 @@ impl TurnExecutor for HttpTurnExecutor {
     }
 }
 
-/// 按 provider 收集需要原样回传的原生输出；Chat Completions 系 provider 无需收集
+/// Agent 请求的线路协议：OpenAI 官方端点走 Responses，自定义端点与国内厂商走 Chat Completions
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WireProtocol {
+    ChatCompletions,
+    Responses,
+    Anthropic,
+    Gemini,
+}
+
+impl WireProtocol {
+    pub fn resolve(provider: ProviderId, base_url: Option<&str>) -> Self {
+        match provider {
+            ProviderId::Claude => Self::Anthropic,
+            ProviderId::Gemini => Self::Gemini,
+            ProviderId::Openai if base_url.is_none() => Self::Responses,
+            ProviderId::Openai | ProviderId::Stepfun | ProviderId::Deepseek | ProviderId::Glm => Self::ChatCompletions,
+        }
+    }
+}
+
+/// 按线路协议收集需要原样回传的原生输出；Chat Completions 无需收集
 enum NativeTurnCollector {
     None,
     Anthropic(crate::gateway::providers::anthropic::AnthropicTurnCollector),
@@ -508,12 +530,12 @@ enum NativeTurnCollector {
 }
 
 impl NativeTurnCollector {
-    fn for_provider(provider: ProviderId) -> Self {
-        match provider {
-            ProviderId::Claude => Self::Anthropic(Default::default()),
-            ProviderId::Gemini => Self::Gemini(Default::default()),
-            ProviderId::Openai => Self::Responses(Default::default()),
-            ProviderId::Stepfun | ProviderId::Deepseek | ProviderId::Glm => Self::None,
+    fn for_protocol(protocol: WireProtocol) -> Self {
+        match protocol {
+            WireProtocol::Anthropic => Self::Anthropic(Default::default()),
+            WireProtocol::Gemini => Self::Gemini(Default::default()),
+            WireProtocol::Responses => Self::Responses(Default::default()),
+            WireProtocol::ChatCompletions => Self::None,
         }
     }
 
@@ -573,6 +595,14 @@ pub fn run_agent_chat_stream(
                 return;
             }
         };
+        let base_url = match crate::gateway::validated_base_url(&request) {
+            Ok(base_url) => base_url.map(str::to_string),
+            Err(error) => {
+                tracing::warn!("Agent 自定义端点无效: {}", error);
+                yield Ok(encode_client_event(&ClientStreamEvent::Error { code: "INVALID_REQUEST".to_string() }));
+                return;
+            }
+        };
 
         // 取消哨兵：SSE 流 Drop（客户端断开）时置位
         let cancelled = Arc::new(AtomicBool::new(false));
@@ -622,6 +652,7 @@ pub fn run_agent_chat_stream(
             client: client.clone(),
             fallback_client,
             provider_id,
+            base_url,
             api_key,
             model,
             system_prompt,

@@ -2,6 +2,7 @@ import { buildSystemPrompt } from "../prompt";
 import type { ExtractedDelta, TokenUsage } from "../stream";
 import type { ClientChatRequest, ClientHistoryMessage } from "../validation";
 import type { EnrichedChatRequest } from "../web-search";
+import { type CompatVendor, compatVendorBodyPatch, detectCompatVendor } from "./compat-vendors";
 import type {
   BuiltProviderRequest,
   JudgeRequestInput,
@@ -35,6 +36,8 @@ export interface OpenAICompatBodyOptions {
   readonly deepseekThinking?: boolean;
   /** 输出预算字段使用 max_completion_tokens 而非 max_tokens */
   readonly maxCompletionTokens?: boolean;
+  /** 自定义端点识别出的第三方厂商，按其协议补充思考开关与思考强度 */
+  readonly compatVendor?: CompatVendor;
 }
 
 /** GPT-5/GPT-6 系列为推理模型（接受 reasoning_effort）；gpt-4.1 等非推理模型传该字段会被拒绝 */
@@ -53,6 +56,7 @@ function resolveBodyOptions(
     reasoningEffort: config.reasoningEffort === true || (official && isOpenAIReasoningModel(model)),
     deepseekThinking: config.deepseekThinking === true,
     maxCompletionTokens: official,
+    compatVendor: detectCompatVendor(baseUrl),
   };
 }
 
@@ -127,6 +131,7 @@ export function buildOpenAICompatBody(
     ...(options.reasoningEffort === true ? { reasoning_effort: containsImage ? "medium" : "low" } : {}),
     // 标题与摘要预算有限，默认开启的思考会先耗尽 max_tokens（对齐 DSH 辅助调用的 thinking.disabled）
     ...(options.deepseekThinking === true && auxiliary ? { thinking: { type: "disabled" as const } } : {}),
+    ...compatVendorBodyPatch(options.compatVendor, model, auxiliary ? "auxiliary" : "chat"),
   };
 }
 
@@ -259,6 +264,7 @@ export function buildOpenAICompatAdapter(
         [options.maxCompletionTokens === true ? "max_completion_tokens" : "max_tokens"]: 512,
         ...(options.reasoningEffort === true ? { reasoning_effort: "low" as const } : {}),
         ...(options.deepseekThinking === true ? { thinking: { type: "disabled" as const } } : {}),
+        ...compatVendorBodyPatch(options.compatVendor, input.model, "auxiliary"),
       };
       return {
         url: resolveEndpoint(input.baseUrl, config.endpoint),

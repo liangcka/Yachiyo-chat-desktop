@@ -413,6 +413,33 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
   },
 ];
 
+function endpointHost(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined;
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 多张厂商卡片共用同一 ProviderId 存储槽（火山、Kimi、百炼等都映射到 openai），
+ * 按端点主机名找回已保存配置所属的卡片；未自定义端点时对应不带默认端点的原生卡片。
+ */
+export function findVendorForEntry(
+  provider: ProviderId,
+  baseUrl: string | undefined,
+): ModelVendorItem | undefined {
+  const host = endpointHost(baseUrl);
+  return MODEL_VENDORS.find(
+    (vendor) =>
+      vendor.mappedProvider === provider &&
+      (host === undefined
+        ? vendor.defaultBaseUrl === undefined
+        : endpointHost(vendor.defaultBaseUrl) === host),
+  );
+}
+
 /** 前端 API Key 宽松校验：非空、长度 20-512、可打印 ASCII（与后端 isValidApiKey 对齐） */
 export function isValidApiKey(value: string): boolean {
   const trimmed = value.trim();

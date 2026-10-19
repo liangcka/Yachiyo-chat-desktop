@@ -96,7 +96,7 @@ fn test_openai_agent_body_structure() {
         "type": "function",
         "function": {"name": "read_file", "description": "read", "parameters": {"type": "object", "properties": {}}}
     })];
-    let body = build_openai_agent_body(ProviderId::Openai, "test-model", &messages, "系统提示", &tools);
+    let body = build_openai_agent_body(ProviderId::Openai, None, "test-model", &messages, "系统提示", &tools);
     assert_eq!(body["model"], "test-model");
     assert_eq!(body["tool_choice"], "auto");
     assert_eq!(body["tools"].as_array().unwrap().len(), 1);
@@ -129,7 +129,7 @@ fn test_deepseek_agent_body_replays_reasoning_and_sets_output_budget() {
         AgentMessage::Assistant { text: String::new(), reasoning: "需要重新读取".to_string(), tool_calls: vec![call("call-1")], native: Vec::new() },
         AgentMessage::ToolResult { tool_call_id: "call-1".to_string(), name: "read_file".to_string(), content: "新".to_string() },
     ];
-    let body = build_openai_agent_body(ProviderId::Deepseek, "deepseek-v4-flash", &messages, "系统提示", &[]);
+    let body = build_openai_agent_body(ProviderId::Deepseek, None, "deepseek-v4-flash", &messages, "系统提示", &[]);
     let msgs = body["messages"].as_array().unwrap();
     assert_eq!(msgs[2]["reasoning_content"], "");
     assert_eq!(msgs[4]["reasoning_content"], "");
@@ -1098,13 +1098,13 @@ fn test_glm_agent_body_enables_preserved_thinking() {
         AgentMessage::Assistant { text: String::new(), reasoning: "需要读取".to_string(), tool_calls: vec![call], native: Vec::new() },
         AgentMessage::ToolResult { tool_call_id: "call-1".to_string(), name: "read_file".to_string(), content: "内容".to_string() },
     ];
-    let body = build_openai_agent_body(ProviderId::Glm, "glm-5.3", &messages, "系统提示", &[]);
+    let body = build_openai_agent_body(ProviderId::Glm, None, "glm-5.3", &messages, "系统提示", &[]);
     assert_eq!(body["thinking"], serde_json::json!({ "type": "enabled", "clear_thinking": false }));
     let msgs = body["messages"].as_array().unwrap();
     assert!(msgs[2].get("reasoning_content").is_none());
     assert_eq!(msgs[4]["reasoning_content"], "需要读取");
 
-    let hybrid = build_openai_agent_body(ProviderId::Glm, "glm-4.6", &messages, "系统提示", &[]);
+    let hybrid = build_openai_agent_body(ProviderId::Glm, None, "glm-4.6", &messages, "系统提示", &[]);
     assert!(hybrid.get("thinking").is_none());
     assert!(hybrid["messages"][4].get("reasoning_content").is_none());
 }
