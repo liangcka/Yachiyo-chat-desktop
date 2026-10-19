@@ -343,3 +343,87 @@ fn test_agent_system_prompt_evidence_verification_rule() {
     assert!(ja.contains("HardwareInformation.qwMemorySize"));
 }
 
+
+fn plain_request(provider: &str, mode: &str) -> yachiyo_desktop_lib::types::ClientChatRequest {
+    let mode = if mode.is_empty() { String::new() } else { format!(r#","mode":"{}""#, mode) };
+    serde_json::from_str(&format!(
+        r#"{{"locale":"zh-CN","provider":"{}","messages":[{{"role":"user","text":"你好"}}]{}}}"#,
+        provider, mode
+    ))
+    .unwrap()
+}
+
+#[test]
+fn test_openai_official_body_uses_completion_budget_and_reasoning_effort() {
+    use yachiyo_desktop_lib::gateway::providers::openai_compat::build_openai_compat_body;
+    use yachiyo_desktop_lib::gateway::providers::registry::get_provider_config;
+    use yachiyo_desktop_lib::types::ProviderId;
+
+    let openai = get_provider_config(ProviderId::Openai);
+    let summary = build_openai_compat_body(&plain_request("openai", "summary"), "gpt-6-luna", openai);
+    assert_eq!(summary["max_completion_tokens"], 4096);
+    assert!(summary.get("max_tokens").is_none());
+    assert_eq!(summary["reasoning_effort"], "low");
+
+    let legacy = build_openai_compat_body(&plain_request("openai", "title"), "gpt-4.1", openai);
+    assert_eq!(legacy["max_completion_tokens"], 512);
+    assert!(legacy.get("reasoning_effort").is_none());
+
+    let stepfun = get_provider_config(ProviderId::Stepfun);
+    let step = build_openai_compat_body(&plain_request("stepfun", "summary"), "step-5-preview", stepfun);
+    assert_eq!(step["max_tokens"], 4096);
+    assert_eq!(step["reasoning_effort"], "low");
+    let glm = get_provider_config(ProviderId::Glm);
+    let glm_body = build_openai_compat_body(&plain_request("glm", "title"), "glm-5.3", glm);
+    assert!(glm_body.get("reasoning_effort").is_none());
+    assert!(glm_body.get("thinking").is_none());
+}
+
+#[test]
+fn test_anthropic_chat_body_caches_role_prompt_and_tunes_thinking() {
+    use yachiyo_desktop_lib::gateway::build_upstream_request;
+    use yachiyo_desktop_lib::gateway::providers::anthropic::build_anthropic_body;
+
+    let chat = build_anthropic_body(&plain_request("claude", ""), "claude-opus-5-5");
+    let system = chat["system"].as_array().expect("chat system splits into cacheable blocks");
+    assert_eq!(system[0]["cache_control"]["type"], "ephemeral");
+    assert!(system[0]["text"].as_str().unwrap().contains("月见八千代"));
+    assert!(system[1]["text"].as_str().unwrap().starts_with("<runtime>"));
+    assert!(system[1].get("cache_control").is_none());
+    assert_eq!(chat["max_tokens"], 16000);
+    assert_eq!(chat["thinking"], serde_json::json!({ "type": "adaptive", "display": "summarized" }));
+    assert_eq!(chat["output_config"]["effort"], "low");
+    assert_eq!(chat["fallbacks"], "default");
+
+    let title = build_anthropic_body(&plain_request("claude", "title"), "claude-haiku-5-5");
+    assert!(title["system"].is_string());
+    assert_eq!(title["max_tokens"], 1024);
+    assert_eq!(title["thinking"], serde_json::json!({ "type": "adaptive" }));
+    assert!(title.get("fallbacks").is_none());
+
+    let legacy = build_anthropic_body(&plain_request("claude", ""), "claude-haiku-4-5");
+    assert!(legacy.get("thinking").is_none());
+    assert!(legacy.get("output_config").is_none());
+
+    let built = build_upstream_request(&plain_request("claude", ""), "sk-ant-test", "claude-sonnet-5-5").unwrap();
+    assert_eq!(built.headers.get("anthropic-beta").unwrap(), "server-side-fallback-2026-07-01");
+    let built = build_upstream_request(&plain_request("claude", ""), "sk-ant-test", "claude-haiku-5-5").unwrap();
+    assert!(built.headers.get("anthropic-beta").is_none());
+}
+
+#[test]
+fn test_anthropic_usage_counts_cached_prompt_tokens() {
+    let start = r#"{"type":"message_start","message":{"usage":{"input_tokens":12,"cache_creation_input_tokens":300,"cache_read_input_tokens":15000}}}"#;
+    let delta = extract_anthropic_delta(start).expect("usage delta");
+    assert_eq!(delta.usage.and_then(|u| u.prompt_tokens), Some(15312));
+}
+
+#[test]
+fn test_gemini_chat_body_requests_thought_summaries() {
+    use yachiyo_desktop_lib::gateway::providers::gemini::build_gemini_body;
+
+    let chat = build_gemini_body(&plain_request("gemini", ""));
+    assert_eq!(chat["generationConfig"]["thinkingConfig"]["includeThoughts"], true);
+    let summary = build_gemini_body(&plain_request("gemini", "summary"));
+    assert!(summary["generationConfig"]["thinkingConfig"].get("includeThoughts").is_none());
+}

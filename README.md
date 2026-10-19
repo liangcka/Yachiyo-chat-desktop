@@ -48,6 +48,8 @@ Tauri v2 与 Rust 提供原生桌面窗口、本地网关和工作区工具；PC
   对齐 DSH `spill-policy` 规范。当命令输出超过阈值时，自动将完整日志写入本地 `.yachiyo/spill/` 目录，并向模型返回双向检索指引。
 - **DeepSeek 专属请求优化**：
   对齐 DSH `llm-deepseek` 适配器规则。Agent 循环逐轮回传 `reasoning_content` 思维链，满足 DeepSeek 思考模式的工具调用约束；标题、摘要与联网判定等辅助请求关闭思考，避免小预算被思考耗尽；Agent 请求显式设定 256K 输出预算。
+- **各厂商协议级适配**：
+  OpenAI Agent 改走 Responses API（GPT-6 Astra / 6.1 Sol 的 Chat Completions 不支持工具调用），并原样回传加密推理项；Claude 与 Gemini 在同一运行内原样回传带签名的思考块与 `thoughtSignature`；GLM-4.7 起的模型启用保留式思考。Claude 对数万字符的角色提示词显式打缓存断点，Agent 循环叠加自动前缀缓存。
 - **工作区深度感知与主动探索准则 (Action-first)**：
   系统动态扫描工作区顶层文件与工程结构注入上下文；当用户提出「这是什么」、「分析项目」等疑问时，模型遵循主动探索准则，优先自主调用工具查阅实际代码与说明文档，杜绝凭空捏造事实。
 
@@ -68,12 +70,12 @@ Tauri v2 与 Rust 提供原生桌面窗口、本地网关和工作区工具；PC
 
 | 分组 | 厂商 | 模型支持 | 视觉模型 |
 | ---- | ---- | -------- | -------- |
-| 国内 | 阶跃星辰 StepFun | step-5-flash, step-3.7-flash 等 | 支持 |
-| 国内 | DeepSeek | deepseek-v4.1-flash, deepseek-v4-pro 等 | 支持 |
-| 国内 | 智谱 GLM | glm-5.3, glm-4.7-flash 等 | 支持 |
-| 国际 | OpenAI | gpt-6.1-sol, gpt-6 等 | 支持 |
-| 国际 | Anthropic | claude-opus-5-5, claude-sonnet-5-5 等 | 支持 |
-| 国际 | Google Gemini | gemini-3.1-pro, gemini-3.8-flash 等 | 支持 |
+| 国内 | 阶跃星辰 StepFun | step-5-preview, step-3.7-flash 等 | 支持 |
+| 国内 | DeepSeek | deepseek-flash（V4.1 Flash）, deepseek-v4-pro 等 | 支持 |
+| 国内 | 智谱 GLM | glm-5.3, glm-5.3-flashx, glm-4.7-flash 等 | 支持 |
+| 国际 | OpenAI | gpt-6-astra, gpt-6.1-sol, gpt-6-luna 等 | 支持 |
+| 国际 | Anthropic | claude-fable-5-1, claude-opus-5-5, claude-sonnet-5-5 等 | 支持 |
+| 国际 | Google Gemini | gemini-4-argon, gemini-3.8-flash 等 | 支持 |
 
 ### 5. DSH 联网搜索管道 (WebRuntime Router)
 

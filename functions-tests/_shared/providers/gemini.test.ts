@@ -20,7 +20,7 @@ describe("buildGeminiBody", () => {
     const body = buildGeminiBody(textRequest) as {
       contents: Array<{ role: string; parts: Array<{ text: string }> }>;
       systemInstruction: { parts: Array<{ text: string }> };
-      generationConfig: { maxOutputTokens: number; thinkingConfig?: { thinkingLevel?: string } };
+      generationConfig: { maxOutputTokens: number; thinkingConfig?: Record<string, unknown> };
     };
 
     expect(body.contents).toEqual([
@@ -28,7 +28,16 @@ describe("buildGeminiBody", () => {
     ]);
     expect(body.systemInstruction.parts[0]?.text).toContain("月见八千代");
     expect(body.generationConfig.maxOutputTokens).toBe(8192);
-    expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "low" });
+    expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "low", includeThoughts: true });
+  });
+
+  it("skips thought summaries for title and summary requests", () => {
+    for (const mode of ["title", "summary"] as const) {
+      const body = buildGeminiBody({ ...textRequest, mode }) as {
+        generationConfig: { thinkingConfig?: Record<string, unknown> };
+      };
+      expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "low" });
+    }
   });
 
   it("merges adjacent same-role messages to enforce strict user/model alternation", () => {
@@ -208,7 +217,8 @@ describe("buildGeminiAdapter", () => {
     expect(adapter.isOpenAICompat).toBe(false);
     expect(adapter.hasNativeWebSearch).toBe(true);
     expect(adapter.supportsImage).toBe(true);
-    expect(adapter.defaultModel).toBe("gemini-3.7-flash");
+    expect(adapter.defaultModel).toBe("gemini-3.8-flash");
+    expect(adapter.allowedModels).toContain("gemini-4-argon");
     expect(adapter.allowedModels).toContain("gemini-3.5-flash");
   });
 

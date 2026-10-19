@@ -362,7 +362,7 @@ async fn readonly_loop_does_not_create_checkpoints_or_spill_large_read_output() 
     std::fs::write(dir.path().join("large.txt"), "a".repeat(70 * 1024)).unwrap();
     let executor = QueueExecutor(Mutex::new(VecDeque::from([
         TurnOutcome {
-            reasoning: String::new(),
+            reasoning: String::new(), native: Vec::new(),
             text: String::new(),
             usage: None,
             tool_calls: vec![
@@ -384,7 +384,7 @@ async fn readonly_loop_does_not_create_checkpoints_or_spill_large_read_output() 
             ],
         },
         TurnOutcome {
-            reasoning: String::new(),
+            reasoning: String::new(), native: Vec::new(),
             text: String::new(),
             usage: None,
             tool_calls: vec![],
@@ -435,7 +435,7 @@ async fn shell_side_effects_are_snapshotted_once_per_turn() {
     let command = "rm old.txt; printf created > new.txt";
     let executor = QueueExecutor(Mutex::new(VecDeque::from([
         TurnOutcome {
-            reasoning: String::new(),
+            reasoning: String::new(), native: Vec::new(),
             text: String::new(),
             usage: None,
             tool_calls: vec![
@@ -452,7 +452,7 @@ async fn shell_side_effects_are_snapshotted_once_per_turn() {
             ],
         },
         TurnOutcome {
-            reasoning: String::new(),
+            reasoning: String::new(), native: Vec::new(),
             text: String::new(),
             usage: None,
             tool_calls: vec![],
@@ -504,7 +504,7 @@ async fn explicit_full_auto_executes_without_permission_and_still_captures() {
     let dir = temp_workspace();
     let executor = QueueExecutor(Mutex::new(VecDeque::from([
         TurnOutcome {
-            reasoning: String::new(),
+            reasoning: String::new(), native: Vec::new(),
             text: String::new(),
             usage: None,
             tool_calls: vec![ToolInvocation {
@@ -514,7 +514,7 @@ async fn explicit_full_auto_executes_without_permission_and_still_captures() {
             }],
         },
         TurnOutcome {
-            reasoning: String::new(),
+            reasoning: String::new(), native: Vec::new(),
             text: String::new(),
             usage: None,
             tool_calls: vec![],
@@ -575,7 +575,7 @@ async fn remembered_command_permission_matches_across_runs_but_once_does_not() {
         for command in ["echo first", "echo first", "echo second"] {
             let executor = QueueExecutor(Mutex::new(VecDeque::from([
                 TurnOutcome {
-                    reasoning: String::new(),
+                    reasoning: String::new(), native: Vec::new(),
                     text: String::new(),
                     usage: None,
                     tool_calls: vec![ToolInvocation {
@@ -585,7 +585,7 @@ async fn remembered_command_permission_matches_across_runs_but_once_does_not() {
                     }],
                 },
                 TurnOutcome {
-                    reasoning: String::new(),
+                    reasoning: String::new(), native: Vec::new(),
                     text: String::new(),
                     usage: None,
                     tool_calls: vec![],

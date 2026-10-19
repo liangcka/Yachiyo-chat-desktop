@@ -17,7 +17,7 @@ const textRequest: ClientChatRequest = {
 
 describe("buildOpenAICompatBody", () => {
   it("maps history to OpenAI chat completions format with system prompt", () => {
-    const body = buildOpenAICompatBody(textRequest, "gpt-5.6-luna", true) as {
+    const body = buildOpenAICompatBody(textRequest, "gpt-5.6-luna", { supportsImage: true }) as {
       model: string;
       messages: Array<{ role: string; content: unknown }>;
       stream: boolean;
@@ -39,7 +39,7 @@ describe("buildOpenAICompatBody", () => {
 
   it("sets reasoning_effort low for reasoning-capable providers and lifts it for images", () => {
     const imageDataUrl = "data:image/webp;base64,UklGRgAAAABXRUJQ";
-    const textBody = buildOpenAICompatBody(textRequest, "step-3.7-flash", true, true) as {
+    const textBody = buildOpenAICompatBody(textRequest, "step-3.7-flash", { supportsImage: true, reasoningEffort: true }) as {
       reasoning_effort?: string;
     };
     expect(textBody.reasoning_effort).toBe("low");
@@ -48,14 +48,14 @@ describe("buildOpenAICompatBody", () => {
       locale: "zh-CN",
       messages: [{ role: "user", text: "看图", imageDataUrl }],
     };
-    const imageBody = buildOpenAICompatBody(imageRequest, "step-3.7-flash", true, true) as {
+    const imageBody = buildOpenAICompatBody(imageRequest, "step-3.7-flash", { supportsImage: true, reasoningEffort: true }) as {
       reasoning_effort?: string;
     };
     expect(imageBody.reasoning_effort).toBe("medium");
   });
 
   it("keeps a smaller token budget for summary mode", () => {
-    const body = buildOpenAICompatBody({ ...textRequest, mode: "summary" }, "gpt-5.6-luna", true) as {
+    const body = buildOpenAICompatBody({ ...textRequest, mode: "summary" }, "gpt-5.6-luna", { supportsImage: true }) as {
       max_tokens: number;
     };
     expect(body.max_tokens).toBe(4096);
@@ -67,7 +67,7 @@ describe("buildOpenAICompatBody", () => {
       locale: "ja-JP",
       messages: [{ role: "user", text: "これは何？", imageDataUrl }],
     };
-    const body = buildOpenAICompatBody(request, "gpt-5.6-luna", true) as {
+    const body = buildOpenAICompatBody(request, "gpt-5.6-luna", { supportsImage: true }) as {
       messages: Array<{ role: string; content: unknown }>;
     };
 
@@ -85,7 +85,7 @@ describe("buildOpenAICompatBody", () => {
       locale: "zh-CN",
       messages: [{ role: "user", text: "看图", imageDataUrl: "data:image/png;base64,iVBORw0KGgo=" }],
     };
-    const body = buildOpenAICompatBody(request, "deepseek-chat", false) as {
+    const body = buildOpenAICompatBody(request, "deepseek-flash", { supportsImage: false }) as {
       messages: Array<{ role: string; content: unknown }>;
     };
 
@@ -100,7 +100,7 @@ describe("buildOpenAICompatBody", () => {
         { title: "上海天气", url: "https://weather.example.cn/", snippet: "今日多云，24至30度。" },
       ],
     };
-    const body = buildOpenAICompatBody(request, "gpt-5.6-luna", true) as {
+    const body = buildOpenAICompatBody(request, "gpt-5.6-luna", { supportsImage: true }) as {
       messages: Array<{ role: string; content: string }>;
     };
     const system = body.messages[0]?.content ?? "";
@@ -117,7 +117,7 @@ describe("buildOpenAICompatBody", () => {
       ...textRequest,
       currentTime: "2026-08-27 11:09:37 星期四",
     };
-    const body = buildOpenAICompatBody(request, "gpt-5.6-luna", true) as {
+    const body = buildOpenAICompatBody(request, "gpt-5.6-luna", { supportsImage: true }) as {
       messages: Array<{ role: string; content: string }>;
     };
     const system = body.messages[0]?.content ?? "";
@@ -270,9 +270,61 @@ describe("DeepSeek thinking toggle", () => {
   });
 
   it("leaves other providers untouched", () => {
-    const body = buildOpenAICompatBody({ ...textRequest, mode: "title" }, "step-3.7-flash", true, true) as {
+    const body = buildOpenAICompatBody({ ...textRequest, mode: "title" }, "step-3.7-flash", { supportsImage: true, reasoningEffort: true }) as {
       thinking?: unknown;
     };
     expect(body.thinking).toBeUndefined();
+  });
+});
+
+describe("OpenAI official endpoint rules", () => {
+  const apiKey = "sk-" + "a".repeat(40);
+  const openai = buildOpenAICompatAdapter("openai", {
+    endpoint: "https://api.openai.com/v1/chat/completions",
+    defaultModel: "gpt-6-luna",
+    allowedModels: ["gpt-6-luna", "gpt-4.1"],
+    supportsImage: true,
+    imageModels: ["gpt-6-luna", "gpt-4.1"],
+    openaiOfficialRules: true,
+  });
+  const parse = (body: string) => JSON.parse(body) as Record<string, unknown>;
+
+  it("uses max_completion_tokens and low reasoning effort for GPT-6 on the official endpoint", () => {
+    const body = parse(openai.buildRequest({ request: textRequest, apiKey, model: "gpt-6-luna" }).body);
+    expect(body.max_completion_tokens).toBe(8192);
+    expect(body.max_tokens).toBeUndefined();
+    expect(body.reasoning_effort).toBe("low");
+
+    const judge = parse(
+      openai.buildJudgeRequest({
+        apiKey,
+        model: "gpt-6-luna",
+        systemPrompt: "judge",
+        messages: [{ role: "user", text: "上海天气" }],
+      }).body,
+    );
+    expect(judge.max_completion_tokens).toBe(512);
+    expect(judge.max_tokens).toBeUndefined();
+    expect(judge.reasoning_effort).toBe("low");
+  });
+
+  it("omits reasoning_effort for non-reasoning models", () => {
+    const body = parse(openai.buildRequest({ request: textRequest, apiKey, model: "gpt-4.1" }).body);
+    expect(body.max_completion_tokens).toBe(8192);
+    expect(body.reasoning_effort).toBeUndefined();
+  });
+
+  it("keeps the generic max_tokens body for custom base URLs", () => {
+    const body = parse(
+      openai.buildRequest({
+        request: textRequest,
+        apiKey,
+        model: "gpt-6-luna",
+        baseUrl: "https://openrouter.ai/api/v1",
+      }).body,
+    );
+    expect(body.max_tokens).toBe(8192);
+    expect(body.max_completion_tokens).toBeUndefined();
+    expect(body.reasoning_effort).toBeUndefined();
   });
 });

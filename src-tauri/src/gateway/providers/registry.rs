@@ -16,6 +16,7 @@ pub const STEPFUN_CONFIG: ProviderConfig = ProviderConfig {
     default_model: "step-3.7-flash",
     allowed_models: &[
         "step-3.7-flash",
+        "step-5-preview",
         "step-3.5-flash",
         "step-3.5-flash-2603",
         "step-2-16k",
@@ -24,16 +25,21 @@ pub const STEPFUN_CONFIG: ProviderConfig = ProviderConfig {
         "step-plan",
     ],
     supports_image: true,
-    image_models: &["step-3.7-flash"],
+    image_models: &["step-3.7-flash", "step-5-preview"],
 };
 
 pub const DEEPSEEK_CONFIG: ProviderConfig = ProviderConfig {
     id: ProviderId::Deepseek,
     endpoint: "https://api.deepseek.com/v1/chat/completions",
-    default_model: "deepseek-v4-flash",
-    allowed_models: &["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
+    default_model: "deepseek-flash",
+    allowed_models: &[
+        "deepseek-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
+    ],
     supports_image: true,
-    image_models: &["deepseek-v4-flash-vision-exp"],
+    image_models: &["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"],
 };
 
 pub const GLM_CONFIG: ProviderConfig = ProviderConfig {
@@ -43,6 +49,7 @@ pub const GLM_CONFIG: ProviderConfig = ProviderConfig {
     allowed_models: &[
         "glm-5.3",
         "glm-5.3-flash",
+        "glm-5.3-flashx",
         "glm-5.2",
         "glm-4.7-flash",
         "glm-4.6",
@@ -50,14 +57,18 @@ pub const GLM_CONFIG: ProviderConfig = ProviderConfig {
         "glm-4v-flash",
     ],
     supports_image: true,
-    image_models: &["glm-5.3-flash", "glm-4.6v-flash", "glm-4v-flash"],
+    image_models: &["glm-5.3-flash", "glm-5.3-flashx", "glm-4.6v-flash", "glm-4v-flash"],
 };
 
 pub const OPENAI_CONFIG: ProviderConfig = ProviderConfig {
     id: ProviderId::Openai,
     endpoint: "https://api.openai.com/v1/chat/completions",
-    default_model: "gpt-5.6-luna",
+    default_model: "gpt-6-luna",
     allowed_models: &[
+        "gpt-6-astra",
+        "gpt-6.1-sol",
+        "gpt-6-sol",
+        "gpt-6-luna",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
@@ -67,6 +78,10 @@ pub const OPENAI_CONFIG: ProviderConfig = ProviderConfig {
     ],
     supports_image: true,
     image_models: &[
+        "gpt-6-astra",
+        "gpt-6.1-sol",
+        "gpt-6-sol",
+        "gpt-6-luna",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
@@ -106,22 +121,26 @@ pub const CLAUDE_CONFIG: ProviderConfig = ProviderConfig {
 pub const GEMINI_CONFIG: ProviderConfig = ProviderConfig {
     id: ProviderId::Gemini,
     endpoint: "https://generativelanguage.googleapis.com/v1beta",
-    default_model: "gemini-3.7-flash",
+    default_model: "gemini-3.8-flash",
     allowed_models: &[
-        "gemini-3.7-flash",
+        "gemini-4-argon",
+        "gemini-3.8-flash",
         "gemini-3.6-flash",
-        "gemini-3.5-flash",
         "gemini-3.5-flash-lite",
         "gemini-3.1-pro",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash",
         "gemini-3.1-flash-lite",
     ],
     supports_image: true,
     image_models: &[
-        "gemini-3.7-flash",
+        "gemini-4-argon",
+        "gemini-3.8-flash",
         "gemini-3.6-flash",
-        "gemini-3.5-flash",
         "gemini-3.5-flash-lite",
         "gemini-3.1-pro",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash",
         "gemini-3.1-flash-lite",
     ],
 };

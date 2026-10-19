@@ -50,6 +50,8 @@ pub struct TurnOutcome {
     pub reasoning: String,
     pub tool_calls: Vec<ToolInvocation>,
     pub usage: Option<TokenUsage>,
+    /// 本轮厂商原生输出，随 assistant 消息原样回传（见 `AgentMessage::Assistant::native`）
+    pub native: Vec<serde_json::Value>,
 }
 
 pub trait TurnExecutor: Send + Sync {
@@ -154,6 +156,7 @@ pub async fn run_agent_loop_ext(
             text: outcome.text.clone(),
             reasoning: outcome.reasoning.clone(),
             tool_calls: outcome.tool_calls.clone(),
+            native: outcome.native.clone(),
         });
 
         for call in &outcome.tool_calls {
@@ -340,7 +343,7 @@ impl TurnExecutor for HttpTurnExecutor {
             let config = get_provider_config(provider_id);
 
             let (url, body) = match provider_id {
-                ProviderId::Stepfun | ProviderId::Deepseek | ProviderId::Glm | ProviderId::Openai => {
+                ProviderId::Stepfun | ProviderId::Deepseek | ProviderId::Glm => {
                     (
                         config.endpoint.to_string(),
                         crate::gateway::providers::openai_compat::build_openai_agent_body(
@@ -348,6 +351,12 @@ impl TurnExecutor for HttpTurnExecutor {
                         ),
                     )
                 }
+                ProviderId::Openai => (
+                    crate::gateway::providers::openai_responses::OPENAI_RESPONSES_ENDPOINT.to_string(),
+                    crate::gateway::providers::openai_responses::build_openai_responses_agent_body(
+                        &model, &messages, &system_prompt, &tools_schema,
+                    ),
+                ),
                 ProviderId::Claude => (
                     config.endpoint.to_string(),
                     crate::gateway::providers::anthropic::build_anthropic_agent_body(
@@ -369,6 +378,9 @@ impl TurnExecutor for HttpTurnExecutor {
                 ProviderId::Claude => {
                     headers.insert(reqwest::header::HeaderName::from_static("x-api-key"), reqwest::header::HeaderValue::from_str(&api_key).map_err(|e| e.to_string())?);
                     headers.insert(reqwest::header::HeaderName::from_static("anthropic-version"), reqwest::header::HeaderValue::from_static("2023-06-01"));
+                    if let Some(beta) = crate::gateway::providers::anthropic::anthropic_beta_header(&model) {
+                        headers.insert(reqwest::header::HeaderName::from_static("anthropic-beta"), reqwest::header::HeaderValue::from_static(beta));
+                    }
                 }
                 ProviderId::Gemini => {
                     headers.insert(reqwest::header::HeaderName::from_static("x-goog-api-key"), reqwest::header::HeaderValue::from_str(&api_key).map_err(|e| e.to_string())?);
@@ -418,6 +430,7 @@ impl TurnExecutor for HttpTurnExecutor {
             }
 
             let mut agg = crate::gateway::agent::stream_agg::ToolCallAggregator::new();
+            let mut native = NativeTurnCollector::for_provider(provider_id);
             let mut full_text = String::new();
             let mut reasoning = String::new();
             let mut usage: Option<TokenUsage> = None;
@@ -446,8 +459,10 @@ impl TurnExecutor for HttpTurnExecutor {
                     if data_str.is_empty() || data_str == "[DONE]" {
                         continue;
                     }
+                    native.push(&data_str);
                     let delta = match provider_id {
-                        ProviderId::Stepfun | ProviderId::Deepseek | ProviderId::Glm | ProviderId::Openai => crate::gateway::stream::extract_openai_delta(&data_str),
+                        ProviderId::Stepfun | ProviderId::Deepseek | ProviderId::Glm => crate::gateway::stream::extract_openai_delta(&data_str),
+                        ProviderId::Openai => crate::gateway::providers::openai_responses::extract_openai_responses_delta(&data_str),
                         ProviderId::Claude => crate::gateway::providers::anthropic::extract_anthropic_delta(&data_str),
                         ProviderId::Gemini => crate::gateway::providers::gemini::extract_gemini_delta(&data_str),
                     };
@@ -478,8 +493,50 @@ impl TurnExecutor for HttpTurnExecutor {
                 }
             }
 
-            Ok(TurnOutcome { text: full_text, reasoning, tool_calls: agg.finish(), usage })
+            let (native, tool_calls) = native.finish(agg)?;
+            Ok(TurnOutcome { text: full_text, reasoning, tool_calls, usage, native })
         })
+    }
+}
+
+/// 按 provider 收集需要原样回传的原生输出；Chat Completions 系 provider 无需收集
+enum NativeTurnCollector {
+    None,
+    Anthropic(crate::gateway::providers::anthropic::AnthropicTurnCollector),
+    Gemini(crate::gateway::providers::gemini::GeminiTurnCollector),
+    Responses(crate::gateway::providers::openai_responses::ResponsesTurnCollector),
+}
+
+impl NativeTurnCollector {
+    fn for_provider(provider: ProviderId) -> Self {
+        match provider {
+            ProviderId::Claude => Self::Anthropic(Default::default()),
+            ProviderId::Gemini => Self::Gemini(Default::default()),
+            ProviderId::Openai => Self::Responses(Default::default()),
+            ProviderId::Stepfun | ProviderId::Deepseek | ProviderId::Glm => Self::None,
+        }
+    }
+
+    fn push(&mut self, data: &str) {
+        match self {
+            Self::None => {}
+            Self::Anthropic(collector) => collector.push(data),
+            Self::Gemini(collector) => collector.push(data),
+            Self::Responses(collector) => collector.push(data),
+        }
+    }
+
+    /// Anthropic 的工具调用取自已剔除拒答回退边界之前内容的内容块，其余 provider 取流式聚合结果
+    fn finish(
+        self,
+        agg: crate::gateway::agent::stream_agg::ToolCallAggregator,
+    ) -> Result<(Vec<serde_json::Value>, Vec<ToolInvocation>), String> {
+        match self {
+            Self::None => Ok((Vec::new(), agg.finish())),
+            Self::Anthropic(collector) => Ok(collector.finish()),
+            Self::Gemini(collector) => Ok((collector.finish(), agg.finish())),
+            Self::Responses(collector) => Ok((collector.finish()?, agg.finish())),
+        }
     }
 }
 

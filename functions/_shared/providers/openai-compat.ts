@@ -19,6 +19,41 @@ export interface OpenAICompatConfig {
   readonly reasoningEffort?: boolean;
   /** 该 provider 使用 DeepSeek 格式的 thinking 开关（thinking.type），默认开启思考，辅助请求需显式关闭 */
   readonly deepseekThinking?: boolean;
+  /**
+   * OpenAI 官方端点规则，仅在未自定义 baseUrl 时生效：GPT-5/6 推理模型拒绝 max_tokens，
+   * 输出预算改用 max_completion_tokens，并为推理模型下发 reasoning_effort；第三方兼容网关不一定认这两个字段
+   */
+  readonly openaiOfficialRules?: boolean;
+}
+
+/** 请求体构造选项：由 adapter 按厂商配置、所选模型与是否自定义端点解析得出 */
+export interface OpenAICompatBodyOptions {
+  readonly supportsImage: boolean;
+  /** 下发 reasoning_effort：思考 token 计入输出预算，需显式压低思考档位 */
+  readonly reasoningEffort?: boolean;
+  /** DeepSeek 格式 thinking 开关：辅助请求关闭思考 */
+  readonly deepseekThinking?: boolean;
+  /** 输出预算字段使用 max_completion_tokens 而非 max_tokens */
+  readonly maxCompletionTokens?: boolean;
+}
+
+/** GPT-5/GPT-6 系列为推理模型（接受 reasoning_effort）；gpt-4.1 等非推理模型传该字段会被拒绝 */
+function isOpenAIReasoningModel(model: string): boolean {
+  return /^gpt-[56]/u.test(model);
+}
+
+function resolveBodyOptions(
+  config: OpenAICompatConfig,
+  model: string,
+  baseUrl: string | undefined,
+): OpenAICompatBodyOptions {
+  const official = config.openaiOfficialRules === true && baseUrl === undefined;
+  return {
+    supportsImage: config.supportsImage,
+    reasoningEffort: config.reasoningEffort === true || (official && isOpenAIReasoningModel(model)),
+    deepseekThinking: config.deepseekThinking === true,
+    maxCompletionTokens: official,
+  };
 }
 
 interface OpenAITextPart {
@@ -64,12 +99,11 @@ function mapHistoryMessage(
 export function buildOpenAICompatBody(
   request: EnrichedChatRequest,
   model: string,
-  supportsImage: boolean,
-  reasoningEffort = false,
-  deepseekThinking = false,
+  options: OpenAICompatBodyOptions,
 ): unknown {
   const auxiliary = request.mode === "title" || request.mode === "summary";
   const containsImage = request.messages.some((message) => message.imageDataUrl !== undefined);
+  const maxTokensField = options.maxCompletionTokens === true ? "max_completion_tokens" : "max_tokens";
   return {
     model,
     messages: [
@@ -82,15 +116,17 @@ export function buildOpenAICompatBody(
           currentTime: request.currentTime,
         }),
       },
-      ...request.messages.map((message) => mapHistoryMessage(message, request.locale, supportsImage)),
+      ...request.messages.map((message) =>
+        mapHistoryMessage(message, request.locale, options.supportsImage),
+      ),
     ],
     stream: true,
     stream_options: { include_usage: true },
-    // 推理模型的思考 token 计入 max_tokens 预算，过小会被思考耗尽导致正文为空
-    max_tokens: request.mode === "title" ? 512 : request.mode === "summary" ? 4096 : 8192,
-    ...(reasoningEffort ? { reasoning_effort: containsImage ? "medium" : "low" } : {}),
+    // 推理模型的思考 token 计入输出预算，过小会被思考耗尽导致正文为空
+    [maxTokensField]: request.mode === "title" ? 512 : request.mode === "summary" ? 4096 : 8192,
+    ...(options.reasoningEffort === true ? { reasoning_effort: containsImage ? "medium" : "low" } : {}),
     // 标题与摘要预算有限，默认开启的思考会先耗尽 max_tokens（对齐 DSH 辅助调用的 thinking.disabled）
-    ...(deepseekThinking && auxiliary ? { thinking: { type: "disabled" as const } } : {}),
+    ...(options.deepseekThinking === true && auxiliary ? { thinking: { type: "disabled" as const } } : {}),
   };
 }
 
@@ -197,9 +233,7 @@ export function buildOpenAICompatAdapter(
       const body = buildOpenAICompatBody(
         input.request,
         input.model,
-        config.supportsImage,
-        config.reasoningEffort === true,
-        config.deepseekThinking === true,
+        resolveBodyOptions(config, input.model, input.baseUrl),
       );
       return {
         url: resolveEndpoint(input.baseUrl, config.endpoint),
@@ -213,6 +247,7 @@ export function buildOpenAICompatAdapter(
     },
     extractDeltaText: extractOpenAIDeltaText,
     buildJudgeRequest(input: JudgeRequestInput): BuiltProviderRequest {
+      const options = resolveBodyOptions(config, input.model, input.baseUrl);
       const body = {
         model: input.model,
         messages: [
@@ -220,10 +255,10 @@ export function buildOpenAICompatAdapter(
           ...input.messages.map((message) => ({ role: message.role, content: message.text })),
         ],
         stream: false,
-        // 推理模型的思考 token 计入 max_tokens 预算，512 足够 YES/NO 输出
-        max_tokens: 512,
-        ...(config.reasoningEffort === true ? { reasoning_effort: "low" as const } : {}),
-        ...(config.deepseekThinking === true ? { thinking: { type: "disabled" as const } } : {}),
+        // 推理模型的思考 token 计入输出预算，512 足够 YES/NO 输出
+        [options.maxCompletionTokens === true ? "max_completion_tokens" : "max_tokens"]: 512,
+        ...(options.reasoningEffort === true ? { reasoning_effort: "low" as const } : {}),
+        ...(options.deepseekThinking === true ? { thinking: { type: "disabled" as const } } : {}),
       };
       return {
         url: resolveEndpoint(input.baseUrl, config.endpoint),

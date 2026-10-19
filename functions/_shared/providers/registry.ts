@@ -52,12 +52,26 @@ export interface ProviderAdapter {
   extractJudgeText(responseJson: string): string | null;
 }
 
+const OPENAI_MODELS = [
+  "gpt-6-astra",
+  "gpt-6.1-sol",
+  "gpt-6-sol",
+  "gpt-6-luna",
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+  "gpt-5.5",
+  "gpt-4.1",
+  "gpt-4.1-mini",
+] as const;
+
 const openaiCompatProviders = {
   stepfun: {
     endpoint: "https://api.stepfun.com/step_plan/v1/chat/completions",
     defaultModel: "step-3.7-flash",
     allowedModels: [
       "step-3.7-flash",
+      "step-5-preview",
       "step-3.5-flash",
       "step-3.5-flash-2603",
       "step-2-16k",
@@ -66,30 +80,40 @@ const openaiCompatProviders = {
       "step-plan",
     ],
     supportsImage: true,
-    imageModels: ["step-3.7-flash"],
+    imageModels: ["step-3.7-flash", "step-5-preview"],
     reasoningEffort: true,
   },
   deepseek: {
     endpoint: "https://api.deepseek.com/v1/chat/completions",
-    defaultModel: "deepseek-v4-flash",
-    allowedModels: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
+    defaultModel: "deepseek-flash",
+    allowedModels: ["deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"],
     supportsImage: true,
-    imageModels: ["deepseek-v4-flash-vision-exp"],
+    imageModels: ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"],
     deepseekThinking: true,
   },
   glm: {
     endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
     defaultModel: "glm-5.3-flash",
-    allowedModels: ["glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-4.7-flash", "glm-4.6", "glm-4.6v-flash", "glm-4v-flash"],
+    allowedModels: [
+      "glm-5.3",
+      "glm-5.3-flash",
+      "glm-5.3-flashx",
+      "glm-5.2",
+      "glm-4.7-flash",
+      "glm-4.6",
+      "glm-4.6v-flash",
+      "glm-4v-flash",
+    ],
     supportsImage: true,
-    imageModels: ["glm-5.3-flash", "glm-4.6v-flash", "glm-4v-flash"],
+    imageModels: ["glm-5.3-flash", "glm-5.3-flashx", "glm-4.6v-flash", "glm-4v-flash"],
   },
   openai: {
     endpoint: "https://api.openai.com/v1/chat/completions",
-    defaultModel: "gpt-5.6-luna",
-    allowedModels: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-4.1", "gpt-4.1-mini"],
+    defaultModel: "gpt-6-luna",
+    allowedModels: OPENAI_MODELS,
     supportsImage: true,
-    imageModels: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-4.1", "gpt-4.1-mini"],
+    imageModels: OPENAI_MODELS,
+    openaiOfficialRules: true,
   },
 } as const;
 

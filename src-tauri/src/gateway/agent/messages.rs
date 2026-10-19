@@ -12,6 +12,9 @@ pub enum AgentMessage {
         /// 本轮思维链原文；DeepSeek 思考模式要求工具轮次回传，客户端历史不携带时为空
         reasoning: String,
         tool_calls: Vec<ToolInvocation>,
+        /// 本轮厂商原生输出（Anthropic 内容块、Responses 输出项、Gemini parts），
+        /// 携带思考签名等不可重建的字段，同一运行内原样回传；客户端历史不携带时为空
+        native: Vec<serde_json::Value>,
     },
     ToolResult {
         tool_call_id: String,
@@ -34,6 +37,7 @@ pub fn history_to_agent_messages(history: &[ClientHistoryMessage]) -> Vec<AgentM
                 text: msg.text.clone(),
                 reasoning: String::new(),
                 tool_calls: msg.tool_calls.clone().unwrap_or_default(),
+                native: Vec::new(),
             },
             _ => AgentMessage::User {
                 text: msg.text.clone(),

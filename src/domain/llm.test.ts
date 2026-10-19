@@ -56,9 +56,14 @@ describe("PROVIDER_METADATA", () => {
   });
 
   it("limits imageModels to the models that actually accept images", () => {
-    expect(PROVIDER_METADATA.deepseek.imageModels).toEqual(["deepseek-v4-flash-vision-exp"]);
+    expect(PROVIDER_METADATA.deepseek.imageModels).toEqual([
+      "deepseek-flash",
+      "deepseek-v4-flash",
+      "deepseek-v4-flash-vision-exp",
+    ]);
     expect(PROVIDER_METADATA.glm.imageModels).toEqual([
       "glm-5.3-flash",
+      "glm-5.3-flashx",
       "glm-4.6v-flash",
       "glm-4v-flash",
     ]);
