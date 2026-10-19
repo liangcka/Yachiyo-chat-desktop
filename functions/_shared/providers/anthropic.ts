@@ -11,6 +11,8 @@ import type {
 
 const ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
+/** 服务端拒答回退（fallbacks: "default"）所需的 beta 头 */
+const SERVER_SIDE_FALLBACK_BETA = "server-side-fallback-2026-07-01";
 const ALLOWED_MODELS = [
   "claude-fable-5-1",
   "claude-opus-5-5",
@@ -22,9 +24,25 @@ const ALLOWED_MODELS = [
   "claude-haiku-4-5",
 ] as const;
 
+/** Haiku 4.5 仍使用 budget_tokens 思考协议，不接受 adaptive thinking 与 effort */
+const LEGACY_THINKING_MODELS: ReadonlySet<string> = new Set(["claude-haiku-4-5"]);
+/** 安全分类器可能拒答、且支持服务端回退到其他模型继续作答的型号 */
+const SERVER_FALLBACK_MODELS: ReadonlySet<string> = new Set([
+  "claude-fable-5-1",
+  "claude-opus-5-5",
+  "claude-opus-5",
+  "claude-sonnet-5-5",
+]);
+
 interface AnthropicTextBlock {
   type: "text";
   text: string;
+}
+
+interface AnthropicSystemBlock {
+  type: "text";
+  text: string;
+  cache_control?: { type: "ephemeral" };
 }
 
 interface AnthropicImageBlock {
@@ -122,18 +140,59 @@ export function buildAnthropicMessages(
   return merged;
 }
 
+/**
+ * 角色提示词（数万字符）是每次请求都相同的前缀，而 <runtime> 段携带逐分钟变化的时间与搜索结果。
+ * Anthropic 不做隐式前缀缓存，在两段之间显式打缓存断点，后续请求的角色提示词按缓存读取计费
+ */
+export function buildAnthropicSystem(prompt: string): string | AnthropicSystemBlock[] {
+  const boundary = prompt.indexOf("\n\n<runtime>");
+  if (boundary <= 0) return prompt;
+  return [
+    { type: "text", text: prompt.slice(0, boundary), cache_control: { type: "ephemeral" } },
+    { type: "text", text: prompt.slice(boundary + 2) },
+  ];
+}
+
+/**
+ * Claude 5 系列默认开启 adaptive thinking，思考 token 计入 max_tokens；
+ * 角色聊天与辅助请求用 low 档位压低延迟，聊天额外要求返回思考摘要（默认 omitted 只给空思考块）
+ */
+function thinkingFields(model: string, displayThinking: boolean): Record<string, unknown> {
+  if (LEGACY_THINKING_MODELS.has(model)) return {};
+  return {
+    thinking: displayThinking ? { type: "adaptive", display: "summarized" } : { type: "adaptive" },
+    output_config: { effort: "low" },
+  };
+}
+
+function anthropicHeaders(apiKey: string, accept: string, serverFallback: boolean): Record<string, string> {
+  return {
+    accept,
+    "content-type": "application/json",
+    "anthropic-version": ANTHROPIC_VERSION,
+    "x-api-key": apiKey,
+    ...(serverFallback ? { "anthropic-beta": SERVER_SIDE_FALLBACK_BETA } : {}),
+  };
+}
+
 export function buildAnthropicBody(request: EnrichedChatRequest, model: string): unknown {
+  const auxiliary = request.mode === "title" || request.mode === "summary";
   return {
     model,
-    max_tokens: request.mode === "title" ? 128 : request.mode === "summary" ? 1024 : 2048,
-    system: buildSystemPrompt(request.locale, request.mode, {
-      webSearch: request.webSearch,
-      smartSearch: request.smartSearch,
-      searchResults: request.searchResults,
-      currentTime: request.currentTime,
-    }),
+    max_tokens: request.mode === "title" ? 1024 : request.mode === "summary" ? 4096 : 16000,
+    system: buildAnthropicSystem(
+      buildSystemPrompt(request.locale, request.mode, {
+        webSearch: request.webSearch,
+        smartSearch: request.smartSearch,
+        searchResults: request.searchResults,
+        currentTime: request.currentTime,
+      }),
+    ),
     messages: buildAnthropicMessages(request.messages, request.locale),
     stream: true,
+    ...thinkingFields(model, !auxiliary),
+    // 分类器拒答时服务端在同一条流内换模型续写，无需客户端重试
+    ...(SERVER_FALLBACK_MODELS.has(model) ? { fallbacks: "default" } : {}),
   };
 }
 
@@ -155,7 +214,12 @@ export function extractAnthropicDeltaText(data: string): ExtractedDelta {
     const msgUsage = msg?.usage as Record<string, unknown> | undefined;
     const inputTokens = typeof msgUsage?.input_tokens === "number" ? msgUsage.input_tokens : undefined;
     if (inputTokens !== undefined) {
-      return { usage: { promptTokens: inputTokens } };
+      // input_tokens 只含未命中缓存的部分，提示词总量需加上缓存写入与读取
+      const cacheWrite =
+        typeof msgUsage?.cache_creation_input_tokens === "number" ? msgUsage.cache_creation_input_tokens : 0;
+      const cacheRead =
+        typeof msgUsage?.cache_read_input_tokens === "number" ? msgUsage.cache_read_input_tokens : 0;
+      return { usage: { promptTokens: inputTokens + cacheWrite + cacheRead } };
     }
     return null;
   }
@@ -217,12 +281,7 @@ export function buildAnthropicAdapter(): ProviderAdapter {
       const body = buildAnthropicBody(input.request, input.model);
       return {
         url: ANTHROPIC_ENDPOINT,
-        headers: {
-          accept: "text/event-stream",
-          "content-type": "application/json",
-          "anthropic-version": ANTHROPIC_VERSION,
-          "x-api-key": input.apiKey,
-        },
+        headers: anthropicHeaders(input.apiKey, "text/event-stream", SERVER_FALLBACK_MODELS.has(input.model)),
         body: JSON.stringify(body),
       };
     },
@@ -230,22 +289,19 @@ export function buildAnthropicAdapter(): ProviderAdapter {
     buildJudgeRequest(input: JudgeRequestInput): BuiltProviderRequest {
       const body = {
         model: input.model,
-        max_tokens: 256,
+        // 思考 token 计入 max_tokens，1024 足够 low 档位思考后输出 YES/NO
+        max_tokens: 1024,
         system: input.systemPrompt,
         messages: input.messages.map((message) => ({
           role: message.role,
           content: message.text,
         })),
         stream: false,
+        ...thinkingFields(input.model, false),
       };
       return {
         url: ANTHROPIC_ENDPOINT,
-        headers: {
-          accept: "application/json",
-          "content-type": "application/json",
-          "anthropic-version": ANTHROPIC_VERSION,
-          "x-api-key": input.apiKey,
-        },
+        headers: anthropicHeaders(input.apiKey, "application/json", false),
         body: JSON.stringify(body),
       };
     },

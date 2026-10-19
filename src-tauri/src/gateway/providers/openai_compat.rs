@@ -8,6 +8,17 @@ use serde_json::json;
 /// 思考 token 计入 max_tokens，不能依赖服务端默认上限，否则长文件写入或深度推理会被截断
 pub const DEEPSEEK_AGENT_MAX_TOKENS: u32 = 256_000;
 
+/// GPT-5/GPT-6 系列为推理模型（接受 reasoning_effort）；gpt-4.1 等非推理模型传该字段会被拒绝
+pub fn is_openai_reasoning_model(model: &str) -> bool {
+    model.starts_with("gpt-5") || model.starts_with("gpt-6")
+}
+
+/// GLM-4.7 起的强制思考模型支持保留式思考：`clear_thinking: false` 时服务端保留回传的 reasoning_content，
+/// 跨工具轮次延续同一任务的推理；更早的混合或非思考模型（glm-4.6、glm-4v-flash）不发送该开关
+fn glm_preserves_thinking(model: &str) -> bool {
+    model.starts_with("glm-5") || model.starts_with("glm-4.7")
+}
+
 pub fn build_openai_messages(
     request: &ClientChatRequest,
 ) -> Vec<serde_json::Value> {
@@ -66,10 +77,23 @@ pub fn build_openai_compat_body(
         "stream_options": { "include_usage": true }
     });
 
+    // OpenAI 推理模型拒绝 max_tokens，官方端点统一改用 max_completion_tokens；
+    // 思考 token 计入输出预算，摘要预算与 Web 端对齐，避免被思考耗尽
+    let max_tokens_field = if config.id == ProviderId::Openai { "max_completion_tokens" } else { "max_tokens" };
     if let Some(RequestMode::Summary) = request.mode {
-        body["max_tokens"] = json!(1024);
+        body[max_tokens_field] = json!(4096);
     } else if let Some(RequestMode::Title) = request.mode {
-        body["max_tokens"] = json!(512);
+        body[max_tokens_field] = json!(512);
+    }
+
+    let reasoning_effort = match config.id {
+        ProviderId::Stepfun => true,
+        ProviderId::Openai => is_openai_reasoning_model(model),
+        _ => false,
+    };
+    if reasoning_effort {
+        let contains_image = request.messages.iter().any(|msg| msg.image_data_url.is_some());
+        body["reasoning_effort"] = json!(if contains_image { "medium" } else { "low" });
     }
 
     // 标题与摘要的输出预算很小，DeepSeek 默认开启的思考会先耗尽预算导致正文为空，
@@ -94,6 +118,13 @@ pub fn build_openai_agent_body(
     // DeepSeek 思考模式要求 assistant 消息回传 reasoning_content，工具轮次缺失会被上游 400 拒绝；
     // 客户端重放的历史不含思维链时回传空串（对齐 DSH reasoning passback 与 pi-ai 的 DeepSeek 兼容规则）
     let deepseek = provider == ProviderId::Deepseek;
+    // GLM 保留式思考要求按原顺序回传未修改的 reasoning_content，但不得为没有思维链的历史轮次补写空串
+    let glm_preserved = provider == ProviderId::Glm && glm_preserves_thinking(model);
+    let reasoning_field = |message: &mut serde_json::Value, reasoning: &str| {
+        if deepseek || (glm_preserved && !reasoning.is_empty()) {
+            message["reasoning_content"] = json!(reasoning);
+        }
+    };
     let mut out = vec![json!({ "role": "system", "content": system_prompt })];
     for msg in messages {
         match msg {
@@ -110,13 +141,11 @@ pub fn build_openai_agent_body(
                     out.push(json!({ "role": "user", "content": text }));
                 }
             }
-            AgentMessage::Assistant { text, reasoning, tool_calls } => {
+            AgentMessage::Assistant { text, reasoning, tool_calls, .. } => {
                 if tool_calls.is_empty() {
                     if !text.is_empty() {
                         let mut message = json!({ "role": "assistant", "content": text });
-                        if deepseek {
-                            message["reasoning_content"] = json!(reasoning);
-                        }
+                        reasoning_field(&mut message, reasoning);
                         out.push(message);
                     }
                     continue;
@@ -136,9 +165,7 @@ pub fn build_openai_agent_body(
                     "content": if text.is_empty() { serde_json::Value::Null } else { json!(text) },
                     "tool_calls": calls
                 });
-                if deepseek {
-                    message["reasoning_content"] = json!(reasoning);
-                }
+                reasoning_field(&mut message, reasoning);
                 out.push(message);
             }
             AgentMessage::ToolResult { tool_call_id, content, .. } => {
@@ -164,6 +191,9 @@ pub fn build_openai_agent_body(
     });
     if deepseek {
         body["max_tokens"] = json!(DEEPSEEK_AGENT_MAX_TOKENS);
+    }
+    if glm_preserved {
+        body["thinking"] = json!({ "type": "enabled", "clear_thinking": false });
     }
     body
 }

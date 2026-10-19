@@ -59,6 +59,12 @@ pub fn build_upstream_request(
                 reqwest::header::HeaderName::from_static("anthropic-version"),
                 reqwest::header::HeaderValue::from_static("2023-06-01"),
             );
+            if let Some(beta) = providers::anthropic::anthropic_beta_header(model) {
+                headers.insert(
+                    reqwest::header::HeaderName::from_static("anthropic-beta"),
+                    reqwest::header::HeaderValue::from_static(beta),
+                );
+            }
             let body = providers::anthropic::build_anthropic_body(request, model);
             (config.endpoint.to_string(), body)
         }

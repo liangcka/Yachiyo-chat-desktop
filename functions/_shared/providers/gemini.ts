@@ -11,11 +11,13 @@ import type {
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const ALLOWED_MODELS = [
-  "gemini-3.7-flash",
+  "gemini-4-argon",
+  "gemini-3.8-flash",
   "gemini-3.6-flash",
-  "gemini-3.5-flash",
   "gemini-3.5-flash-lite",
   "gemini-3.1-pro",
+  "gemini-3.7-flash",
+  "gemini-3.5-flash",
   "gemini-3.1-flash-lite",
 ] as const;
 
@@ -96,8 +98,8 @@ export function buildGeminiContents(
 }
 
 export function buildGeminiBody(request: EnrichedChatRequest): unknown {
-  const useGoogleSearch =
-    request.webSearch === true && request.mode !== "summary" && request.mode !== "title";
+  const auxiliary = request.mode === "summary" || request.mode === "title";
+  const useGoogleSearch = request.webSearch === true && !auxiliary;
   return {
     contents: buildGeminiContents(request.messages, request.locale),
     ...(useGoogleSearch ? { tools: [{ googleSearch: {} }] } : {}),
@@ -114,10 +116,13 @@ export function buildGeminiBody(request: EnrichedChatRequest): unknown {
       ],
     },
     // Gemini 3 系列默认开启 thinking 且思考 token 计入 maxOutputTokens，
-    // 预算过小会被思考耗尽导致正文为空；thinkingLevel low 适配角色聊天场景
+    // 预算过小会被思考耗尽导致正文为空；thinkingLevel low 适配角色聊天场景。
+    // 思考摘要默认不返回，聊天显式 includeThoughts 才有 thought 流；辅助请求无需展示
     generationConfig: {
       maxOutputTokens: request.mode === "title" ? 512 : request.mode === "summary" ? 4096 : 8192,
-      thinkingConfig: { thinkingLevel: "low" },
+      thinkingConfig: auxiliary
+        ? { thinkingLevel: "low" }
+        : { thinkingLevel: "low", includeThoughts: true },
     },
   };
 }
@@ -251,7 +256,7 @@ export function buildGeminiAdapter(): ProviderAdapter {
     hasNativeWebSearch: true,
     supportsImage: true,
     imageModels: [...ALLOWED_MODELS],
-    defaultModel: "gemini-3.7-flash",
+    defaultModel: "gemini-3.8-flash",
     allowedModels: ALLOWED_MODELS,
     buildRequest(input: ProviderRequestInput): BuiltProviderRequest {
       const body = buildGeminiBody(input.request);

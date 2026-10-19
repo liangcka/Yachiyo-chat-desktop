@@ -32,8 +32,17 @@ describe("PROVIDERS registry", () => {
   });
 
   it("exposes per-model image support aligned with the frontend", () => {
-    expect(PROVIDERS.deepseek.imageModels).toEqual(["deepseek-v4-flash-vision-exp"]);
-    expect(PROVIDERS.glm.imageModels).toEqual(["glm-5.3-flash", "glm-4.6v-flash", "glm-4v-flash"]);
+    expect(PROVIDERS.deepseek.imageModels).toEqual([
+      "deepseek-flash",
+      "deepseek-v4-flash",
+      "deepseek-v4-flash-vision-exp",
+    ]);
+    expect(PROVIDERS.glm.imageModels).toEqual([
+      "glm-5.3-flash",
+      "glm-5.3-flashx",
+      "glm-4.6v-flash",
+      "glm-4v-flash",
+    ]);
     for (const id of PROVIDER_IDS) {
       for (const model of PROVIDERS[id].imageModels) {
         expect(PROVIDERS[id].allowedModels).toContain(model);
@@ -64,6 +73,8 @@ describe("isAllowedModel", () => {
     const provider = PROVIDERS.openai;
     expect(isAllowedModel(provider, "gpt-5.6-luna")).toBe(true);
     expect(isAllowedModel(provider, "gpt-5.6-sol")).toBe(true);
+    expect(isAllowedModel(provider, "gpt-6-astra")).toBe(true);
+    expect(isAllowedModel(provider, "gpt-6.1-sol")).toBe(true);
     expect(isAllowedModel(provider, "gpt-4o")).toBe(false);
     expect(isAllowedModel(provider, "")).toBe(false);
     expect(isAllowedModel(provider, undefined)).toBe(false);

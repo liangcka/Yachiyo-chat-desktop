@@ -79,7 +79,7 @@ fn test_openai_agent_body_structure() {
         AgentMessage::User { text: "读 a.rs".to_string(), image_data_url: None },
         AgentMessage::Assistant {
             text: "好的".to_string(),
-            reasoning: String::new(),
+            reasoning: String::new(), native: Vec::new(),
             tool_calls: vec![ToolInvocation {
                 id: "call-1".to_string(),
                 name: "read_file".to_string(),
@@ -122,11 +122,11 @@ fn test_deepseek_agent_body_replays_reasoning_and_sets_output_budget() {
     let messages = vec![
         AgentMessage::User { text: "读 a.rs".to_string(), image_data_url: None },
         // 客户端重放的上一轮工具调用不含思维链
-        AgentMessage::Assistant { text: String::new(), reasoning: String::new(), tool_calls: vec![call("call-0")] },
+        AgentMessage::Assistant { text: String::new(), reasoning: String::new(), native: Vec::new(), tool_calls: vec![call("call-0")] },
         AgentMessage::ToolResult { tool_call_id: "call-0".to_string(), name: "read_file".to_string(), content: "旧".to_string() },
-        AgentMessage::Assistant { text: "读过了".to_string(), reasoning: String::new(), tool_calls: vec![] },
+        AgentMessage::Assistant { text: "读过了".to_string(), reasoning: String::new(), native: Vec::new(), tool_calls: vec![] },
         AgentMessage::User { text: "再读一次".to_string(), image_data_url: None },
-        AgentMessage::Assistant { text: String::new(), reasoning: "需要重新读取".to_string(), tool_calls: vec![call("call-1")] },
+        AgentMessage::Assistant { text: String::new(), reasoning: "需要重新读取".to_string(), tool_calls: vec![call("call-1")], native: Vec::new() },
         AgentMessage::ToolResult { tool_call_id: "call-1".to_string(), name: "read_file".to_string(), content: "新".to_string() },
     ];
     let body = build_openai_agent_body(ProviderId::Deepseek, "deepseek-v4-flash", &messages, "系统提示", &[]);
@@ -184,7 +184,7 @@ fn test_anthropic_agent_body_structure() {
         AgentMessage::User { text: "读 a.rs".to_string(), image_data_url: None },
         AgentMessage::Assistant {
             text: "好的".to_string(),
-            reasoning: String::new(),
+            reasoning: String::new(), native: Vec::new(),
             tool_calls: vec![ToolInvocation {
                 id: "toolu_1".to_string(),
                 name: "read_file".to_string(),
@@ -250,7 +250,7 @@ fn test_gemini_agent_body_structure() {
         AgentMessage::User { text: "读 a.rs".to_string(), image_data_url: None },
         AgentMessage::Assistant {
             text: "好的".to_string(),
-            reasoning: String::new(),
+            reasoning: String::new(), native: Vec::new(),
             tool_calls: vec![ToolInvocation {
                 id: "call-gemini-0".to_string(),
                 name: "read_file".to_string(),
@@ -406,7 +406,7 @@ fn collector() -> (yachiyo_desktop_lib::gateway::agent::runtime::EventSink, Arc<
 
 fn read_call(id: &str, path: &str) -> TurnOutcome {
     TurnOutcome {
-        reasoning: String::new(),
+        reasoning: String::new(), native: Vec::new(),
         text: "我先读文件".to_string(),
         tool_calls: vec![ToolInvocation {
             id: id.to_string(),
@@ -421,7 +421,7 @@ fn read_call(id: &str, path: &str) -> TurnOutcome {
 async fn test_loop_plain_text_completion() {
     let dir = temp_workspace();
     let executor = ScriptedExecutor::new(vec![TurnOutcome {
-        reasoning: String::new(),
+        reasoning: String::new(), native: Vec::new(),
         text: "任务完成".to_string(),
         tool_calls: vec![],
         usage: None,
@@ -458,7 +458,7 @@ async fn test_loop_multi_turn_chain() {
     std::fs::write(dir.path().join("a.txt"), "内容").unwrap();
     let executor = ScriptedExecutor::new(vec![
         read_call("call-1", "a.txt"),
-        TurnOutcome { reasoning: String::new(), text: "读完了".to_string(), tool_calls: vec![], usage: None },
+        TurnOutcome { reasoning: String::new(), native: Vec::new(), text: "读完了".to_string(), tool_calls: vec![], usage: None },
     ]);
     let (sink, events) = collector();
     let gate = ApprovalRegistry::new();
@@ -496,9 +496,10 @@ async fn test_loop_carries_turn_reasoning_into_next_request() {
     std::fs::write(dir.path().join("a.txt"), "内容").unwrap();
     let mut first = read_call("call-1", "a.txt");
     first.reasoning = "先读文件确认现状".to_string();
+    first.native = vec![serde_json::json!({ "type": "thinking", "thinking": "", "signature": "sig-1" })];
     let executor = ScriptedExecutor::new(vec![
         first,
-        TurnOutcome { reasoning: String::new(), text: "读完了".to_string(), tool_calls: vec![], usage: None },
+        TurnOutcome { reasoning: String::new(), native: Vec::new(), text: "读完了".to_string(), tool_calls: vec![], usage: None },
     ]);
     let (sink, _events) = collector();
     let gate = ApprovalRegistry::new();
@@ -523,6 +524,7 @@ async fn test_loop_carries_turn_reasoning_into_next_request() {
 
     let second = &executor.seen.lock().unwrap()[1];
     assert!(matches!(&second[1], AgentMessage::Assistant { reasoning, .. } if reasoning == "先读文件确认现状"));
+    assert!(matches!(&second[1], AgentMessage::Assistant { native, .. } if native.len() == 1 && native[0]["signature"] == "sig-1"));
 }
 
 #[tokio::test]
@@ -530,7 +532,7 @@ async fn test_loop_write_permission_denied() {
     let dir = temp_workspace();
     let executor = ScriptedExecutor::new(vec![
         TurnOutcome {
-            reasoning: String::new(),
+            reasoning: String::new(), native: Vec::new(),
             text: "我要写文件".to_string(),
             tool_calls: vec![ToolInvocation {
                 id: "call-w".to_string(),
@@ -539,7 +541,7 @@ async fn test_loop_write_permission_denied() {
             }],
             usage: None,
         },
-        TurnOutcome { reasoning: String::new(), text: "好的，那我不写了".to_string(), tool_calls: vec![], usage: None },
+        TurnOutcome { reasoning: String::new(), native: Vec::new(), text: "好的，那我不写了".to_string(), tool_calls: vec![], usage: None },
     ]);
     let (sink, events) = collector();
     let gate = Arc::new(ApprovalRegistry::new());
@@ -580,7 +582,7 @@ async fn test_loop_write_permission_denied() {
 async fn test_loop_remembered_file_permission_does_not_approve_other_paths() {
     let dir = temp_workspace();
     let write_call = |id: &str| TurnOutcome {
-        reasoning: String::new(),
+        reasoning: String::new(), native: Vec::new(),
         text: "写".to_string(),
         tool_calls: vec![ToolInvocation {
             id: id.to_string(),
@@ -592,7 +594,7 @@ async fn test_loop_remembered_file_permission_does_not_approve_other_paths() {
     let executor = ScriptedExecutor::new(vec![
         write_call("w1"),
         write_call("w2"),
-        TurnOutcome { reasoning: String::new(), text: "完成".to_string(), tool_calls: vec![], usage: None },
+        TurnOutcome { reasoning: String::new(), native: Vec::new(), text: "完成".to_string(), tool_calls: vec![], usage: None },
     ]);
     let (sink, events) = collector();
     let gate = Arc::new(ApprovalRegistry::new());
@@ -641,7 +643,7 @@ async fn test_loop_permission_timeout_treated_as_denied() {
     let dir = temp_workspace();
     let executor = ScriptedExecutor::new(vec![
         TurnOutcome {
-            reasoning: String::new(),
+            reasoning: String::new(), native: Vec::new(),
             text: "写".to_string(),
             tool_calls: vec![ToolInvocation {
                 id: "w1".to_string(),
@@ -650,7 +652,7 @@ async fn test_loop_permission_timeout_treated_as_denied() {
             }],
             usage: None,
         },
-        TurnOutcome { reasoning: String::new(), text: "超时了".to_string(), tool_calls: vec![], usage: None },
+        TurnOutcome { reasoning: String::new(), native: Vec::new(), text: "超时了".to_string(), tool_calls: vec![], usage: None },
     ]);
     let (sink, events) = collector();
     let gate = ApprovalRegistry::new();
@@ -709,7 +711,7 @@ async fn test_loop_cancel_between_turns() {
 async fn test_loop_usage_accumulates() {
     let dir = temp_workspace();
     let executor = ScriptedExecutor::new(vec![TurnOutcome {
-        reasoning: String::new(),
+        reasoning: String::new(), native: Vec::new(),
         text: "a".to_string(),
         tool_calls: vec![],
         usage: Some(TokenUsage {
@@ -748,7 +750,7 @@ async fn test_loop_usage_accumulates() {
 async fn test_loop_without_workspace_plain_completion() {
     // 无工作区时（无项目），模型直接输出文本回答（如“你能长任务运行吗”），Agent 模式应平滑完成
     let executor = ScriptedExecutor::new(vec![TurnOutcome {
-        reasoning: String::new(),
+        reasoning: String::new(), native: Vec::new(),
         text: "我当然可以帮你执行长任务啦～".to_string(),
         tool_calls: vec![],
         usage: Some(TokenUsage {
@@ -790,7 +792,7 @@ async fn test_loop_without_workspace_tool_interception() {
     let executor = ScriptedExecutor::new(vec![
         read_call("call-no-ws", "package.json"),
         TurnOutcome {
-            reasoning: String::new(),
+            reasoning: String::new(), native: Vec::new(),
             text: "彩叶，请先在上方打开工作区文件夹哦～".to_string(),
             tool_calls: vec![],
             usage: None,
@@ -832,7 +834,7 @@ async fn test_loop_without_workspace_tool_interception() {
 async fn test_loop_without_workspace_run_command_allowed_in_full_auto() {
     let executor = ScriptedExecutor::new(vec![
         TurnOutcome {
-            reasoning: String::new(),
+            reasoning: String::new(), native: Vec::new(),
             text: "我来查看系统状态～".to_string(),
             tool_calls: vec![ToolInvocation {
                 id: "cmd1".to_string(),
@@ -842,7 +844,7 @@ async fn test_loop_without_workspace_run_command_allowed_in_full_auto() {
             usage: None,
         },
         TurnOutcome {
-            reasoning: String::new(),
+            reasoning: String::new(), native: Vec::new(),
             text: "系统检查完成啦！".to_string(),
             tool_calls: vec![],
             usage: None,
@@ -883,3 +885,226 @@ async fn test_loop_without_workspace_run_command_allowed_in_full_auto() {
     assert!(has_tool_success, "无工作区全自动模式下应允许直接执行系统命令并获得输出");
 }
 
+
+fn read_tools() -> Vec<serde_json::Value> {
+    vec![serde_json::json!({
+        "type": "function",
+        "function": {"name": "read_file", "description": "read", "parameters": {"type": "object", "properties": {}}}
+    })]
+}
+
+#[test]
+fn test_anthropic_agent_body_replays_native_blocks_with_caching() {
+    use yachiyo_desktop_lib::gateway::providers::anthropic::build_anthropic_agent_body;
+
+    let native = vec![
+        serde_json::json!({ "type": "thinking", "thinking": "先看文件", "signature": "sig-1" }),
+        serde_json::json!({ "type": "tool_use", "id": "toolu_1", "name": "read_file", "input": { "path": "a.rs" } }),
+    ];
+    let messages = vec![
+        AgentMessage::User { text: "读 a.rs".to_string(), image_data_url: None },
+        AgentMessage::Assistant {
+            text: String::new(),
+            reasoning: String::new(),
+            tool_calls: vec![ToolInvocation {
+                id: "toolu_1".to_string(),
+                name: "read_file".to_string(),
+                arguments: serde_json::json!({ "path": "a.rs" }),
+            }],
+            native: native.clone(),
+        },
+        AgentMessage::ToolResult { tool_call_id: "toolu_1".to_string(), name: "read_file".to_string(), content: "fn main() {}".to_string() },
+    ];
+    let body = build_anthropic_agent_body("claude-opus-5-5", &messages, "角色设定\n\n<runtime>\n时间\n</runtime>", &read_tools());
+
+    assert_eq!(body["messages"][1]["content"], serde_json::Value::Array(native));
+    assert_eq!(body["cache_control"]["type"], "ephemeral");
+    assert_eq!(body["system"][0]["text"], "角色设定");
+    assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
+    assert_eq!(body["system"][1]["text"], "<runtime>\n时间\n</runtime>");
+    assert_eq!(body["max_tokens"], 64_000);
+    assert_eq!(body["thinking"], serde_json::json!({ "type": "adaptive", "display": "summarized" }));
+    assert!(body.get("output_config").is_none());
+    assert_eq!(body["fallbacks"], "default");
+
+    let legacy = build_anthropic_agent_body("claude-haiku-4-5", &messages, "系统提示", &read_tools());
+    assert!(legacy.get("thinking").is_none());
+    assert!(legacy.get("fallbacks").is_none());
+}
+
+#[test]
+fn test_anthropic_turn_collector_rebuilds_blocks_and_drops_pre_fallback_reasoning() {
+    use yachiyo_desktop_lib::gateway::providers::anthropic::AnthropicTurnCollector;
+
+    let mut collector = AnthropicTurnCollector::new();
+    for event in [
+        r#"{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}"#,
+        r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"先读"}}"#,
+        r#"{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-1"}}"#,
+        r#"{"type":"content_block_stop","index":0}"#,
+        r#"{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}"#,
+        r#"{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"我看看"}}"#,
+        r#"{"type":"content_block_stop","index":1}"#,
+        r#"{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_1","name":"read_file","input":{}}}"#,
+        r#"{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"path\":"}}"#,
+        r#"{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"\"a.rs\"}"}}"#,
+        r#"{"type":"content_block_stop","index":2}"#,
+    ] {
+        collector.push(event);
+    }
+    let (blocks, calls) = collector.finish();
+    assert_eq!(blocks.len(), 3);
+    assert_eq!(blocks[0], serde_json::json!({ "type": "thinking", "thinking": "先读", "signature": "sig-1" }));
+    assert_eq!(blocks[1]["text"], "我看看");
+    assert_eq!(blocks[2]["input"]["path"], "a.rs");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].id, "toolu_1");
+    assert_eq!(calls[0].arguments["path"], "a.rs");
+
+    let mut collector = AnthropicTurnCollector::new();
+    for event in [
+        r#"{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":"sig-0"}}"#,
+        r#"{"type":"content_block_start","index":1,"content_block":{"type":"text","text":"部分回答"}}"#,
+        r#"{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_0","name":"read_file","input":{}}}"#,
+        r#"{"type":"content_block_start","index":3,"content_block":{"type":"fallback","from":{"model":"claude-opus-5-5"},"to":{"model":"claude-opus-4-8"}}}"#,
+        r#"{"type":"content_block_stop","index":3}"#,
+        r#"{"type":"content_block_start","index":4,"content_block":{"type":"text","text":"续写"}}"#,
+    ] {
+        collector.push(event);
+    }
+    let (blocks, calls) = collector.finish();
+    assert_eq!(blocks, vec![
+        serde_json::json!({ "type": "text", "text": "部分回答" }),
+        serde_json::json!({ "type": "text", "text": "续写" }),
+    ]);
+    assert!(calls.is_empty());
+}
+
+#[test]
+fn test_gemini_turn_collector_keeps_function_call_signatures() {
+    use yachiyo_desktop_lib::gateway::providers::gemini::{build_gemini_agent_body, GeminiTurnCollector};
+
+    let mut collector = GeminiTurnCollector::new();
+    collector.push(r#"{"candidates":[{"content":{"parts":[{"text":"思考摘要","thought":true}]}}]}"#);
+    collector.push(r#"{"candidates":[{"content":{"parts":[{"text":"我先"}]}}]}"#);
+    collector.push(r#"{"candidates":[{"content":{"parts":[{"text":"看看"},{"functionCall":{"name":"read_file","args":{"path":"a.rs"}},"thoughtSignature":"sig-g"}]}}]}"#);
+    let parts = collector.finish();
+    assert_eq!(parts, vec![
+        serde_json::json!({ "text": "我先看看" }),
+        serde_json::json!({ "functionCall": { "name": "read_file", "args": { "path": "a.rs" } }, "thoughtSignature": "sig-g" }),
+    ]);
+
+    let messages = vec![
+        AgentMessage::User { text: "读 a.rs".to_string(), image_data_url: None },
+        AgentMessage::Assistant { text: "我先看看".to_string(), reasoning: String::new(), tool_calls: vec![], native: parts.clone() },
+    ];
+    let body = build_gemini_agent_body("gemini-3.8-flash", &messages, "系统提示", &read_tools());
+    assert_eq!(body["contents"][1]["parts"], serde_json::Value::Array(parts));
+    assert_eq!(body["generationConfig"]["thinkingConfig"]["includeThoughts"], true);
+}
+
+#[test]
+fn test_openai_responses_agent_body_maps_history_and_replays_items() {
+    use yachiyo_desktop_lib::gateway::providers::openai_responses::build_openai_responses_agent_body;
+
+    let reasoning_item = serde_json::json!({ "type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "enc" });
+    let call_item = serde_json::json!({ "type": "function_call", "id": "fc_1", "call_id": "call_2", "name": "read_file", "arguments": "{\"path\":\"b.rs\"}" });
+    let messages = vec![
+        AgentMessage::User { text: "读 a.rs".to_string(), image_data_url: Some("data:image/png;base64,AAAA".to_string()) },
+        // 客户端重放的历史轮次没有原生输出项，按 function_call 重建
+        AgentMessage::Assistant {
+            text: "好的".to_string(),
+            reasoning: String::new(),
+            tool_calls: vec![ToolInvocation { id: "call_1".to_string(), name: "read_file".to_string(), arguments: serde_json::json!({ "path": "a.rs" }) }],
+            native: Vec::new(),
+        },
+        AgentMessage::ToolResult { tool_call_id: "call_1".to_string(), name: "read_file".to_string(), content: "旧".to_string() },
+        AgentMessage::Assistant {
+            text: String::new(),
+            reasoning: String::new(),
+            tool_calls: vec![],
+            native: vec![reasoning_item.clone(), call_item.clone()],
+        },
+        AgentMessage::ToolResult { tool_call_id: "call_2".to_string(), name: "read_file".to_string(), content: "新".to_string() },
+    ];
+    let body = build_openai_responses_agent_body("gpt-6.1-sol", &messages, "系统提示", &read_tools());
+
+    assert_eq!(body["instructions"], "系统提示");
+    assert_eq!(body["store"], false);
+    assert_eq!(body["include"], serde_json::json!(["reasoning.encrypted_content"]));
+    assert_eq!(body["tools"][0], serde_json::json!({ "type": "function", "name": "read_file", "description": "read", "parameters": { "type": "object", "properties": {} } }));
+    let input = body["input"].as_array().unwrap();
+    assert_eq!(input[0]["content"][1], serde_json::json!({ "type": "input_image", "image_url": "data:image/png;base64,AAAA" }));
+    assert_eq!(input[1], serde_json::json!({ "role": "assistant", "content": "好的" }));
+    assert_eq!(input[2], serde_json::json!({ "type": "function_call", "call_id": "call_1", "name": "read_file", "arguments": "{\"path\":\"a.rs\"}" }));
+    assert_eq!(input[3], serde_json::json!({ "type": "function_call_output", "call_id": "call_1", "output": "旧" }));
+    assert_eq!(input[4], reasoning_item);
+    assert_eq!(input[5], call_item);
+    assert_eq!(input[6]["call_id"], "call_2");
+
+    let legacy = build_openai_responses_agent_body("gpt-4.1", &messages, "系统提示", &read_tools());
+    assert!(legacy.get("include").is_none());
+}
+
+#[test]
+fn test_openai_responses_stream_extraction_and_collection() {
+    use yachiyo_desktop_lib::gateway::providers::openai_responses::{extract_openai_responses_delta, ResponsesTurnCollector};
+
+    let events = [
+        r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_1","summary":[]}}"#,
+        r#"{"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"enc"}}"#,
+        r#"{"type":"response.output_text.delta","output_index":1,"delta":"我先读"}"#,
+        r#"{"type":"response.output_item.added","output_index":2,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"read_file","arguments":""}}"#,
+        r#"{"type":"response.function_call_arguments.delta","output_index":2,"item_id":"fc_1","delta":"{\"path\":"}"#,
+        r#"{"type":"response.function_call_arguments.delta","output_index":2,"item_id":"fc_1","delta":"\"a.rs\"}"}"#,
+        r#"{"type":"response.output_item.done","output_index":2,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"read_file","arguments":"{\"path\":\"a.rs\"}"}}"#,
+        r#"{"type":"response.completed","response":{"usage":{"input_tokens":120,"output_tokens":30,"total_tokens":150}}}"#,
+    ];
+    let mut agg = ToolCallAggregator::new();
+    let mut collector = ResponsesTurnCollector::new();
+    let mut text = String::new();
+    let mut usage = None;
+    for event in events {
+        collector.push(event);
+        if let Some(delta) = extract_openai_responses_delta(event) {
+            if let Some(content) = delta.content { text.push_str(&content); }
+            if delta.usage.is_some() { usage = delta.usage; }
+            for tc in &delta.tool_calls { agg.push(tc); }
+        }
+    }
+    assert_eq!(text, "我先读");
+    assert_eq!(usage.and_then(|u| u.total_tokens), Some(150));
+    let calls = agg.finish();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].id, "call_1");
+    assert_eq!(calls[0].arguments["path"], "a.rs");
+    let items = collector.finish().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["encrypted_content"], "enc");
+    assert_eq!(items[1]["call_id"], "call_1");
+
+    let mut failed = ResponsesTurnCollector::new();
+    failed.push(r#"{"type":"response.failed","response":{"error":{"code":"server_error","message":"boom"}}}"#);
+    assert!(failed.finish().is_err());
+}
+
+#[test]
+fn test_glm_agent_body_enables_preserved_thinking() {
+    let call = ToolInvocation { id: "call-1".to_string(), name: "read_file".to_string(), arguments: serde_json::json!({ "path": "a.rs" }) };
+    let messages = vec![
+        AgentMessage::User { text: "读 a.rs".to_string(), image_data_url: None },
+        AgentMessage::Assistant { text: "上一轮".to_string(), reasoning: String::new(), tool_calls: vec![], native: Vec::new() },
+        AgentMessage::User { text: "再读".to_string(), image_data_url: None },
+        AgentMessage::Assistant { text: String::new(), reasoning: "需要读取".to_string(), tool_calls: vec![call], native: Vec::new() },
+        AgentMessage::ToolResult { tool_call_id: "call-1".to_string(), name: "read_file".to_string(), content: "内容".to_string() },
+    ];
+    let body = build_openai_agent_body(ProviderId::Glm, "glm-5.3", &messages, "系统提示", &[]);
+    assert_eq!(body["thinking"], serde_json::json!({ "type": "enabled", "clear_thinking": false }));
+    let msgs = body["messages"].as_array().unwrap();
+    assert!(msgs[2].get("reasoning_content").is_none());
+    assert_eq!(msgs[4]["reasoning_content"], "需要读取");
+
+    let hybrid = build_openai_agent_body(ProviderId::Glm, "glm-4.6", &messages, "系统提示", &[]);
+    assert!(hybrid.get("thinking").is_none());
+    assert!(hybrid["messages"][4].get("reasoning_content").is_none());
+}

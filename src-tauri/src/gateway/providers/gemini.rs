@@ -109,6 +109,15 @@ pub fn build_gemini_body(
         8192
     };
 
+    // 思考摘要默认不返回，聊天显式 includeThoughts 才有 thought 流；辅助请求无需展示
+    let thinking_config = if matches!(
+        request.mode,
+        Some(crate::types::RequestMode::Summary | crate::types::RequestMode::Title)
+    ) {
+        json!({ "thinkingLevel": "low" })
+    } else {
+        json!({ "thinkingLevel": "low", "includeThoughts": true })
+    };
     let mut body = json!({
         "contents": build_gemini_contents(&request.messages, request.locale),
         "systemInstruction": {
@@ -116,7 +125,7 @@ pub fn build_gemini_body(
         },
         "generationConfig": {
             "maxOutputTokens": max_output_tokens,
-            "thinkingConfig": { "thinkingLevel": "low" }
+            "thinkingConfig": thinking_config
         }
     });
 
@@ -158,6 +167,10 @@ pub fn build_gemini_agent_body(
                 }
                 contents.push(json!({ "role": "user", "parts": parts }));
             }
+            // Gemini 3 校验当前轮次 functionCall 的 thoughtSignature，缺失即 400，本运行内的轮次原样回传
+            AgentMessage::Assistant { native, .. } if !native.is_empty() => {
+                contents.push(json!({ "role": "model", "parts": native }));
+            }
             AgentMessage::Assistant { text, tool_calls, .. } => {
                 let mut parts: Vec<serde_json::Value> = Vec::new();
                 if !text.is_empty() {
@@ -183,9 +196,62 @@ pub fn build_gemini_agent_body(
         "contents": contents,
         "systemInstruction": { "parts": [{ "text": system_prompt }] },
         "tools": [{ "functionDeclarations": declarations }],
-        "generationConfig": { "thinkingConfig": { "thinkingLevel": "low" } },
+        "generationConfig": { "thinkingConfig": { "thinkingLevel": "low", "includeThoughts": true } },
         "model": model
     })
+}
+
+/// 收集一轮 model 输出中需要回传的 parts：正文合并为一个 text part，functionCall part 连同
+/// thoughtSignature 原样保留；思考摘要（thought: true）仅用于展示，不回传
+#[derive(Default)]
+pub struct GeminiTurnCollector {
+    text: String,
+    text_signature: Option<serde_json::Value>,
+    function_calls: Vec<serde_json::Value>,
+}
+
+impl GeminiTurnCollector {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(&mut self, data: &str) {
+        let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) else { return };
+        let Some(parts) = parsed
+            .get("candidates")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("content"))
+            .and_then(|c| c.get("parts"))
+            .and_then(|p| p.as_array())
+        else {
+            return;
+        };
+        for part in parts {
+            if part.get("functionCall").is_some() {
+                self.function_calls.push(part.clone());
+            } else if part.get("thought").and_then(|v| v.as_bool()) != Some(true) {
+                if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
+                    self.text.push_str(text);
+                }
+                if let Some(signature) = part.get("thoughtSignature") {
+                    self.text_signature = Some(signature.clone());
+                }
+            }
+        }
+    }
+
+    pub fn finish(self) -> Vec<serde_json::Value> {
+        let mut parts = Vec::new();
+        if !self.text.is_empty() {
+            let mut part = json!({ "text": self.text });
+            if let Some(signature) = self.text_signature {
+                part["thoughtSignature"] = signature;
+            }
+            parts.push(part);
+        }
+        parts.extend(self.function_calls);
+        parts
+    }
 }
 
 pub fn extract_gemini_delta(data: &str) -> Option<ExtractedDelta> {

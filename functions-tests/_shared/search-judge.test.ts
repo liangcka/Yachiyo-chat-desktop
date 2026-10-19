@@ -110,11 +110,13 @@ describe("judgeSearchNeed", () => {
     expect(headers.accept).toBe("application/json");
     const body = JSON.parse(init?.body as string) as {
       stream: boolean;
-      max_tokens: number;
+      max_completion_tokens: number;
+      reasoning_effort: string;
       messages: Array<{ role: string; content: string }>;
     };
     expect(body.stream).toBe(false);
-    expect(body.max_tokens).toBe(512);
+    expect(body.max_completion_tokens).toBe(512);
+    expect(body.reasoning_effort).toBe("low");
     expect(body.messages.at(-1)).toEqual({ role: "user", content: "今天上海天气怎么样" });
     expect(body.messages[0]?.role).toBe("system");
     expect(body.messages[0]?.content).toContain("搜索意图判断器");
@@ -240,6 +242,6 @@ describe("judgeSearchNeed (gemini & claude adapters)", () => {
     expect(url).toBe("https://api.anthropic.com/v1/messages");
     const body = JSON.parse(init?.body as string) as { stream: boolean; max_tokens: number };
     expect(body.stream).toBe(false);
-    expect(body.max_tokens).toBe(256);
+    expect(body.max_tokens).toBe(1024);
   });
 });
