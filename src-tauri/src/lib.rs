@@ -1,3 +1,5 @@
+pub mod computer;
+pub mod control_overlay;
 pub mod crypto;
 pub mod gateway;
 pub mod mcp;
@@ -12,7 +14,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, Manager, State};
+use tauri::{Manager, State};
 use tools::WorkspaceManager;
 use tracing::info;
 
@@ -349,81 +351,6 @@ fn export_claude_mcp_config(state: State<DesktopState>) -> Result<String, String
     state.mcp_manager.export_claude_config()
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ControlOverlayPayload {
-    pub active: bool,
-    pub tool_name: String,
-    pub detail: String,
-}
-
-/// 显示全屏系统级电脑控制覆盖层，并向其同步控制状态
-#[tauri::command]
-fn show_control_overlay(
-    app: tauri::AppHandle,
-    tool_name: String,
-    detail: String,
-) -> Result<(), String> {
-    if let Some(overlay) = app.get_webview_window("control_overlay") {
-        let _ = overlay.emit(
-            "control_state_change",
-            ControlOverlayPayload {
-                active: true,
-                tool_name,
-                detail,
-            },
-        );
-        let _ = overlay.set_ignore_cursor_events(true);
-        let _ = overlay.show();
-        let _ = overlay.set_always_on_top(true);
-    }
-    Ok(())
-}
-
-/// 隐藏全屏系统级电脑控制覆盖层
-#[tauri::command]
-fn hide_control_overlay(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(overlay) = app.get_webview_window("control_overlay") {
-        let _ = overlay.emit(
-            "control_state_change",
-            ControlOverlayPayload {
-                active: false,
-                tool_name: String::new(),
-                detail: String::new(),
-            },
-        );
-        let _ = overlay.hide();
-    }
-    Ok(())
-}
-
-/// 切换全屏系统级覆盖层的鼠标点击穿透状态（悬停横幅时关闭穿透以允许点击接管，离开时开启穿透）
-#[tauri::command]
-fn set_overlay_ignore_cursor(app: tauri::AppHandle, ignore: bool) -> Result<(), String> {
-    if let Some(overlay) = app.get_webview_window("control_overlay") {
-        let _ = overlay.set_ignore_cursor_events(ignore);
-    }
-    Ok(())
-}
-
-/// 紧急接管电脑控制：向主窗口广播中断指令并关闭全屏覆盖层
-#[tauri::command]
-fn stop_active_control(app: tauri::AppHandle) -> Result<(), String> {
-    let _ = app.emit("emergency_stop_control", ());
-    if let Some(overlay) = app.get_webview_window("control_overlay") {
-        let _ = overlay.emit(
-            "control_state_change",
-            ControlOverlayPayload {
-                active: false,
-                tool_name: String::new(),
-                detail: String::new(),
-            },
-        );
-        let _ = overlay.hide();
-    }
-    Ok(())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     info!("Starting Yachiyo Desktop App...");
@@ -468,6 +395,7 @@ pub fn run() {
             }
         }))
         .manage(desktop_state)
+        .manage(control_overlay::ControlOverlayState::default())
         .setup(move |app| {
             // 同步完成端口绑定再进入事件循环：前端经 get_server_port 拼网关地址，
             // 若异步绑定尚未完成，端口漂移（28888 被占用）时首批请求会打到错误端口
@@ -557,10 +485,11 @@ pub fn run() {
             get_mcp_server_status,
             import_claude_mcp_config,
             export_claude_mcp_config,
-            show_control_overlay,
-            hide_control_overlay,
-            set_overlay_ignore_cursor,
-            stop_active_control,
+            control_overlay::show_control_overlay,
+            control_overlay::hide_control_overlay,
+            control_overlay::get_control_overlay_state,
+            control_overlay::set_overlay_hit_region,
+            control_overlay::stop_active_control,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

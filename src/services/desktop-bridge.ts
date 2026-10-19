@@ -238,7 +238,22 @@ export async function closeDesktopWindow(): Promise<boolean> {
   return exitDesktopApp();
 }
 
-/** 显示系统级全屏控制覆盖层（通知桌面 Overlay 窗口并向其同步控制状态） */
+/** 电脑控制遮罩的状态，与 Rust 端 ControlOverlayPayload 对齐 */
+export interface ControlOverlayState {
+  active: boolean;
+  toolName: string;
+  detail: string;
+}
+
+/** 接管横幅在遮罩窗口客户区内的矩形，物理像素 */
+export interface OverlayHitRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** 显示系统级全屏控制遮罩并同步当前动作；后端对相同状态去重 */
 export async function showControlOverlay(toolName: string, detail: string): Promise<boolean> {
   if (!isDesktopApp()) return false;
   try {
@@ -250,7 +265,7 @@ export async function showControlOverlay(toolName: string, detail: string): Prom
   }
 }
 
-/** 隐藏系统级全屏控制覆盖层 */
+/** 隐藏系统级全屏控制遮罩 */
 export async function hideControlOverlay(): Promise<boolean> {
   if (!isDesktopApp()) return false;
   try {
@@ -262,19 +277,46 @@ export async function hideControlOverlay(): Promise<boolean> {
   }
 }
 
-/** 切换系统级全屏覆盖层的鼠标穿透行为 */
-export async function setOverlayIgnoreCursor(ignore: boolean): Promise<boolean> {
+/** 遮罩窗口加载时拉取当前状态，补上加载前错过的推送 */
+export async function getControlOverlayState(): Promise<ControlOverlayState | null> {
+  if (!isDesktopApp()) return null;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return await invoke<ControlOverlayState>("get_control_overlay_state");
+  } catch {
+    return null;
+  }
+}
+
+/** 订阅后端推送的遮罩状态变化 */
+export async function onControlOverlayStateChange(
+  callback: (state: ControlOverlayState) => void,
+): Promise<() => void> {
+  if (!isDesktopApp()) return () => {};
+  try {
+    const { listen } = await import("@tauri-apps/api/event");
+    return await listen<ControlOverlayState>("control_state_change", (event) => callback(event.payload));
+  } catch {
+    return () => {};
+  }
+}
+
+/**
+ * 上报接管横幅区域：遮罩默认鼠标穿透、收不到悬停事件，
+ * 由后端轮询光标进入该区域时临时关闭穿透；传 null 表示没有可点击区域
+ */
+export async function setOverlayHitRegion(region: OverlayHitRegion | null): Promise<boolean> {
   if (!isDesktopApp()) return false;
   try {
     const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("set_overlay_ignore_cursor", { ignore });
+    await invoke("set_overlay_hit_region", { region });
     return true;
   } catch {
     return false;
   }
 }
 
-/** 紧急接管并中止控制 */
+/** 紧急接管：通知主窗口中止当前运行并收起遮罩 */
 export async function stopActiveControl(): Promise<boolean> {
   if (!isDesktopApp()) return false;
   try {

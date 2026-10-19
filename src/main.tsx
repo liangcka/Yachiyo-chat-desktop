@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
-import { FullscreenControlOverlayWindow } from "./components/desktop/FullscreenControlOverlayWindow";
+import { ControlOverlayWindow } from "./features/computer-control/ControlOverlayWindow";
 import "./styles/global.css";
 
 const rootElement = document.getElementById("root");
@@ -24,7 +24,7 @@ const isControlOverlayWindow = typeof window !== "undefined" && window.location.
 createRoot(rootElement).render(
   <StrictMode>
     <AppErrorBoundary>
-      {isControlOverlayWindow ? <FullscreenControlOverlayWindow /> : <App />}
+      {isControlOverlayWindow ? <ControlOverlayWindow /> : <App />}
     </AppErrorBoundary>
   </StrictMode>,
 );

@@ -1,4 +1,3 @@
-import type { Locale } from "../domain/chat";
 import { isDesktopApp } from "./app-platform";
 import { apiFetch } from "./api-origins";
 
@@ -57,81 +56,20 @@ export interface McpPreset {
   config: McpServerConfig;
 }
 
-/** 判定给定工具是否属于电脑/桌面控制类行为 */
-export function isComputerControlTool(toolName: string): boolean {
-  const parsed = parseMcpToolName(toolName);
-  const base = parsed.isMcp && parsed.originalToolName ? parsed.originalToolName : toolName;
-  const normalized = base.toLowerCase().replace(/^(?:mcp_)?(?:windows[-_])?/, "");
-  const controlNames = new Set([
-    "click",
-    "type",
-    "move",
-    "scroll",
-    "shortcut",
-    "clipboard",
-    "multiselect",
-    "multiedit",
-    "app",
-  ]);
-  return controlNames.has(normalized);
-}
-
-/** 格式化电脑控制动作名称，向用户直观展示当前操作 */
-export function formatComputerControlAction(
-  toolName: string,
-  args?: Record<string, unknown>,
-  locale: Locale = "zh-CN",
-): string {
-  const parsed = parseMcpToolName(toolName);
-  const base = parsed.isMcp && parsed.originalToolName ? parsed.originalToolName : toolName;
-  const normalized = base.toLowerCase().replace(/^(?:mcp_)?(?:windows[-_])?/, "");
-  const ja = locale === "ja-JP";
-  switch (normalized) {
-    case "click":
-      if (args && (args.x !== undefined || args.y !== undefined)) {
-        return ja
-          ? `マウスクリックを実行中 (${args.x ?? 0}, ${args.y ?? 0})`
-          : `正在模拟鼠标点击 (${args.x ?? 0}, ${args.y ?? 0})`;
-      }
-      return ja ? "マウスクリックを実行中" : "正在模拟鼠标点击";
-    case "type":
-      return ja ? "キーボード入力を実行中" : "正在模拟键盘键入文本";
-    case "move":
-      return ja ? "マウスカーソルを移動中" : "正在移动鼠标光标";
-    case "scroll":
-      return ja ? "画面をスクロール中" : "正在滚动页面视口";
-    case "shortcut":
-      if (args?.shortcut) {
-        return ja ? `ショートカット [${args.shortcut}] を実行中` : `正在触发系统快捷键 [${args.shortcut}]`;
-      }
-      return ja ? "ショートカットを実行中" : "正在触发快捷键组合";
-    case "app":
-      if (args?.name) {
-        return ja ? `アプリ [${args.name}] を切り替え／起動中` : `正在切换/启动应用 [${args.name}]`;
-      }
-      return ja ? "アプリのウィンドウを操作中" : "正在管理应用程序窗口";
-    case "clipboard":
-      return ja ? "クリップボードを操作中" : "正在操作系统剪贴板";
-    case "multiselect":
-      return ja ? "複数の項目を選択中" : "正在进行多项选择";
-    case "multiedit":
-      return ja ? "まとめて編集中" : "正在进行批量编辑";
-    default:
-      return ja ? `操作を実行中：${toolName}` : `正在执行操作：${toolName}`;
-  }
-}
+/** 内置桌面控制的服务 ID：由桌面端进程内原生执行，transport 字段不参与运行 */
+export const BUILTIN_DESKTOP_CONTROL_ID = "windows_mcp";
 
 export const MCP_PRESETS: McpPreset[] = [
   {
-    id: "windows_mcp",
+    id: BUILTIN_DESKTOP_CONTROL_ID,
     name: "Windows 桌面控制 (Windows MCP)",
-    description: "内置 Windows MCP 服务，支持控制应用程序、模拟鼠标点击、键盘输入、屏幕捕获与 PowerShell 执行",
-    ja: { name: "Windows デスクトップ操作 (Windows MCP)", description: "内蔵の Windows MCP サーバー。アプリ操作、マウスクリック、キーボード入力、画面キャプチャ、PowerShell 実行に対応" },
+    description: "内置桌面控制，支持启动与切换应用、模拟鼠标点击与键盘输入、列出窗口与截图",
+    ja: { name: "Windows デスクトップ操作 (Windows MCP)", description: "内蔵のデスクトップ操作。アプリの起動と切り替え、マウスクリック、キーボード入力、ウィンドウ一覧、スクリーンショットに対応" },
     category: "general",
     config: {
-      id: "windows_mcp",
+      id: BUILTIN_DESKTOP_CONTROL_ID,
       name: "Windows 桌面控制",
-      description: "控制 Windows 桌面与窗口应用，支持鼠标键盘交互与屏幕捕获",
+      description: "内置桌面控制：启动与切换应用、模拟鼠标键盘、列出窗口与截图，无需额外安装",
       enabled: true,
       transport: {
         type: "stdio",

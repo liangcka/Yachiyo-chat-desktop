@@ -194,3 +194,35 @@ fn test_default_windows_mcp_config() {
         _ => panic!("Expected stdio transport"),
     }
 }
+
+#[tokio::test]
+async fn test_builtin_desktop_control_never_spawns_transport() {
+    let dir = tempdir().expect("tempdir");
+    let manager = McpManager::new(Some(dir.path().join("mcp_servers.json")), reqwest::Client::new());
+    // transport 指向不存在的命令：内置服务若仍去拉起外部进程，这里会得到进程启动错误而不是平台判定
+    let mut builtin = McpManager::default_windows_mcp_config();
+    builtin.transport = McpTransportConfig::Stdio {
+        command: "yachiyo-command-that-does-not-exist".to_string(),
+        args: vec![],
+        env: HashMap::new(),
+    };
+    manager.save_server(builtin.clone()).unwrap();
+
+    let schema = manager.get_agent_tools_schema().await;
+    let names: Vec<&str> = schema.iter().filter_map(|t| t["function"]["name"].as_str()).collect();
+    let status = manager.get_server_status("windows_mcp").await.unwrap();
+    let tested = manager.test_server_connection(&builtin).await;
+    let executed = manager.execute_tool("mcp__windows_mcp__snapshot", &serde_json::json!({})).await;
+
+    if cfg!(windows) {
+        assert!(names.contains(&"mcp__windows_mcp__click"));
+        assert!(status.is_online);
+        assert_eq!(tested.unwrap().len(), status.tool_count);
+    } else {
+        assert!(names.is_empty());
+        assert!(!status.is_online);
+        assert!(status.last_error.unwrap().contains("仅支持 Windows"));
+        assert!(tested.unwrap_err().contains("仅支持 Windows"));
+        assert!(executed.unwrap_err().contains("仅支持 Windows"));
+    }
+}
