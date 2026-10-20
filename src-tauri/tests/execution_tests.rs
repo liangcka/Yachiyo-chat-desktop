@@ -333,6 +333,22 @@ fn overlapping_workspaces_cannot_execute_or_restore_concurrently() {
 }
 
 #[test]
+fn concurrent_agent_runs_share_workspace_but_block_exclusive_access() {
+    let dir = temp_workspace();
+    let manager = WorkspaceManager::new(Some(dir.path().to_path_buf()));
+    let first = manager.acquire_shared_workspace(dir.path()).unwrap();
+    let second = manager.acquire_shared_workspace(dir.path()).unwrap();
+    assert!(manager.acquire_workspace(dir.path()).is_err());
+    drop(first);
+    assert!(manager.acquire_workspace(dir.path()).is_err());
+    drop(second);
+    let exclusive = manager.acquire_workspace(dir.path()).unwrap();
+    assert!(manager.acquire_shared_workspace(dir.path()).is_err());
+    drop(exclusive);
+    assert!(manager.acquire_shared_workspace(dir.path()).is_ok());
+}
+
+#[test]
 fn checkpoints_reject_parent_traversal_and_external_files() {
     let dir = temp_workspace();
     let outside = tempfile::NamedTempFile::new().unwrap();

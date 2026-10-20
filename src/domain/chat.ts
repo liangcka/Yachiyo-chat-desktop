@@ -15,6 +15,8 @@ export interface Conversation {
   /** 最后一条已压缩消息的 id；用于消息级精确因果回溯 */
   compressedUpToId?: string;
   branches?: MessageBranch[];
+  /** 归档时间；存在即表示已归档，侧栏收进「已归档」分组，启动时不再自动打开 */
+  archivedAt?: number;
 }
 
 /** 备选路径保留完整消息及其摘要边界，避免恢复时混入另一版本的上下文。 */

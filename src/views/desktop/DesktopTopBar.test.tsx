@@ -151,9 +151,12 @@ describe("DesktopTopBar", () => {
       />,
     );
 
-    const minBtn = screen.getByTitle("最小化");
-    const maxBtn = screen.getByTitle("最大化");
-    const closeBtn = screen.getByTitle("关闭");
+    const minBtn = screen.getByRole("button", { name: "最小化窗口" });
+    const maxBtn = screen.getByRole("button", { name: "最大化窗口" });
+    const closeBtn = screen.getByRole("button", { name: "关闭窗口" });
+    // 窗口控件不用原生 title 气泡（透明窗口下会被裁切并残留黑边）
+    expect(closeBtn).not.toHaveAttribute("title");
+    expect(closeBtn).toHaveAttribute("data-tooltip", "关闭");
 
     expect(minBtn).toBeInTheDocument();
     expect(maxBtn).toBeInTheDocument();
@@ -183,9 +186,9 @@ describe("DesktopTopBar", () => {
       />,
     );
 
-    expect(screen.queryByTitle("最小化")).not.toBeInTheDocument();
-    expect(screen.queryByTitle("最大化")).not.toBeInTheDocument();
-    expect(screen.queryByTitle("关闭")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "最小化窗口" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "最大化窗口" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "关闭窗口" })).not.toBeInTheDocument();
 
     vi.restoreAllMocks();
   });

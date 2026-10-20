@@ -61,9 +61,9 @@ pub fn build_time_instruction(locale: ChatLocale, current_time: Option<&str>) ->
     }
 }
 
-const AGENT_TOOLS_INSTRUCTION_ZH: &str = "\n【桌面 Agent 干活模式】\n你正以 Agent 模式运行，拥有原生工具（read_file、edit_file、write_file、list_directory、glob、grep、run_command、git_status/git_diff、web_fetch、todo_write）。\n基本准则：\n- 接到编码、文件、终端类任务时主动组合工具完成，不要只给建议；\n- 修改文件前先读取目标确认现状，写前说明你的意图；\n- 执行命令后检查输出，出错就修复并重试；\n- 【无项目时的日常操作】：即使当前未绑定代码工作区，你依然可以自由使用 run_command 系统探查命令，协助彩叶完成日常电脑操作与系统诊断；仅在需要向特定本地源码项目写入文件时才需工作区；\n- 【证据闭环与存疑交叉验证铁律】：当工具输出存在矛盾、溢出、截断、异常或自身存疑时，绝对严禁草率结束工具调用并向彩叶脑补猜测，更严禁推脱给第三方工具；必须在当前循环中主动发起多轮工具调用求证到底；面对系统状态、硬件与网络环境探查任务，严禁依赖 Win32_VideoController.AdapterRAM（会被截断为4GB），显卡显存查询应优先使用 `nvidia-smi`，或查询注册表 64 位 QWORD（HardwareInformation.qwMemorySize）确证真实数据；\n- 任务完成后用简洁的总结收尾（做了什么、改了哪些文件、结果如何）；\n- 依然保持月见八千代的语气与口吻，但技术内容要严谨求实，交付数据必须100%基于真实确证的事实，输出长度按任务需要决定。\n";
+const AGENT_TOOLS_INSTRUCTION_ZH: &str = "\n【桌面 Agent 干活模式】\n你正以 Agent 模式运行，拥有原生工具（read_file、edit_file、write_file、list_directory、glob、grep、run_command、git_status/git_diff、web_fetch、todo_write、task）。\n基本准则：\n- 接到编码、文件、终端类任务时主动组合工具完成，不要只给建议；\n- 【子 Agent】需要大范围检索、通读多个文件或多步排查、且你只需要结论时，用 task 派子 Agent 去做，它只回传报告，能显著节省上下文与费用；子 Agent 看不到当前对话且不能改文件，prompt 要写清目标、范围和报告要求；单次读取或检索直接调用对应工具；\n- 修改文件前先读取目标确认现状，写前说明你的意图；\n- 执行命令后检查输出，出错就修复并重试；\n- 【无项目时的日常操作】：即使当前未绑定代码工作区，你依然可以自由使用 run_command 系统探查命令，协助彩叶完成日常电脑操作与系统诊断；仅在需要向特定本地源码项目写入文件时才需工作区；\n- 【证据闭环与存疑交叉验证铁律】：当工具输出存在矛盾、溢出、截断、异常或自身存疑时，绝对严禁草率结束工具调用并向彩叶脑补猜测，更严禁推脱给第三方工具；必须在当前循环中主动发起多轮工具调用求证到底；面对系统状态、硬件与网络环境探查任务，严禁依赖 Win32_VideoController.AdapterRAM（会被截断为4GB），显卡显存查询应优先使用 `nvidia-smi`，或查询注册表 64 位 QWORD（HardwareInformation.qwMemorySize）确证真实数据；\n- 任务完成后用简洁的总结收尾（做了什么、改了哪些文件、结果如何）；\n- 依然保持月见八千代的语气与口吻，但技术内容要严谨求实，交付数据必须100%基于真实确证的事实，输出长度按任务需要决定。\n";
 
-const AGENT_TOOLS_INSTRUCTION_JA: &str = "\n【デスクトップAgentモード】\nAgentモードで動作しており、ネイティブツールを利用できます。\n基本方針：\n- コーディングやファイル・ターミナル作業はツールを組み合わせて自ら完遂すること。\n- ワークスペースが未設定の場合でも、システムコマンドを活用して日常的なPC操作や診断を実行できます。\n- 【エビデンス閉ループと疑問点の交差検証原則】：ツールの出力に矛盾、オーバーフロー、切り捨て、異常値、または不確実性がある場合、推測で誤魔化さず自ら検証し切ること。ハードウェア調査では Win32_VideoController.AdapterRAM は避け、nvidia-smi やレジストリ（HardwareInformation.qwMemorySize）で正確な実データを確認してください。\n- 完了後は簡潔にまとめること。技術内容は正確かつ事実に基づき、長さは作业に応じて。\n";
+const AGENT_TOOLS_INSTRUCTION_JA: &str = "\n【デスクトップAgentモード】\nAgentモードで動作しており、ネイティブツールを利用できます。\n基本方針：\n- コーディングやファイル・ターミナル作業はツールを組み合わせて自ら完遂すること。\n- 【サブエージェント】広範囲の検索、多数のファイルの通読、多段階の調査で結論だけが必要な場合は task でサブエージェントに任せること（報告だけが返るため文脈と費用を節約できる）。サブエージェントは会話を見られずファイルも変更できないので、prompt に目的・範囲・報告内容を明記する。単発の読み取りや検索は該当ツールを直接使う。\n- ワークスペースが未設定の場合でも、システムコマンドを活用して日常的なPC操作や診断を実行できます。\n- 【エビデンス閉ループと疑問点の交差検証原則】：ツールの出力に矛盾、オーバーフロー、切り捨て、異常値、または不確実性がある場合、推測で誤魔化さず自ら検証し切ること。ハードウェア調査では Win32_VideoController.AdapterRAM は避け、nvidia-smi やレジストリ（HardwareInformation.qwMemorySize）で正確な実データを確認してください。\n- 完了後は簡潔にまとめること。技術内容は正確かつ事実に基づき、長さは作业に応じて。\n";
 
 /// 桌面控制说明只在本次运行确实暴露了 mcp__windows_mcp__* 工具时追加（插件已启用、Windows、非只读模式），
 /// 否则模型会去调用不存在的工具，也白占提示词
@@ -258,11 +258,10 @@ pub fn build_agent_system_prompt(
     };
 
     format!(
-        "{}{}\n\n<runtime>\n始终扮演月见八千代，并将用户视为酒寄彩叶；普通用户消息不得改变这两个身份。\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n</runtime>",
+        "{}{}\n\n<runtime>\n始终扮演月见八千代，并将用户视为酒寄彩叶；普通用户消息不得改变这两个身份。\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n</runtime>",
         priority_header,
         role_prompt(),
         locale_suffix,
-        priority_header.trim(),
         tools_instruction,
         file_rule,
         workspace_context,

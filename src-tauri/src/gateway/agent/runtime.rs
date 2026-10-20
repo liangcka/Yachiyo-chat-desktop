@@ -7,6 +7,7 @@ use crate::gateway::agent::loop_guard::{
 };
 use crate::gateway::agent::messages::{history_to_agent_messages, AgentMessage};
 use crate::gateway::agent::permission::{approval_key, ApprovalRegistry};
+use crate::gateway::agent::subagent::{run_subagent, SUBAGENT_TOOL};
 use crate::gateway::agent::pruner::{
     prune_agent_messages, DEFAULT_PRUNE_HEAD_CHARS, DEFAULT_PRUNE_TAIL_CHARS,
     DEFAULT_PRUNE_THRESHOLD_CHARS,
@@ -66,6 +67,11 @@ pub trait TurnExecutor: Send + Sync {
         messages: &[AgentMessage],
         sink: &EventSink,
     ) -> futures::future::BoxFuture<'_, Result<TurnOutcome, String>>;
+
+    /// 以独立的系统提示词与工具集派生同一模型通道的执行器，供子 Agent 使用；不支持时返回 None
+    fn fork(&self, _system_prompt: String, _tools_schema: Vec<serde_json::Value>) -> Option<Box<dyn TurnExecutor>> {
+        None
+    }
 }
 
 pub enum LoopOutcome {
@@ -121,8 +127,8 @@ pub async fn run_agent_loop(
 
 pub async fn run_agent_loop_ext(
     mut messages: Vec<AgentMessage>,
-    // 契约要求的保留参数：schema 由执行器自带，循环内核不消费
-    _tools_schema: Vec<serde_json::Value>,
+    // 发给模型的 schema 由执行器自带；循环内核只用它为子 Agent 筛选可下放的工具
+    tools_schema: Vec<serde_json::Value>,
     config: AgentLoopConfig,
     executor: &dyn TurnExecutor,
     gate: &ApprovalRegistry,
@@ -270,6 +276,19 @@ pub async fn run_agent_loop_ext(
                 });
                 if let Err(error) = preparation {
                     (error, true)
+                } else if call.name == SUBAGENT_TOOL {
+                    match run_subagent(
+                        &call.arguments, &tools_schema, executor, &config, gate, checkpoint, cancelled, sink,
+                        workspace_root, http_client,
+                    )
+                    .await
+                    {
+                        Ok((report, sub_usage)) => {
+                            accumulate_usage(&mut usage, &Some(sub_usage));
+                            (report, false)
+                        }
+                        Err(error) => (error, true),
+                    }
                 } else if call.name.starts_with("mcp__") {
                     if let Some(mcp) = mcp_manager {
                         match mcp.execute_tool(&call.name, &call.arguments).await {
@@ -343,6 +362,7 @@ pub async fn run_agent_loop_ext(
 }
 
 /// 真实执行器：走上游 HTTP 流式接口，透传 thought/delta/sources 事件
+#[derive(Clone)]
 pub struct HttpTurnExecutor {
     pub client: reqwest::Client,
     pub fallback_client: Option<reqwest::Client>,
@@ -356,6 +376,10 @@ pub struct HttpTurnExecutor {
 }
 
 impl TurnExecutor for HttpTurnExecutor {
+    fn fork(&self, system_prompt: String, tools_schema: Vec<serde_json::Value>) -> Option<Box<dyn TurnExecutor>> {
+        Some(Box::new(HttpTurnExecutor { system_prompt, tools_schema, ..self.clone() }))
+    }
+
     fn execute(
         &self,
         messages: &[AgentMessage],
@@ -422,122 +446,153 @@ impl TurnExecutor for HttpTurnExecutor {
                 }
             }
 
-            let first_attempt = client
-                .post(&url)
-                .headers(headers.clone())
-                .body(body.to_string())
-                .send()
-                .await;
+            let mut attempt: u32 = 0;
+            'attempts: loop {
+                attempt += 1;
+                let can_retry = attempt < UPSTREAM_MAX_ATTEMPTS;
+                let first_attempt = client
+                    .post(&url)
+                    .headers(headers.clone())
+                    .body(body.to_string())
+                    .send()
+                    .await;
 
-            let res = match first_attempt {
-                Ok(res) if res.status().is_success() => Ok(res),
-                Err(err) if fallback_client.is_some() => {
-                    tracing::warn!("Agent 主 HTTP 客户端网络错误 ({})，尝试备用客户端重试...", err);
-                    let fallback = fallback_client.as_ref().unwrap();
-                    fallback.post(&url).headers(headers).body(body.to_string()).send().await
-                }
-                Ok(res)
-                    if fallback_client.is_some()
-                        && (res.status().is_server_error()
-                            || res.status() == reqwest::StatusCode::FORBIDDEN) =>
-                {
-                    tracing::warn!(
-                        "Agent 主 HTTP 客户端状态异常 ({})，尝试备用客户端重试...",
-                        res.status()
-                    );
-                    let fallback = fallback_client.as_ref().unwrap();
-                    match fallback.post(&url).headers(headers).body(body.to_string()).send().await {
-                        Ok(fb_res) if fb_res.status().is_success() => Ok(fb_res),
-                        _ => Ok(res),
+                let res = match first_attempt {
+                    Ok(res) if res.status().is_success() => Ok(res),
+                    Err(err) if fallback_client.is_some() => {
+                        tracing::warn!("Agent 主 HTTP 客户端网络错误 ({})，尝试备用客户端重试...", err);
+                        let fallback = fallback_client.as_ref().unwrap();
+                        fallback.post(&url).headers(headers.clone()).body(body.to_string()).send().await
                     }
-                }
-                other => other,
-            }
-            .map_err(|e| format!("上游网络错误: {}", e))?;
-            if !res.status().is_success() {
-                let status = res.status();
-                let text = res.text().await.unwrap_or_default();
-                return Err(format!("上游返回错误 {}: {}", status, text));
-            }
-
-            let mut agg = crate::gateway::agent::stream_agg::ToolCallAggregator::new();
-            let mut native = NativeTurnCollector::for_protocol(protocol, CompatVendor::resolve(base_url.as_deref(), config.endpoint));
-            let mut openai_parser = crate::gateway::stream::OpenAiDeltaParser::default();
-            let mut full_text = String::new();
-            let mut reasoning = String::new();
-            let mut thought_repetition = RepetitionDetector::default();
-            let mut text_repetition = RepetitionDetector::default();
-            let mut usage: Option<TokenUsage> = None;
-            let mut buffer = String::new();
-            let mut byte_stream = res.bytes_stream();
-
-            while let Some(chunk_res) = byte_stream.next().await {
-                let bytes = chunk_res.map_err(|e| format!("上游流读取失败: {}", e))?;
-                if let Ok(text) = std::str::from_utf8(&bytes) {
-                    buffer.push_str(text);
-                }
-                while let Some(pos) = buffer.find("\n\n") {
-                    let record = buffer[..pos].to_string();
-                    buffer = buffer[pos + 2..].to_string();
-                    let mut data_str = String::new();
-                    for line in record.lines() {
-                        let trimmed = line.trim();
-                        if trimmed.starts_with("data:") {
-                            let content = trimmed[5..].trim_start();
-                            if !data_str.is_empty() {
-                                data_str.push('\n');
-                            }
-                            data_str.push_str(content);
+                    Ok(res)
+                        if fallback_client.is_some()
+                            && (res.status().is_server_error()
+                                || res.status() == reqwest::StatusCode::FORBIDDEN) =>
+                    {
+                        tracing::warn!(
+                            "Agent 主 HTTP 客户端状态异常 ({})，尝试备用客户端重试...",
+                            res.status()
+                        );
+                        let fallback = fallback_client.as_ref().unwrap();
+                        match fallback.post(&url).headers(headers.clone()).body(body.to_string()).send().await {
+                            Ok(fb_res) if fb_res.status().is_success() => Ok(fb_res),
+                            _ => Ok(res),
                         }
                     }
-                    if data_str.is_empty() || data_str == "[DONE]" {
-                        continue;
+                    other => other,
+                };
+                let res = match res {
+                    Ok(res) => res,
+                    Err(error) if can_retry => {
+                        tracing::warn!("Agent 上游网络错误，第 {} 次重试: {}", attempt, error);
+                        tokio::time::sleep(upstream_retry_delay(attempt)).await;
+                        continue 'attempts;
                     }
-                    native.push(&data_str);
-                    let delta = match protocol {
-                        WireProtocol::ChatCompletions => openai_parser.parse(&data_str),
-                        WireProtocol::Responses => crate::gateway::providers::openai_responses::extract_openai_responses_delta(&data_str),
-                        WireProtocol::Anthropic => crate::gateway::providers::anthropic::extract_anthropic_delta(&data_str),
-                        WireProtocol::Gemini => crate::gateway::providers::gemini::extract_gemini_delta(&data_str),
+                    Err(error) => return Err(format!("上游网络错误: {}", error)),
+                };
+                if !res.status().is_success() {
+                    let status = res.status();
+                    if can_retry && is_transient_status(status) {
+                        tracing::warn!("Agent 上游暂时不可用 ({})，第 {} 次重试", status, attempt);
+                        tokio::time::sleep(upstream_retry_delay(attempt)).await;
+                        continue 'attempts;
+                    }
+                    let text = res.text().await.unwrap_or_default();
+                    return Err(format!("上游返回错误 {}: {}", status, text));
+                }
+
+                let mut agg = crate::gateway::agent::stream_agg::ToolCallAggregator::new();
+                let mut native = NativeTurnCollector::for_protocol(protocol, CompatVendor::resolve(base_url.as_deref(), config.endpoint));
+                let mut openai_parser = crate::gateway::stream::OpenAiDeltaParser::default();
+                let mut full_text = String::new();
+                let mut reasoning = String::new();
+                let mut thought_repetition = RepetitionDetector::default();
+                let mut text_repetition = RepetitionDetector::default();
+                let mut usage: Option<TokenUsage> = None;
+                let mut buffer = String::new();
+                let mut byte_stream = res.bytes_stream();
+                // 已向前端下发过内容就不能再整轮重放，否则界面会出现重复的思考与正文
+                let mut emitted = false;
+
+                while let Some(chunk_res) = byte_stream.next().await {
+                    let bytes = match chunk_res {
+                        Ok(bytes) => bytes,
+                        Err(error) if can_retry && !emitted => {
+                            tracing::warn!("Agent 上游流在输出前中断，第 {} 次重试: {}", attempt, error);
+                            tokio::time::sleep(upstream_retry_delay(attempt)).await;
+                            continue 'attempts;
+                        }
+                        Err(error) => return Err(format!("上游流读取失败: {}", error)),
                     };
-                    let Some(delta) = delta else { continue };
-                    if let Some(sources) = delta.sources {
-                        if !sources.is_empty() {
-                            sink(LoopEmit::Event(ClientStreamEvent::Sources { sources }));
-                        }
+                    if let Ok(text) = std::str::from_utf8(&bytes) {
+                        buffer.push_str(text);
                     }
-                    if let Some(u) = delta.usage {
-                        usage = Some(u);
-                    }
-                    if let Some(thought) = delta.thought {
-                        if !thought.is_empty() {
-                            reasoning.push_str(&thought);
-                            let repeating = thought_repetition.push(&thought);
-                            sink(LoopEmit::Event(ClientStreamEvent::Thought { text: thought }));
-                            // 丢弃响应流即断开上游连接，不再为退化输出继续计费
-                            if repeating {
-                                return Err(REPETITION_LOOP_DETECTED.to_string());
+                    while let Some(pos) = buffer.find("\n\n") {
+                        let record = buffer[..pos].to_string();
+                        buffer = buffer[pos + 2..].to_string();
+                        let mut data_str = String::new();
+                        for line in record.lines() {
+                            let trimmed = line.trim();
+                            if trimmed.starts_with("data:") {
+                                let content = trimmed[5..].trim_start();
+                                if !data_str.is_empty() {
+                                    data_str.push('\n');
+                                }
+                                data_str.push_str(content);
                             }
                         }
-                    }
-                    if let Some(content) = delta.content {
-                        if !content.is_empty() {
-                            full_text.push_str(&content);
-                            let repeating = text_repetition.push(&content);
-                            sink(LoopEmit::Event(ClientStreamEvent::Delta { text: content }));
-                            if repeating {
-                                return Err(REPETITION_LOOP_DETECTED.to_string());
+                        if data_str.is_empty() || data_str == "[DONE]" {
+                            continue;
+                        }
+                        native.push(&data_str);
+                        let delta = match protocol {
+                            WireProtocol::ChatCompletions => openai_parser.parse(&data_str),
+                            WireProtocol::Responses => crate::gateway::providers::openai_responses::extract_openai_responses_delta(&data_str),
+                            WireProtocol::Anthropic => crate::gateway::providers::anthropic::extract_anthropic_delta(&data_str),
+                            WireProtocol::Gemini => crate::gateway::providers::gemini::extract_gemini_delta(&data_str),
+                        };
+                        let Some(delta) = delta else { continue };
+                        if let Some(sources) = delta.sources {
+                            if !sources.is_empty() {
+                                emitted = true;
+                                sink(LoopEmit::Event(ClientStreamEvent::Sources { sources }));
                             }
                         }
-                    }
-                    for tc in &delta.tool_calls {
-                        agg.push(tc);
+                        if let Some(u) = delta.usage {
+                            usage = Some(u);
+                        }
+                        if let Some(thought) = delta.thought {
+                            if !thought.is_empty() {
+                                reasoning.push_str(&thought);
+                                let repeating = thought_repetition.push(&thought);
+                                emitted = true;
+                                sink(LoopEmit::Event(ClientStreamEvent::Thought { text: thought }));
+                                // 丢弃响应流即断开上游连接，不再为退化输出继续计费
+                                if repeating {
+                                    return Err(REPETITION_LOOP_DETECTED.to_string());
+                                }
+                            }
+                        }
+                        if let Some(content) = delta.content {
+                            if !content.is_empty() {
+                                full_text.push_str(&content);
+                                let repeating = text_repetition.push(&content);
+                                emitted = true;
+                                sink(LoopEmit::Event(ClientStreamEvent::Delta { text: content }));
+                                if repeating {
+                                    return Err(REPETITION_LOOP_DETECTED.to_string());
+                                }
+                            }
+                        }
+                        for tc in &delta.tool_calls {
+                            agg.push(tc);
+                        }
                     }
                 }
-            }
 
-            let (native, tool_calls) = native.finish(agg)?;
-            Ok(TurnOutcome { text: full_text, reasoning, tool_calls, usage, native })
+                let (native, tool_calls) = native.finish(agg)?;
+                return Ok(TurnOutcome { text: full_text, reasoning, tool_calls, usage, native });
+            }
         })
     }
 }
@@ -624,6 +679,18 @@ impl NativeTurnCollector {
     }
 }
 
+/// 单轮上游请求的最多尝试次数；只在尚未向前端输出任何内容时重试，避免界面重复
+pub const UPSTREAM_MAX_ATTEMPTS: u32 = 3;
+
+/// 限流、过载与网关类错误通常几秒内恢复，值得原样重发
+pub fn is_transient_status(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 408 | 429 | 500 | 502 | 503 | 504 | 529)
+}
+
+fn upstream_retry_delay(attempt: u32) -> Duration {
+    Duration::from_millis(1_500 * u64::from(attempt))
+}
+
 /// 下发心跳的周期，需明显小于客户端的流空闲超时（45 秒）
 const HEARTBEAT_PERIOD: Duration = Duration::from_secs(5);
 
@@ -696,7 +763,7 @@ pub fn run_agent_chat_stream(
             Some(requested)
         } else { workspace_manager.get_workspace_root() };
 
-        let workspace_lease = match root.as_deref().map(|root| workspace_manager.acquire_workspace(root)).transpose() {
+        let workspace_lease = match root.as_deref().map(|root| workspace_manager.acquire_shared_workspace(root)).transpose() {
             Ok(lease) => lease,
             Err(error) => {
                 tracing::warn!("Agent 工作区忙: {}", error);

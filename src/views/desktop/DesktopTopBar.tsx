@@ -344,14 +344,16 @@ export function DesktopTopBar({
         </button>
       ) : null}
 
-      {/* 4. 原生感桌面窗口控制三件套（仅在桌面环境下渲染） */}
+      {/* 4. 原生感桌面窗口控制三件套（仅在桌面环境下渲染）。
+          透明无边框窗口里 WebView2 的原生 title 气泡贴着窗口右缘会被裁切并留下黑边残影，
+          这里改用页面内的 data-tooltip 提示 */}
       {isDesktop ? (
         <div className="desktop-window-controls" role="group" aria-label={ja ? "ウィンドウ操作" : "窗口控制"}>
           <button
             type="button"
             className="desktop-window-control-btn"
             onClick={handleMinimize}
-            title="最小化"
+            data-tooltip="最小化"
             aria-label={ja ? "ウィンドウを最小化" : "最小化窗口"}
           >
             <Minus size={13} strokeWidth={2} />
@@ -360,7 +362,7 @@ export function DesktopTopBar({
             type="button"
             className="desktop-window-control-btn"
             onClick={(e) => void handleToggleMaximize(e)}
-            title={isMaximized ? (ja ? "元のサイズに戻す" : "向下还原") : "最大化"}
+            data-tooltip={isMaximized ? (ja ? "元のサイズに戻す" : "向下还原") : "最大化"}
             aria-label={
               isMaximized
                 ? ja ? "ウィンドウを元のサイズに戻す" : "向下还原窗口"
@@ -377,7 +379,7 @@ export function DesktopTopBar({
             type="button"
             className="desktop-window-control-btn desktop-window-control-btn--close"
             onClick={handleClose}
-            title={ja ? "閉じる" : "关闭"}
+            data-tooltip={ja ? "閉じる" : "关闭"}
             aria-label={ja ? "ウィンドウを閉じる" : "关闭窗口"}
           >
             <X size={14} strokeWidth={2} />

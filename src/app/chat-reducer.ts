@@ -50,6 +50,9 @@ export type ChatAction =
       conversation: Conversation;
       messages: ChatMessage[];
       hasMoreHistory?: boolean;
+      /** 切回一个仍在后台运行的会话 */
+      running?: boolean;
+      pendingPermission?: ChatState["pendingPermission"];
     }
   | { type: "locale-changed"; locale: Locale }
   | { type: "pending-image-changed"; image?: StoredImage }
@@ -263,10 +266,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         locale: action.conversation.locale,
         messages: action.messages,
         pendingImage: undefined,
-        pendingPermission: undefined,
-        phase: "idle",
+        pendingPermission: action.pendingPermission,
+        phase: action.running === true ? "streaming" : "idle",
         streaming: undefined,
         hasMoreHistory: action.hasMoreHistory,
+        // 长期记忆跨会话共享，切换会话时必须保留，否则新会话的请求会丢掉记忆前缀
+        userMemory: state.userMemory,
       };
     case "conversation-renamed":
       if (

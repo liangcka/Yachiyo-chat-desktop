@@ -97,6 +97,17 @@ pub struct SaveKeyRequest {
 
 /// 生成进程级随机网关 token：随桌面进程启动一次，经 IPC 交给 webview。
 /// 网关只监听 127.0.0.1，但本机任意进程与浏览器都能连上，故以不可猜测的高熵 token
+/// 上游连续无数据超过该时长才判定断流；推理模型排队或长思考期间仍会持续推送数据或心跳注释
+pub const UPSTREAM_READ_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+
+/// 网关上游客户端。一次流式回复（长思考 + 长输出）常超过两分钟，reqwest 的 `timeout`
+/// 是覆盖读完整个响应体的总时限，会把正常的长回复拦腰切断，因此只限制建连与读取空闲
+pub fn gateway_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(20))
+        .read_timeout(UPSTREAM_READ_IDLE_TIMEOUT)
+}
+
 /// 区分「本应用发起的请求」与「同机其他来源发起的请求」。
 pub fn generate_gateway_token() -> String {
     let mut buf = [0u8; GATEWAY_TOKEN_BYTES];
@@ -479,16 +490,9 @@ pub async fn start_local_server(
         None => return Err(format!("Could not bind to any port in range {}-{}", preferred_port, preferred_port + 10)),
     };
 
-    let http_client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .unwrap_or_default();
+    let http_client = gateway_client_builder().build().unwrap_or_default();
 
-    let direct_client = reqwest::Client::builder()
-        .no_proxy()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .unwrap_or_default();
+    let direct_client = gateway_client_builder().no_proxy().build().unwrap_or_default();
 
     let state = AppState {
         key_store,

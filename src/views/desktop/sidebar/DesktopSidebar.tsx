@@ -12,6 +12,7 @@ export function DesktopSidebar({
   conversations,
   copy,
   locale,
+  onArchiveConversation,
   onDeleteConversation,
   onLocale,
   onNewChat,
@@ -24,6 +25,7 @@ export function DesktopSidebar({
   onTogglePinConversation,
   onToggleTheme,
   resolvedTheme = "dark",
+  runningConversations,
   showToast,
 }: DesktopSidebarProps) {
   const { handlePointerEnter, handlePointerLeave, pointerInside } = useScrollbarLinger();
@@ -60,6 +62,8 @@ export function DesktopSidebar({
           activeConversationId={activeConversationId}
           conversations={orderedConversations}
           copy={copy}
+          runningConversations={runningConversations}
+          onArchiveConversation={onArchiveConversation}
           onDeleteConversation={onDeleteConversation}
           onRenameConversation={onRenameConversation}
           onSelectConversation={onSelectConversation}

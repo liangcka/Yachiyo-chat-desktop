@@ -51,6 +51,7 @@ export interface ChatRepository {
   listConversations(): Promise<Conversation[]>;
   getConversation(id: string): Promise<Conversation | undefined>;
   renameConversation?(id: string, title: string): Promise<void>;
+  setConversationArchived?(id: string, archived: boolean): Promise<void>;
   listMessages(
     conversationId: string,
     options?: { beforeCreatedAt?: number; limit?: number },
@@ -96,9 +97,14 @@ export interface ChatControllerOptions {
   autoAiTitle?: boolean;
   /** 会话元数据（标题/时间/自愈）变更外部通知，便于顶层同步刷新列表 */
   onConversationUpdated?: () => void;
+  /** 非当前会话的运行结束时通知（后台任务完成提醒） */
+  onBackgroundRunFinished?: (conversationId: string, status: "complete" | "failed" | "stopped") => void;
   now?: () => number;
   id?: () => string;
 }
+
+/** 运行中会话的状态：流式生成中，或在等待用户审批工具权限 */
+export type RunActivity = "streaming" | "approval";
 
 export interface RecalledMessageData {
   text: string;
@@ -133,6 +139,10 @@ export interface ChatController extends ChatState {
   toggleAgent(): void;
   setExecutionMode(mode: "readonly" | "confirm" | "full_auto"): void;
   approvePermission(requestId: string, approved: boolean, sessionScope?: boolean): Promise<boolean>;
+  /** 所有正在运行的会话（含后台），键为会话 id */
+  runningConversations: ReadonlyMap<string, RunActivity>;
+  /** 停止指定会话的运行（不要求是当前会话） */
+  stopConversation(id: string): Promise<void>;
 }
 
 interface ControllerServices {
@@ -172,6 +182,8 @@ interface ActiveRun {
   contentStartedAtMs?: number;
   timer?: ReturnType<typeof setTimeout>;
   token: number;
+  /** 本次运行等待中的权限审批；会话在后台时暂存于此，切回前台再交给界面 */
+  pendingPermission?: NonNullable<ChatState["pendingPermission"]>;
 }
 
 const partialPersistenceInterval = 250;
@@ -249,13 +261,18 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   }, [setExecutionMode]);
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const stateRef = useRef<ChatState>(initialChatState);
-  const activeRef = useRef<ActiveRun | undefined>(undefined);
-  const compressControllerRef = useRef<AbortController | undefined>(undefined);
+  /** 按会话 id 索引的运行：切换或新建会话不会中断其他会话的运行 */
+  const runsRef = useRef(new Map<string, ActiveRun>());
+  const [runningConversations, setRunningConversations] = useState<ReadonlyMap<string, RunActivity>>(
+    () => new Map(),
+  );
+  const compressRef = useRef<{ controller: AbortController; conversationId: string } | undefined>(undefined);
   const initializationRef = useRef<Promise<InitialData> | undefined>(undefined);
   const mountedRef = useRef(false);
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const runTokenRef = useRef(0);
-  const sendingRef = useRef(false);
+  /** 正在准备或执行发送的会话 id → 发送令牌；各会话互不阻塞 */
+  const sendingRef = useRef(new Map<string, number>());
   const sendTokenRef = useRef(0);
   const newConversationLockRef = useRef(false);
   const lastTimestampRef = useRef(0);
@@ -263,6 +280,10 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   useEffect(() => {
     onConversationUpdatedRef.current = options.onConversationUpdated;
   }, [options.onConversationUpdated]);
+  const onBackgroundRunFinishedRef = useRef(options.onBackgroundRunFinished);
+  useEffect(() => {
+    onBackgroundRunFinishedRef.current = options.onBackgroundRunFinished;
+  }, [options.onBackgroundRunFinished]);
 
   const nextTimestamp = useCallback(() => {
     const timestamp = Math.max(servicesRef.current.now(), lastTimestampRef.current + 1);
@@ -273,6 +294,32 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   const emit = useCallback((action: ChatAction) => {
     stateRef.current = chatReducer(stateRef.current, action);
     dispatch(action);
+  }, []);
+
+  /** 运行仍是该会话的当前运行（未被停止、替换或撤回） */
+  const isRunAlive = useCallback(
+    (run: ActiveRun) => runsRef.current.get(run.assistant.conversationId)?.token === run.token,
+    [],
+  );
+  /** 会话正显示在界面上；后台会话的进度只写入存储与运行缓冲，不派发到界面状态 */
+  const isForeground = useCallback(
+    (conversationId: string) => mountedRef.current && stateRef.current.activeConversation?.id === conversationId,
+    [],
+  );
+  const isSending = useCallback(
+    (conversationId: string | undefined) => conversationId !== undefined && sendingRef.current.has(conversationId),
+    [],
+  );
+  const syncRunActivity = useCallback(() => {
+    if (!mountedRef.current) return;
+    setRunningConversations(
+      new Map(
+        [...runsRef.current].map(([id, run]): [string, RunActivity] => [
+          id,
+          run.pendingPermission !== undefined ? "approval" : "streaming",
+        ]),
+      ),
+    );
   }, []);
 
   const streamBatcherRef = useRef<StreamBatcher | undefined>(undefined);
@@ -307,6 +354,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   useEffect(() => {
     mountedRef.current = true;
     let ignored = false;
+    const runs = runsRef.current;
 
     initializationRef.current ??= (async () => {
       const [locale, conversations, userMemory] = await Promise.all([
@@ -314,7 +362,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         servicesRef.current.repository.listConversations(),
         servicesRef.current.repository.getUserMemory().catch(() => ""),
       ]);
-      let latest = conversations[0];
+      // 启动时打开最近的未归档会话；全部归档时新建一个
+      let latest = conversations.find((conversation) => conversation.archivedAt === undefined);
       if (latest === undefined) {
         return { ...(await createConversation(locale)), userMemory };
       }
@@ -401,16 +450,16 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     return () => {
       ignored = true;
       mountedRef.current = false;
-      const compressController = compressControllerRef.current;
-      if (compressController !== undefined) {
-        compressControllerRef.current = undefined;
-        compressController.abort();
+      const compress = compressRef.current;
+      if (compress !== undefined) {
+        compressRef.current = undefined;
+        compress.controller.abort();
       }
-      const active = activeRef.current;
-      if (active !== undefined) {
-        activeRef.current = undefined;
+      const stoppedRuns = [...runs.values()];
+      runs.clear();
+      streamBatcherRef.current?.flush();
+      for (const active of stoppedRuns) {
         if (active.timer !== undefined) clearTimeout(active.timer);
-        streamBatcherRef.current?.flush();
         active.controller.abort();
         void active.preparation
           .catch(() => undefined)
@@ -432,7 +481,10 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       pendingImage?: StoredImage,
       reserveCharacters = 0,
       overrideSummary?: string,
+      conversation: Conversation | undefined = stateRef.current.activeConversation,
     ): Promise<StreamChatMessage[]> => {
+      // 运行开始后用户可能切到别的会话，摘要、压缩边界与语言必须取自发起运行的会话
+      const locale = conversation?.locale ?? stateRef.current.locale;
       const activeSkills = activeSkillsRef.current ?? [];
       const hasSkills = activeSkills.length > 0;
       const skillUserText = hasSkills
@@ -441,7 +493,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             .join("\n\n---\n\n")}`
         : "";
       const skillAssistantText = hasSkills
-        ? stateRef.current.locale === "ja-JP"
+        ? locale === "ja-JP"
           ? "（技能指示を確認しました。厳守して実行します）"
           : "（已收到技能指令，将严格遵守执行）"
         : "";
@@ -454,12 +506,12 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         typeof activeUserMemory === "string" && activeUserMemory.trim().length > 0;
 
       const memoryUserText = hasUserMemory
-        ? stateRef.current.locale === "ja-JP"
+        ? locale === "ja-JP"
           ? `【彩葉についての長期記憶（全ての会話で共有される事実）】\n${activeUserMemory.trim()}\nこれは実際に起きた確定した事実として扱ってください。`
           : `【关于彩叶的长期记忆（所有对话共享的事实）】\n${activeUserMemory.trim()}\n以下内容请作为真实发生的既定事实对待。`
         : "";
       const memoryAssistantText = hasUserMemory
-        ? stateRef.current.locale === "ja-JP"
+        ? locale === "ja-JP"
           ? "（彩葉のこと、ちゃんと覚えていますよ）"
           : "（关于彩叶的事情，我一直都记得哦~）"
         : "";
@@ -468,16 +520,16 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         ? [...memoryUserText].length + [...memoryAssistantText].length
         : 0;
 
-      const activeSummary = overrideSummary ?? stateRef.current.activeConversation?.summary;
+      const activeSummary = overrideSummary ?? conversation?.summary;
       const hasSummary = typeof activeSummary === "string" && activeSummary.trim().length > 0;
 
       const summaryUserText = hasSummary
-        ? stateRef.current.locale === "ja-JP"
+        ? locale === "ja-JP"
           ? `【これまでの会話の記憶・背景（実際に起きた確定した事実）】\n${activeSummary.trim()}\nこれは私たちが実際に経験した会話の記録です。既定の事実として守り、引き継いでください。`
           : `【前情提要 / 历史背景记忆（真实发生的既定事实）】\n${activeSummary.trim()}\n这是我们真实经历过的对话记录，请作为既定事实遵守并延续。`
         : "";
       const summaryAssistantText = hasSummary
-        ? stateRef.current.locale === "ja-JP"
+        ? locale === "ja-JP"
           ? "（これまでの経緯と記憶を把握しました。会話を続けます）"
           : "（已记住我们之前的对话与经历，继续交流~）"
         : "";
@@ -495,7 +547,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         messages,
         reserveCharacters + summaryChars + memoryChars + skillChars,
         maxHistoryMessages,
-        stateRef.current.activeConversation?.compressedUpTo,
+        conversation?.compressedUpTo,
       );
       if (history.length === 0 && messages.some(isHistoryMessage)) throw new ChatClientError("INVALID_REQUEST");
       const lastIndex = history.length - 1;
@@ -581,7 +633,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       // 运行时请求追加接续指令以符合大模型接口末尾必须是 user 的契约，同时 100% 继承上文全部工作事实
       if (allMessages.at(-1)?.role === "assistant") {
         const continuationText =
-          stateRef.current.locale === "ja-JP"
+          locale === "ja-JP"
             ? "（接続が一時切断されました。上記に続けてタスクを完了してください）"
             : "（连接曾中断，请接续上文继续完成任务）";
         allMessages.push({ role: "user", text: continuationText });
@@ -664,8 +716,10 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     ): Promise<void> => {
       if (run.finishing !== undefined) return run.finishing;
       run.finishing = (async () => {
-        if (activeRef.current?.token !== run.token) return;
-        activeRef.current = undefined;
+        if (!isRunAlive(run)) return;
+        const conversationId = run.assistant.conversationId;
+        runsRef.current.delete(conversationId);
+        syncRunActivity();
         if (run.timer !== undefined) clearTimeout(run.timer);
         // 终态（completed/stopped/failed）必须晚于所有已缓冲的流式增量落地
         streamBatcherRef.current?.flush();
@@ -691,7 +745,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             ? { toolSteps: run.toolSteps.map((step) => ({ ...step })) }
             : {}),
         };
-        if (mountedRef.current) {
+        const foreground = isForeground(conversationId);
+        if (foreground) {
           if (status === "complete") {
             emit({
               messageId: run.assistant.id,
@@ -715,10 +770,10 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           }
         }
         await queueMessage(message).catch(() => {
-          if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
+          if (isForeground(conversationId)) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
         });
+        if (!foreground && mountedRef.current) onBackgroundRunFinishedRef.current?.(conversationId, status);
 
-        const conversationId = run.assistant.conversationId;
         const activeConv = stateRef.current.activeConversation;
         if (
           conversationId &&
@@ -782,7 +837,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       })();
       return run.finishing;
     },
-    [emit, generateAiTitle, queueMessage],
+    [emit, generateAiTitle, isForeground, isRunAlive, queueMessage, syncRunActivity],
   );
 
   const startAssistant = useCallback(
@@ -792,7 +847,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       pendingImage?: StoredImage,
       branch?: { branchRootId: string; branchVersion: number },
       preparedAssistant?: ChatMessage,
+      conversationSnapshot?: Conversation,
     ): Promise<void> => {
+      const conversation = conversationSnapshot ?? stateRef.current.activeConversation;
       const activeConfig = activeLlmConfigRef.current;
       const currentProvider = activeConfig?.provider ?? "stepfun";
       const currentModel = activeConfig?.model ?? "step-3.7-flash";
@@ -824,8 +881,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         contentSegments: [],
         token: ++runTokenRef.current,
       };
-      activeRef.current = run;
-      emit({ assistant, type: "send-started", user });
+      runsRef.current.set(assistant.conversationId, run);
+      syncRunActivity();
+      if (isForeground(assistant.conversationId)) emit({ assistant, type: "send-started", user });
 
       run.preparation = (async () => {
         if (user !== undefined) await queueMessage(user);
@@ -841,17 +899,17 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         await finishRun(run, "failed", "STORAGE_ERROR");
         return;
       }
-      if (activeRef.current?.token !== run.token) return;
+      if (!isRunAlive(run)) return;
       if (run.controller.signal.aborted) {
         await finishRun(run, "stopped");
         return;
       }
 
       const schedulePartialPersistence = () => {
-        if (run.timer !== undefined || activeRef.current?.token !== run.token) return;
+        if (run.timer !== undefined || !isRunAlive(run)) return;
         run.timer = setTimeout(() => {
           run.timer = undefined;
-          if (activeRef.current?.token !== run.token) return;
+          if (!isRunAlive(run)) return;
           void queueMessage({
             ...run.assistant,
             status: "streaming",
@@ -870,16 +928,15 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       };
 
       try {
-        const requestMessages = await makeRequestMessages(history, pendingImage);
+        const requestMessages = await makeRequestMessages(history, pendingImage, 0, undefined, conversation);
+        const locale = conversation?.locale ?? stateRef.current.locale;
         // 流正常结束但零输出（如推理模型思考耗尽 token 预算）视为可重试失败，
         // 避免空气泡被静默隐藏
-        const currentTime = formatClientTimestamp(
-          servicesRef.current.now(),
-          stateRef.current.locale,
-        );
+        const currentTime = formatClientTimestamp(servicesRef.current.now(), locale);
+        const conversationId = run.assistant.conversationId;
         const result = await servicesRef.current.streamChat(
           {
-            locale: stateRef.current.locale,
+            locale,
             messages: requestMessages,
             currentTime,
             ...(activeConfig !== undefined
@@ -908,40 +965,44 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           },
           {
             onDelta(text) {
-              if (activeRef.current?.token !== run.token || text.length === 0) return;
+              if (!isRunAlive(run) || text.length === 0) return;
               const start = run.text.length;
               const atMs = servicesRef.current.now() - run.startTime;
               run.contentStartedAtMs ??= atMs;
               run.text += text;
               run.contentSegments = appendContentSegment(run.contentSegments,
                 { type: "text", start, end: run.text.length }, atMs);
-              streamBatcherRef.current?.push({ messageId: run.assistant.id, text, type: "delta", contentSegments: run.contentSegments });
+              if (isForeground(conversationId)) {
+                streamBatcherRef.current?.push({ messageId: run.assistant.id, text, type: "delta", contentSegments: run.contentSegments });
+              }
               schedulePartialPersistence();
             },
             onThought(text) {
-              if (activeRef.current?.token !== run.token || text.length === 0) return;
+              if (!isRunAlive(run) || text.length === 0) return;
               const start = run.thought?.length ?? 0;
               const atMs = servicesRef.current.now() - run.startTime;
               run.contentStartedAtMs ??= atMs;
               run.thought = (run.thought ?? "") + text;
               run.contentSegments = appendContentSegment(run.contentSegments,
                 { type: "thought", start, end: run.thought.length, startedAtMs: atMs }, atMs);
-              streamBatcherRef.current?.push({
-                messageId: run.assistant.id,
-                text,
-                type: "thought-delta",
-                contentSegments: run.contentSegments,
-              });
+              if (isForeground(conversationId)) {
+                streamBatcherRef.current?.push({
+                  messageId: run.assistant.id,
+                  text,
+                  type: "thought-delta",
+                  contentSegments: run.contentSegments,
+                });
+              }
               schedulePartialPersistence();
             },
             onSources(sources) {
-              if (activeRef.current?.token !== run.token || sources.length === 0) return;
+              if (!isRunAlive(run) || sources.length === 0) return;
               run.sources = sources;
-              emit({ messageId: run.assistant.id, sources, type: "sources-received" });
+              if (isForeground(conversationId)) emit({ messageId: run.assistant.id, sources, type: "sources-received" });
               schedulePartialPersistence();
             },
             onToolCall(call) {
-              if (activeRef.current?.token !== run.token) return;
+              if (!isRunAlive(run)) return;
               const argumentsJson = JSON.stringify(call.arguments ?? {});
               const atMs = servicesRef.current.now() - run.startTime;
               run.contentStartedAtMs ??= atMs;
@@ -949,43 +1010,54 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
               run.toolSteps.push(step);
               run.contentSegments = appendContentSegment(run.contentSegments,
                 { type: "tool", toolId: call.id }, atMs);
-              // 工具边界前先提交 rAF 缓冲，避免稍后的增量覆盖工具位置。
-              streamBatcherRef.current?.flush();
-              emit({ messageId: run.assistant.id, call: step, type: "tool-call", contentSegments: run.contentSegments });
+              if (isForeground(conversationId)) {
+                // 工具边界前先提交 rAF 缓冲，避免稍后的增量覆盖工具位置。
+                streamBatcherRef.current?.flush();
+                emit({ messageId: run.assistant.id, call: step, type: "tool-call", contentSegments: run.contentSegments });
+              }
               schedulePartialPersistence();
             },
             onToolResult(result) {
-              if (activeRef.current?.token !== run.token) return;
+              if (!isRunAlive(run)) return;
               const step = run.toolSteps.find((s) => s.id === result.id);
               const timedResult = { output: result.output, isError: result.isError, durationMs: result.durationMs,
                 endedAtMs: servicesRef.current.now() - run.startTime };
               if (step !== undefined) {
                 step.result = timedResult;
               }
-              emit({
-                messageId: run.assistant.id,
-                callId: result.id,
-                result: timedResult,
-                type: "tool-result",
-              });
+              if (isForeground(conversationId)) {
+                emit({
+                  messageId: run.assistant.id,
+                  callId: result.id,
+                  result: timedResult,
+                  type: "tool-result",
+                });
+              }
               schedulePartialPersistence();
             },
             onPermissionRequest(request) {
-              if (activeRef.current?.token !== run.token) return;
-              emit({
+              if (!isRunAlive(run)) return;
+              run.pendingPermission = {
                 messageId: run.assistant.id,
                 requestId: request.requestId,
                 toolName: request.toolName,
                 argumentsJson: JSON.stringify(request.arguments ?? {}),
-                type: "permission-requested",
-              });
+              };
+              syncRunActivity();
+              if (isForeground(conversationId)) emit({ ...run.pendingPermission, type: "permission-requested" });
             },
             onPermissionResolved(resolved) {
-              emit({ type: "permission-resolved", requestId: resolved.requestId, approved: resolved.approved });
+              if (run.pendingPermission?.requestId === resolved.requestId) {
+                run.pendingPermission = undefined;
+                syncRunActivity();
+              }
+              if (isForeground(conversationId)) {
+                emit({ type: "permission-resolved", requestId: resolved.requestId, approved: resolved.approved });
+              }
             },
             onTurn(turn) {
               // Agent 多轮各自上报 usage 时逐轮累加；done 事件的最终 usage 优先（finishRun 取 usage ?? run.usage）
-              if (activeRef.current?.token !== run.token || turn.usage === undefined) return;
+              if (!isRunAlive(run) || turn.usage === undefined) return;
               const previous = run.usage;
               run.usage = {
                 promptTokens: (previous?.promptTokens ?? 0) + (turn.usage.promptTokens ?? 0),
@@ -1012,7 +1084,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           loopStopped,
         );
       } catch (error) {
-        if (activeRef.current?.token !== run.token) return;
+        if (!isRunAlive(run)) return;
         const code =
           error instanceof ChatClientError
             ? error.code
@@ -1023,14 +1095,14 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         else await finishRun(run, "failed", code);
       }
     },
-    [emit, finishRun, makeRequestMessages, nextTimestamp, queueMessage],
+    [emit, finishRun, isForeground, isRunAlive, makeRequestMessages, nextTimestamp, queueMessage, syncRunActivity],
   );
 
   const compressConversation = useCallback(
     async (manual = true, allowSending = false): Promise<boolean> => {
       const snapshot = stateRef.current;
       if (
-        (sendingRef.current && !allowSending) ||
+        (isSending(snapshot.activeConversation?.id) && !allowSending) ||
         snapshot.activeConversation === undefined ||
         snapshot.phase === "loading" ||
         snapshot.phase === "streaming" ||
@@ -1039,6 +1111,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       ) {
         return false;
       }
+      const conversationId = snapshot.activeConversation.id;
 
       // 增量压缩：只处理压缩边界之后的消息，已压缩区间由摘要取代
       const previousBoundary = snapshot.activeConversation.compressedUpTo;
@@ -1048,12 +1121,13 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       }
 
       const controller = new AbortController();
-      compressControllerRef.current = controller;
-      sendingRef.current = true;
+      compressRef.current = { controller, conversationId };
+      // 由 send 内部调用时发送锁已由 send 持有
+      const sendToken = allowSending ? undefined : ++sendTokenRef.current;
+      if (sendToken !== undefined) sendingRef.current.set(conversationId, sendToken);
       emit({ type: "compress-started" });
 
       try {
-        const conversationId = snapshot.activeConversation.id;
         const summaryPrompt = compressionInstruction[snapshot.locale];
 
         const existingSummary = snapshot.activeConversation.summary?.trim();
@@ -1155,7 +1229,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         );
 
         if (controller.signal.aborted) {
-          if (mountedRef.current) emit({ type: "clear-error" });
+          if (isForeground(conversationId)) emit({ type: "clear-error" });
           return false;
         }
 
@@ -1179,11 +1253,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           if (userProfile !== undefined) {
             await servicesRef.current.repository.updateUserMemory(userProfile);
           }
-          if (
-            mountedRef.current &&
-            stateRef.current.activeConversation?.id === conversationId &&
-            !controller.signal.aborted
-          ) {
+          if (isForeground(conversationId) && !controller.signal.aborted) {
             emit({
               type: "context-compressed",
               summary: conversationMemory,
@@ -1194,45 +1264,68 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             return true;
           }
         }
-        if (mountedRef.current) emit({ type: "clear-error" });
+        if (isForeground(conversationId)) emit({ type: "clear-error" });
         return false;
       } catch {
-        if (mountedRef.current) emit({ type: "clear-error" });
+        if (isForeground(conversationId)) emit({ type: "clear-error" });
         return false;
       } finally {
-        if (compressControllerRef.current === controller) {
-          compressControllerRef.current = undefined;
+        if (compressRef.current?.controller === controller) {
+          compressRef.current = undefined;
         }
-        if (!allowSending) sendingRef.current = false;
+        if (sendToken !== undefined && sendingRef.current.get(conversationId) === sendToken) {
+          sendingRef.current.delete(conversationId);
+        }
       }
     },
-    [emit, nextTimestamp],
+    [emit, isForeground, isSending, nextTimestamp],
   );
 
+  const stopConversation = useCallback(
+    async (conversationId: string): Promise<void> => {
+      const compress = compressRef.current;
+      if (compress !== undefined && compress.conversationId === conversationId) {
+        compressRef.current = undefined;
+        compress.controller.abort();
+        if (isForeground(conversationId)) emit({ type: "clear-error" });
+      }
+      const run = runsRef.current.get(conversationId);
+      if (run === undefined) return;
+      run.controller.abort();
+      await run.preparation.catch(() => undefined);
+      await finishRun(run, "stopped");
+    },
+    [emit, finishRun, isForeground],
+  );
+
+  /** 只停止当前显示的会话，后台会话继续运行 */
   const stop = useCallback(async (): Promise<void> => {
-    const compressController = compressControllerRef.current;
-    if (compressController !== undefined) {
-      compressControllerRef.current = undefined;
-      compressController.abort();
-      if (mountedRef.current) emit({ type: "clear-error" });
+    const conversationId = stateRef.current.activeConversation?.id;
+    if (conversationId !== undefined) await stopConversation(conversationId);
+  }, [stopConversation]);
+
+  /** 同一会话同一时刻只允许一个发送/重试/分支操作；不同会话互不阻塞 */
+  const withSendingLock = useCallback(async (conversationId: string, task: () => Promise<void>) => {
+    const token = ++sendTokenRef.current;
+    sendingRef.current.set(conversationId, token);
+    try {
+      await task();
+    } finally {
+      if (sendingRef.current.get(conversationId) === token) sendingRef.current.delete(conversationId);
     }
-    const run = activeRef.current;
-    if (run === undefined) return;
-    run.controller.abort();
-    await run.preparation.catch(() => undefined);
-    await finishRun(run, "stopped");
-  }, [emit, finishRun]);
+  }, []);
 
   const send = useCallback(
     async (text: string): Promise<void> => {
       if (!text.trim() && !stateRef.current.pendingImage) return;
       if (stateRef.current.phase === "streaming") {
+        const streamingId = stateRef.current.activeConversation?.id;
         await stop();
-        sendingRef.current = false;
+        if (streamingId !== undefined) sendingRef.current.delete(streamingId);
       }
       const snapshot = stateRef.current;
       if (
-        sendingRef.current ||
+        isSending(snapshot.activeConversation?.id) ||
         snapshot.activeConversation === undefined ||
         snapshot.phase === "loading" ||
         snapshot.phase === "streaming" ||
@@ -1243,68 +1336,61 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       }
 
       const normalized = text.trim();
-      if (normalized.length === 0 && snapshot.pendingImage === undefined) return;
+      const pendingImage = snapshot.pendingImage;
+      if (normalized.length === 0 && pendingImage === undefined) return;
 
       const targetConversationId = snapshot.activeConversation.id;
-      sendingRef.current = true;
-      const sendToken = ++sendTokenRef.current;
-      try {
-        // 未压缩历史达到阈值时先增量压缩，再发送（为摘要/长期记忆前缀预留槽位）
-        while (
-          countUncompressedMessages(
-            stateRef.current.messages,
-            stateRef.current.activeConversation?.compressedUpTo,
-          ) >= compressionTriggerUncompressedMessages || shouldCompressContext(stateRef.current.messages, stateRef.current.activeConversation?.compressedUpTo, stateRef.current.activeConversation?.summary)
-        ) {
-          const compressed = await compressConversation(false, true);
-
-          const currentSnapshot = stateRef.current;
-          if (
-            !mountedRef.current ||
-            currentSnapshot.activeConversation?.id !== targetConversationId ||
-            currentSnapshot.phase === "offline"
+      await withSendingLock(targetConversationId, async () => {
+        try {
+          // 未压缩历史达到阈值时先增量压缩，再发送（为摘要/长期记忆前缀预留槽位）；
+          // 压缩基于界面状态，用户切走后不再继续压缩
+          while (
+            isForeground(targetConversationId) &&
+            (countUncompressedMessages(
+              stateRef.current.messages,
+              stateRef.current.activeConversation?.compressedUpTo,
+            ) >= compressionTriggerUncompressedMessages || shouldCompressContext(stateRef.current.messages, stateRef.current.activeConversation?.compressedUpTo, stateRef.current.activeConversation?.summary))
           ) {
-            return;
+            const compressed = await compressConversation(false, true);
+            if (!mountedRef.current || stateRef.current.phase === "offline") return;
+            if (!compressed) break;
           }
-          if (!compressed) break;
-        }
+          if (!mountedRef.current || stateRef.current.phase === "offline") return;
 
-        const currentSnapshot = stateRef.current;
-        if (
-          !mountedRef.current ||
-          currentSnapshot.activeConversation?.id !== targetConversationId ||
-          currentSnapshot.phase === "offline"
-        ) {
-          return;
-        }
+          // 压缩期间用户切到了别的会话：消息照常发出，运行直接转入后台
+          const foreground = isForeground(targetConversationId);
+          const conversation = foreground
+            ? stateRef.current.activeConversation
+            : await servicesRef.current.repository.getConversation(targetConversationId);
+          if (conversation === undefined) return;
+          const history = foreground
+            ? stateRef.current.messages
+            : await servicesRef.current.repository.listMessages(targetConversationId, { limit: historyWindowSize });
 
-        const image =
-          currentSnapshot.pendingImage === undefined
-            ? undefined
-            : { ...currentSnapshot.pendingImage, conversationId: targetConversationId };
-        const user: ChatMessage = {
-          conversationId: targetConversationId,
-          createdAt: nextTimestamp(),
-          ...(image === undefined ? {} : { imageId: image.id }),
-          id: servicesRef.current.id(),
-          role: "user",
-          status: "complete",
-          text: normalized,
-        };
-        await startAssistant([...stateRef.current.messages, user], user, image);
-      } catch {
-        if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
-      } finally {
-        if (sendTokenRef.current === sendToken) sendingRef.current = false;
-      }
+          const image =
+            pendingImage === undefined ? undefined : { ...pendingImage, conversationId: targetConversationId };
+          const user: ChatMessage = {
+            conversationId: targetConversationId,
+            createdAt: nextTimestamp(),
+            ...(image === undefined ? {} : { imageId: image.id }),
+            id: servicesRef.current.id(),
+            role: "user",
+            status: "complete",
+            text: normalized,
+          };
+          await startAssistant([...history, user], user, image, undefined, undefined, conversation);
+        } catch {
+          if (isForeground(targetConversationId)) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
+        }
+      });
     },
-    [compressConversation, emit, nextTimestamp, startAssistant, stop],
+    [compressConversation, emit, isForeground, isSending, nextTimestamp, startAssistant, stop, withSendingLock],
   );
 
   const retry = useCallback(async (): Promise<void> => {
     const snapshot = stateRef.current;
     if (
-      sendingRef.current ||
+      isSending(snapshot.activeConversation?.id) ||
       snapshot.activeConversation === undefined ||
       snapshot.phase === "loading" ||
       snapshot.phase === "streaming" ||
@@ -1314,13 +1400,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     ) {
       return;
     }
-    sendingRef.current = true;
-    try {
-      await startAssistant(snapshot.messages, undefined);
-    } finally {
-      sendingRef.current = false;
-    }
-  }, [startAssistant]);
+    await withSendingLock(snapshot.activeConversation.id, () => startAssistant(snapshot.messages, undefined));
+  }, [isSending, startAssistant, withSendingLock]);
 
   const recall = useCallback(async (): Promise<RecalledMessageData | undefined> => {
     const snapshot = stateRef.current;
@@ -1345,16 +1426,18 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       return undefined;
     }
 
-    const compressController = compressControllerRef.current;
-    if (compressController !== undefined) {
-      compressControllerRef.current = undefined;
-      compressController.abort();
-      if (mountedRef.current) emit({ type: "clear-error" });
+    const conversationId = snapshot.activeConversation.id;
+    const compress = compressRef.current;
+    if (compress !== undefined && compress.conversationId === conversationId) {
+      compressRef.current = undefined;
+      compress.controller.abort();
+      emit({ type: "clear-error" });
     }
 
-    const active = activeRef.current;
+    const active = runsRef.current.get(conversationId);
     if (active !== undefined) {
-      activeRef.current = undefined;
+      runsRef.current.delete(conversationId);
+      syncRunActivity();
       if (active.timer !== undefined) clearTimeout(active.timer);
       streamBatcherRef.current?.flush();
       active.controller.abort();
@@ -1364,7 +1447,6 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     if (recalledUser === undefined) return undefined;
 
     const remainingMessages = messages.slice(0, lastUserIndex);
-    const conversationId = snapshot.activeConversation.id;
 
     try {
       const task = persistQueueRef.current.then(async () => {
@@ -1389,14 +1471,15 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
       return undefined;
     }
-  }, [emit]);
+  }, [emit, syncRunActivity]);
 
   const forkMessage = useCallback(async (messageId: string, text?: string): Promise<void> => {
     const current = stateRef.current;
-    if (sendingRef.current || !current.activeConversation || ["loading", "streaming", "compressing", "offline"].includes(current.phase)) return;
+    if (isSending(current.activeConversation?.id) || !current.activeConversation || ["loading", "streaming", "compressing", "offline"].includes(current.phase)) return;
     if (text !== undefined && !text.trim()) return;
-    sendingRef.current = true;
-    try {
+    const conversationId = current.activeConversation.id;
+    await withSendingLock(conversationId, async () => { try {
+      if (!current.activeConversation) return;
       await persistQueueRef.current;
       const messages = await servicesRef.current.repository.listMessages(current.activeConversation.id);
       const index = messages.findIndex((message) => message.id === messageId);
@@ -1425,9 +1508,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       await startAssistant(user ? [...preceding, user] : preceding, user, undefined, user ? undefined : branch, preparedAssistant);
       onConversationUpdatedRef.current?.();
     } catch {
-      if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
-    } finally { sendingRef.current = false; }
-  }, [compressConversation, emit, nextTimestamp, startAssistant]);
+      if (isForeground(conversationId)) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
+    } });
+  }, [compressConversation, emit, isForeground, isSending, nextTimestamp, startAssistant, withSendingLock]);
 
   const editMessage = useCallback((messageId: string, text: string) => forkMessage(messageId, text), [forkMessage]);
   const regenerate = useCallback(async (messageId?: string): Promise<void> => {
@@ -1436,9 +1519,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   }, [forkMessage]);
   const switchBranch = useCallback(async (messageId: string, version: number): Promise<void> => {
     const current = stateRef.current;
-    if (sendingRef.current || !current.activeConversation || !["idle", "error"].includes(current.phase)) return;
-    sendingRef.current = true;
-    try {
+    if (isSending(current.activeConversation?.id) || !current.activeConversation || !["idle", "error"].includes(current.phase)) return;
+    await withSendingLock(current.activeConversation.id, async () => { try {
+      if (!current.activeConversation) return;
       await persistQueueRef.current;
       const messages = await servicesRef.current.repository.listMessages(current.activeConversation.id);
       const target = messages.find((message) => message.id === messageId);
@@ -1447,20 +1530,17 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       await servicesRef.current.repository.saveBranchState(restored.conversation, restored.messages);
       if (mountedRef.current && stateRef.current.activeConversation?.id === current.activeConversation.id)
         emit({ type: "conversation-selected", conversation: restored.conversation, messages: restored.messages, hasMoreHistory: false });
-    } catch { if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" }); }
-    finally { sendingRef.current = false; }
-  }, [emit]);
-
-  const stopAndWait = useCallback(async () => {
-    await stop();
-  }, [stop]);
+    } catch { if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" }); } });
+  }, [emit, isSending, withSendingLock]);
 
   const selectConversation = useCallback(
     async (id: string): Promise<void> => {
-      await stopAndWait();
+      // 切换会话不停止任何运行：离开的会话转入后台继续，切回运行中的会话时接上实时进度
       try {
         const conversation = await servicesRef.current.repository.getConversation(id);
         if (conversation === undefined) throw new TypeError("Conversation is missing.");
+        // 先等已排队的写入落盘，避免读到刚结束的后台运行的旧快照
+        await persistQueueRef.current;
         // UI 窗口化：切换会话同样只加载最近 windowSize 条，多取 1 条探测更早历史
         const stored = await servicesRef.current.repository.listMessages(id, {
           limit: historyWindowSize + 1,
@@ -1476,41 +1556,28 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             onConversationUpdatedRef.current?.();
           }
         }
-        if (
-          autoAiTitleRef.current &&
-          messages.length >= 2 &&
-          (currentConv.title === autoTitle || isDefaultTitle(currentConv.title))
-        ) {
-          void (async () => {
-            try {
-              const aiTitle = await generateAiTitle(id, messages);
-              if (aiTitle) {
-                const latest = await servicesRef.current.repository.getConversation(id);
-                if (latest && (latest.title === autoTitle || isDefaultTitle(latest.title))) {
-                  await servicesRef.current.repository.renameConversation?.(id, aiTitle);
-                  if (mountedRef.current && stateRef.current.activeConversation?.id === id) {
-                    emit({ conversationId: id, title: aiTitle, type: "conversation-renamed" });
-                  }
-                  onConversationUpdatedRef.current?.();
-                }
-              }
-            } catch {
-              // 静默自愈
-            }
-          })();
-        }
         await servicesRef.current.repository.setLocale(currentConv.locale);
+        // 以下同步执行到派发为止，保证实时快照与之后到达的增量首尾衔接
+        const run = runsRef.current.get(id);
+        const visible = messages.map((message) =>
+          message.status === "streaming" && message.id !== run?.assistant.id
+            ? { ...message, status: "stopped" as const }
+            : message,
+        );
+        streamBatcherRef.current?.flush();
         emit({
           conversation: currentConv,
-          messages,
+          messages: run === undefined ? visible : withLiveRun(visible, run),
           type: "conversation-selected",
           ...(hasMoreHistory ? { hasMoreHistory: true } : {}),
+          ...(run !== undefined ? { running: true } : {}),
+          ...(run?.pendingPermission !== undefined ? { pendingPermission: run.pendingPermission } : {}),
         });
       } catch {
         emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
       }
     },
-    [emit, generateAiTitle, stopAndWait],
+    [emit],
   );
 
   const renameConversation = useCallback(
@@ -1530,11 +1597,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     if (newConversationLockRef.current) return;
     newConversationLockRef.current = true;
     try {
-      await stopAndWait();
-
       const currentActive = stateRef.current.activeConversation;
       // 1. 防御：如果当前活跃会话无消息且未在发送中，复用当前会话，避免在空会话中无限繁殖新记录
-      if (currentActive !== undefined && stateRef.current.messages.length === 0 && !sendingRef.current) {
+      if (currentActive !== undefined && stateRef.current.messages.length === 0 && !isSending(currentActive.id)) {
         const currentStored = await servicesRef.current.repository.getConversation(currentActive.id);
         if (currentStored !== undefined) {
           const storedMsgs = await servicesRef.current.repository.listMessages(currentActive.id, { limit: 1 });
@@ -1548,7 +1613,15 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       const existingList = await servicesRef.current.repository.listConversations();
       const blankConversations: Conversation[] = [];
       for (const conv of existingList) {
-        if (conv.id === currentActive?.id) continue;
+        // 刚开始运行的会话可能还没把首条消息写进存储，不能当作空白会话复用或清理
+        if (
+          conv.id === currentActive?.id ||
+          conv.archivedAt !== undefined ||
+          runsRef.current.has(conv.id) ||
+          isSending(conv.id)
+        ) {
+          continue;
+        }
         if (isDefaultTitle(conv.title)) {
           const msgs = await servicesRef.current.repository.listMessages(conv.id, { limit: 1 });
           if (msgs.length === 0) {
@@ -1571,6 +1644,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       // 3. 所有已有会话均有消息（或无已有空会话），创建新的空白会话
       try {
         const loaded = await createConversation(stateRef.current.locale);
+        streamBatcherRef.current?.flush();
         emit({
           conversation: loaded.conversation,
           messages: loaded.messages,
@@ -1583,7 +1657,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     } finally {
       newConversationLockRef.current = false;
     }
-  }, [createConversation, emit, selectConversation, stopAndWait]);
+  }, [createConversation, emit, isSending, selectConversation]);
 
   const loadEarlier = useCallback(async (): Promise<void> => {
     const snapshot = stateRef.current;
@@ -1606,7 +1680,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
   const setLocale = useCallback(
     async (locale: Locale): Promise<void> => {
-      await stopAndWait();
+      await stop();
       try {
         await servicesRef.current.repository.setLocale(locale);
         const conversation = stateRef.current.activeConversation;
@@ -1618,7 +1692,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
       }
     },
-    [emit, stopAndWait],
+    [emit, stop],
   );
 
   const setPendingImage = useCallback(
@@ -1628,10 +1702,12 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
   const setOnline = useCallback(
     (online: boolean) => {
-      if (!online) void stop();
+      if (!online) {
+        for (const conversationId of [...runsRef.current.keys()]) void stopConversation(conversationId);
+      }
       emit({ online, type: "connectivity-changed" });
     },
-    [emit, stop],
+    [emit, stopConversation],
   );
 
   const updateUserMemory = useCallback(
@@ -1685,7 +1761,28 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     setOnline,
     setPendingImage,
     stop,
+    stopConversation,
+    runningConversations,
   };
+}
+
+/**
+ * 运行中消息的实时快照：存储里的部分持久化按 250ms 节流、可能落后，
+ * 切回前台时以内存中的运行缓冲为准
+ */
+function withLiveRun(messages: ChatMessage[], run: ActiveRun): ChatMessage[] {
+  const live: ChatMessage = {
+    ...run.assistant,
+    status: "streaming",
+    text: run.text,
+    contentSegments: run.contentSegments,
+    ...(run.contentStartedAtMs !== undefined ? { contentStartedAtMs: run.contentStartedAtMs } : {}),
+    ...(run.thought !== undefined ? { thought: run.thought } : {}),
+    ...(run.sources !== undefined ? { sources: run.sources } : {}),
+    ...(run.toolSteps.length > 0 ? { toolSteps: run.toolSteps.map((step) => ({ ...step })) } : {}),
+  };
+  const index = messages.findIndex((message) => message.id === live.id);
+  return index < 0 ? [...messages, live] : messages.map((message, i) => (i === index ? live : message));
 }
 
 /** 工具步骤参数 JSON 的宽松解析：非法 JSON 回退为空对象（服务端/模型输出不可信） */

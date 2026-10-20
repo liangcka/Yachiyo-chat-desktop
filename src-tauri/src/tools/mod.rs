@@ -8,7 +8,7 @@ pub use fs::FsObservationTracker;
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use crate::types::AgentExecutionMode;
 
@@ -58,7 +58,7 @@ pub fn tool_risk(name: &str) -> Option<ToolRisk> {
     }
     match name {
         "read_file" | "list_directory" | "glob" | "grep" | "git_status" | "git_diff" | "web_fetch"
-        | "web_search" | "todo_write" => {
+        | "web_search" | "todo_write" | "task" => {
             Some(ToolRisk::Read)
         }
         "write_file" | "edit_file" | "run_command" => Some(ToolRisk::Write),
@@ -182,20 +182,29 @@ pub struct ToolResult {
 }
 
 #[derive(Debug)]
+struct LeaseEntry {
+    id: u64,
+    root: PathBuf,
+    /// 共享租约之间互不阻塞（多个 Agent 对话可同时在同一项目中运行）；独占租约与任何重叠租约互斥
+    shared: bool,
+}
+
+#[derive(Debug)]
 pub struct WorkspaceManager {
     root_path: RwLock<Option<PathBuf>>,
-    active: Arc<Mutex<HashSet<PathBuf>>>,
+    active: Arc<Mutex<Vec<LeaseEntry>>>,
+    next_lease: AtomicU64,
 }
 
 pub struct WorkspaceLease {
-    root: PathBuf,
-    active: Arc<Mutex<HashSet<PathBuf>>>,
+    id: u64,
+    active: Arc<Mutex<Vec<LeaseEntry>>>,
 }
 
 impl Drop for WorkspaceLease {
     fn drop(&mut self) {
         if let Ok(mut active) = self.active.lock() {
-            active.remove(&self.root);
+            active.retain(|entry| entry.id != self.id);
         }
     }
 }
@@ -211,19 +220,34 @@ impl WorkspaceManager {
         });
         Self {
             root_path: RwLock::new(root),
-            active: Arc::new(Mutex::new(HashSet::new())),
+            active: Arc::new(Mutex::new(Vec::new())),
+            next_lease: AtomicU64::new(1),
         }
     }
 
-    /// Agent 运行、恢复与界面写入共用工作区互斥，避免快照和文件变化交错。
+    /// 检查点恢复与界面写入独占工作区，避免快照和文件变化交错。
     pub fn acquire_workspace(&self, workspace: &Path) -> Result<WorkspaceLease, String> {
+        self.acquire(workspace, false)
+    }
+
+    /// Agent 运行取共享租约：多个对话可以同时在同一项目中工作，但恢复与界面写入须等它们全部结束。
+    pub fn acquire_shared_workspace(&self, workspace: &Path) -> Result<WorkspaceLease, String> {
+        self.acquire(workspace, true)
+    }
+
+    fn acquire(&self, workspace: &Path, shared: bool) -> Result<WorkspaceLease, String> {
         let root = workspace.canonicalize().map_err(|e| e.to_string())?;
         let mut active = self.active.lock().map_err(|e| e.to_string())?;
-        if active.iter().any(|running| root.starts_with(running) || running.starts_with(&root)) {
+        let conflict = active.iter().any(|entry| {
+            let overlaps = root.starts_with(&entry.root) || entry.root.starts_with(&root);
+            overlaps && !(shared && entry.shared)
+        });
+        if conflict {
             return Err("工作区正在执行任务，请停止任务后再恢复或修改文件。".to_string());
         }
-        active.insert(root.clone());
-        Ok(WorkspaceLease { root, active: Arc::clone(&self.active) })
+        let id = self.next_lease.fetch_add(1, Ordering::Relaxed);
+        active.push(LeaseEntry { id, root, shared });
+        Ok(WorkspaceLease { id, active: Arc::clone(&self.active) })
     }
 
     pub fn get_workspace_root(&self) -> Option<PathBuf> {
@@ -422,6 +446,21 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
                         "query": { "type": "string", "description": "精炼的检索词（1~6 个词）" }
                     },
                     "required": ["query"]
+                }
+            }
+        }),
+        serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "task",
+                "description": "Delegate a self-contained investigation to a sub-agent with its own isolated context (broad code search, reading many files, multi-step system diagnosis, web research). Only the sub-agent's final report comes back, so its intermediate reads never bloat your context. The sub-agent cannot modify files and cannot see this conversation: the prompt must state the goal, scope and what the report should contain. For a single read or search, call that tool directly instead.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "description": { "type": "string", "description": "Short label (3-10 words) shown to the user" },
+                        "prompt": { "type": "string", "description": "Complete, self-contained instructions for the sub-agent" }
+                    },
+                    "required": ["description", "prompt"]
                 }
             }
         }),

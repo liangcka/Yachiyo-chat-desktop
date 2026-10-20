@@ -471,7 +471,6 @@ describe("App flows", () => {
 
   it("creates, renames, deletes, and clears local conversations behind confirmations", async () => {
     const user = userEvent.setup();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const services = fakeServices();
     render(<App services={services} />);
     const composer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
@@ -483,15 +482,18 @@ describe("App flows", () => {
     await user.click(screen.getByTitle("新建对话 (Ctrl+N)"));
     await waitFor(() => expect(services.repository.conversations).toHaveLength(2));
 
-    const renameBtns = screen.getAllByTitle("重命名");
-    await user.click(renameBtns[0]);
+    await user.click(screen.getAllByRole("button", { name: "对话操作" })[0]!);
+    await user.click(screen.getByRole("menuitem", { name: "重命名" }));
     const renameInput = screen.getByLabelText("重命名");
     await user.clear(renameInput);
     await user.type(renameInput, "夏夜{Enter}");
     expect((await screen.findAllByText("夏夜")).length).toBeGreaterThan(0);
 
-    const deleteBtns = screen.getAllByTitle("删除");
-    await user.click(deleteBtns[0]);
+    await user.click(screen.getAllByRole("button", { name: "对话操作" })[0]!);
+    await user.click(screen.getByRole("menuitem", { name: "删除" }));
+    // 应用内确认弹窗替代 window.confirm
+    const dialog = screen.getByRole("alertdialog", { name: "确定删除这段对话吗？" });
+    await user.click(within(dialog).getByRole("button", { name: "删除" }));
     await waitFor(() => expect(services.repository.conversations).toHaveLength(1));
 
     await user.click(screen.getByLabelText("用户资料与菜单"));
@@ -502,7 +504,6 @@ describe("App flows", () => {
     await user.click(screen.getByRole("button", { name: "关闭设置" }));
     await waitFor(() => expect(services.repository.conversations).toHaveLength(1));
     expect(services.repository.messages).toHaveLength(0);
-    confirmSpy.mockRestore();
   });
 
   it("shows quota feedback and returns to the gate on session expiry without deleting history", async () => {

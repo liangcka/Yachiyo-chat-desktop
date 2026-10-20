@@ -46,6 +46,11 @@ describe("formatToolDescription", () => {
       expect(formatToolDescription("web_search", {}, "zh-CN")).toBe("联网搜索");
     });
 
+    it("正确映射 task 子 Agent 并展示任务简称", () => {
+      expect(formatToolDescription("task", { description: "排查磁盘占用", prompt: "…" }, "zh-CN")).toBe("子 Agent · 排查磁盘占用");
+      expect(formatToolDescription("task", {}, "ja-JP")).toBe("サブエージェント");
+    });
+
     it("正确映射 git_status 和 git_diff", () => {
       expect(formatToolDescription("git_status", {}, "zh-CN")).toBe("查看 Git 状态");
       expect(formatToolDescription("git_diff", {}, "zh-CN")).toBe("查看 Git 差异");

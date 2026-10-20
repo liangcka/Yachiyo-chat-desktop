@@ -53,6 +53,11 @@ export class ConversationRepository {
     await this.db.conversations.update(id, { title: requireTitle(title) });
   }
 
+  /** 归档只是一个可选字段，不需要索引或版本迁移；Dexie 的 update 传 undefined 即删除该字段 */
+  async setConversationArchived(id: string, archived: boolean, now = Date.now()): Promise<void> {
+    await this.db.conversations.update(id, { archivedAt: archived ? now : undefined });
+  }
+
   async updateConversationSummary(
     id: string,
     summary: string,

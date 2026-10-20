@@ -370,6 +370,7 @@ export function DesktopLayout(props: SharedViewProps) {
                 locale={props.controller.locale}
                 onClearData={props.onClearData}
                 onCompress={handleCompress}
+                onArchiveConversation={props.onArchive}
                 onDeleteConversation={props.onDelete}
                 onLocale={props.onLocale}
                 onNewChat={props.onNewChat}
@@ -380,6 +381,7 @@ export function DesktopLayout(props: SharedViewProps) {
                 onSignOut={props.onSignOut}
                 onToggleTheme={handleToggleTheme}
                 resolvedTheme={resolved}
+                runningConversations={props.controller.runningConversations}
                 showToast={props.showToast}
               />
               {/* 侧栏右缘分隔条 */}
