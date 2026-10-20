@@ -140,6 +140,25 @@ fn is_qwen_hybrid(model: &str) -> bool {
         && snapshot.map_or(true, is_date)
 }
 
+/// 方舟上确认为混合思考（默认开启、可用 thinking.type 关闭）的豆包 Seed 型号，含海外 BytePlus 的 dola-/seed- 命名。
+/// 方舟同时托管强制思考的第三方模型（传 disabled 会 400），代码预览版的思考开关未确认，因此只匹配已确认的型号
+fn is_ark_hybrid(model: &str) -> bool {
+    let known = ["doubao-seed-1-8", "doubao-seed-2-0", "doubao-seed-2-1", "doubao-seed-evolving", "dola-seed-2", "seed-2-"];
+    known.iter().any(|prefix| model.starts_with(prefix)) && !model.contains("code-preview")
+}
+
+/// 已确认接受 reasoning_effort（minimal / low / medium / high）的型号；其余型号的支持情况未核实，传了可能 400
+fn is_ark_effort_model(model: &str) -> bool {
+    ["doubao-seed-2-1-pro", "doubao-seed-2-1-turbo", "doubao-seed-evolving", "dola-seed-2-1-turbo"]
+        .iter()
+        .any(|prefix| model.starts_with(prefix))
+}
+
+/// GLM-5.2 起才有 reasoning_effort 字段（GLM-5.3 取值 low / high / max，默认 max）
+fn is_glm_effort_model(model: &str) -> bool {
+    model.starts_with("glm-5.3") || model.starts_with("glm-5.2")
+}
+
 /// 智谱 GLM-4.7 起的强制思考模型支持保留式思考；更早的混合或非思考模型（glm-4.6、glm-4v-flash）不发送该开关
 fn glm_preserves_thinking(model: &str) -> bool {
     model.starts_with("glm-5") || model.starts_with("glm-4.7")
@@ -169,6 +188,13 @@ pub fn body_patch(vendor: Option<CompatVendor>, model: &str, purpose: RequestPur
         {
             vec![("reasoning_effort", json!("low"))]
         }
+        // thinking.type 为 disabled 时 reasoning_effort 只能取 minimal，关闭思考时不再带强度字段
+        Some(CompatVendor::Ark) if auxiliary && is_ark_hybrid(model) => {
+            vec![("thinking", json!({ "type": "disabled" }))]
+        }
+        Some(CompatVendor::Ark) if purpose == RequestPurpose::Chat && is_ark_effort_model(model) => {
+            vec![("reasoning_effort", json!("low"))]
+        }
         Some(CompatVendor::MiniMax) => minimax_patch(&model.to_ascii_lowercase(), auxiliary),
         // MiMo V2.5 起默认开启思考，只能用 thinking.type 开关，没有思考强度字段
         Some(CompatVendor::Mimo) if auxiliary && model.starts_with("mimo-v2") => {
@@ -189,6 +215,10 @@ pub fn body_patch(vendor: Option<CompatVendor>, model: &str, purpose: RequestPur
         // 保留式思考：clear_thinking:false 时服务端保留回传的 reasoning_content，跨工具轮次延续同一任务的推理
         Some(CompatVendor::Zhipu) if agent && glm_preserves_thinking(model) => {
             vec![("thinking", json!({ "type": "enabled", "clear_thinking": false }))]
+        }
+        // GLM-5.3 强制思考，传 thinking.disabled 会 400，默认档位 max 会耗尽小预算；官方建议改用 low 档
+        Some(CompatVendor::Zhipu) if !agent && is_glm_effort_model(model) => {
+            vec![("reasoning_effort", json!("low"))]
         }
         _ => Vec::new(),
     }
@@ -225,9 +255,6 @@ pub fn reasoning_passback(vendor: Option<CompatVendor>, model: &str) -> Option<R
         Some(CompatVendor::Mimo) if model.starts_with("mimo-") => Some(ReasoningPassback::EveryAssistant),
         // Qwen3.x 工具轮次省略 reasoning_content 会降低准确率但不报错；Qwen3.8 默认保留式思考会读取回传的原文
         Some(CompatVendor::Dashscope) if model.starts_with("qwen3.") => Some(ReasoningPassback::NonEmpty),
-        // 混元交错思考与文心多次思考的工具链路都要求回填同一轮的 reasoning_content，缺失只影响效果
-        Some(CompatVendor::Hunyuan) if model.starts_with("hy") => Some(ReasoningPassback::NonEmpty),
-        Some(CompatVendor::Qianfan) => Some(ReasoningPassback::NonEmpty),
         // GLM 保留式思考要求按原顺序回传未修改的 reasoning_content，但不得为没有思维链的历史轮次补写空串
         Some(CompatVendor::Zhipu) if glm_preserves_thinking(model) => Some(ReasoningPassback::NonEmpty),
         // MiniMax 要求工具多轮原样带回思考字段以延续交错思考；缺失不报错，但推理链会中断

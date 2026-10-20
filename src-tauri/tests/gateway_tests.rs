@@ -379,9 +379,12 @@ fn test_openai_official_body_uses_completion_budget_and_reasoning_effort() {
     assert_eq!(step["max_tokens"], 4096);
     assert_eq!(step["reasoning_effort"], "low");
     let glm = get_provider_config(ProviderId::Glm);
+    // GLM-5.3 强制思考，不能 disabled，只能把档位降到 low
     let glm_body = build_openai_compat_body(&plain_request("glm", "title"), "glm-5.3", glm);
-    assert!(glm_body.get("reasoning_effort").is_none());
+    assert_eq!(glm_body["reasoning_effort"], "low");
     assert!(glm_body.get("thinking").is_none());
+    let legacy_glm = build_openai_compat_body(&plain_request("glm", "title"), "glm-4.7-flash", glm);
+    assert!(legacy_glm.get("reasoning_effort").is_none());
 }
 
 #[test]
@@ -496,9 +499,22 @@ fn test_compat_vendor_body_patches_match_web_rules() {
     assert_eq!(patch(CompatVendor::Dashscope, "qwen3.7-max-2026-05-17", RequestPurpose::Auxiliary), json!({}));
     assert_eq!(patch(CompatVendor::Dashscope, "qwen3.8-max", RequestPurpose::Chat), json!({ "reasoning_effort": "low" }));
     assert_eq!(patch(CompatVendor::Dashscope, "qwen3.8-max", RequestPurpose::Agent), json!({}));
+    for model in ["doubao-seed-2-1-pro-260915", "doubao-seed-2-1-lite-260915", "doubao-seed-2-0-mini-260428", "doubao-seed-evolving", "dola-seed-2-1-turbo-260628", "seed-2-0-lite-260428"] {
+        assert_eq!(patch(CompatVendor::Ark, model, RequestPurpose::Auxiliary), json!({ "thinking": { "type": "disabled" } }), "{model}");
+    }
+    for model in ["glm-5-3-flash-260828", "kimi-k2.7-code", "doubao-seed-1-6-thinking-250715", "doubao-seed-2-0-code-preview-260215", "seed-2-0-code-preview-260328", "doubao-seed-character-251128", "ep-20260101000000-abcde"] {
+        assert_eq!(patch(CompatVendor::Ark, model, RequestPurpose::Auxiliary), json!({}), "{model}");
+    }
+    assert_eq!(patch(CompatVendor::Ark, "doubao-seed-2-1-turbo-260628", RequestPurpose::Chat), json!({ "reasoning_effort": "low" }));
+    assert_eq!(patch(CompatVendor::Ark, "doubao-seed-2-0-lite-260428", RequestPurpose::Chat), json!({}));
+    assert_eq!(patch(CompatVendor::Ark, "doubao-seed-2-1-turbo-260628", RequestPurpose::Agent), json!({}));
     assert_eq!(patch(CompatVendor::MiniMax, "MiniMax-M3", RequestPurpose::Auxiliary), json!({ "reasoning_split": true, "thinking": { "type": "disabled" } }));
     assert_eq!(patch(CompatVendor::MiniMax, "MiniMax-M3", RequestPurpose::Agent), json!({ "reasoning_split": true }));
     assert_eq!(patch(CompatVendor::MiniMax, "MiniMax-M3.1-Flash", RequestPurpose::Chat), json!({ "reasoning_effort": "low" }));
+    assert_eq!(patch(CompatVendor::Zhipu, "glm-5.3-flash", RequestPurpose::Chat), json!({ "reasoning_effort": "low" }));
+    assert_eq!(patch(CompatVendor::Zhipu, "glm-5.2", RequestPurpose::Auxiliary), json!({ "reasoning_effort": "low" }));
+    assert_eq!(patch(CompatVendor::Zhipu, "glm-4.7-flash", RequestPurpose::Chat), json!({}));
+    assert_eq!(patch(CompatVendor::Zhipu, "glm-5.3", RequestPurpose::Agent), json!({ "thinking": { "type": "enabled", "clear_thinking": false } }));
     assert_eq!(patch(CompatVendor::Moonshot, "kimi-k3", RequestPurpose::Agent), json!({}));
     assert_eq!(patch(CompatVendor::Moonshot, "kimi-k2.7-code", RequestPurpose::Auxiliary), json!({}));
 }

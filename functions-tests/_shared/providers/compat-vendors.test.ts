@@ -59,6 +59,42 @@ describe("compatVendorBodyPatch", () => {
   });
 });
 
+describe("compatVendorBodyPatch for Ark", () => {
+  it("disables thinking on confirmed hybrid Seed models without sending an effort", () => {
+    for (const model of [
+      "doubao-seed-2-1-pro-260915",
+      "doubao-seed-2-1-lite-260915",
+      "doubao-seed-2-0-mini-260428",
+      "doubao-seed-evolving",
+      "dola-seed-2-1-turbo-260628",
+      "seed-2-0-lite-260428",
+    ]) {
+      expect(compatVendorBodyPatch("ark", model, "auxiliary")).toEqual({ thinking: { type: "disabled" } });
+    }
+  });
+
+  it("leaves forced-thinking third-party models and unconfirmed variants alone", () => {
+    for (const model of [
+      "glm-5-3-flash-260828",
+      "kimi-k2.7-code",
+      "doubao-seed-1-6-thinking-250715",
+      "doubao-seed-2-0-code-preview-260215",
+      "seed-2-0-code-preview-260328",
+      "doubao-seed-character-251128",
+      "ep-20260101000000-abcde",
+    ]) {
+      expect(compatVendorBodyPatch("ark", model, "auxiliary")).toEqual({});
+    }
+  });
+
+  it("lowers the effort for chat only where the levels are confirmed", () => {
+    expect(compatVendorBodyPatch("ark", "doubao-seed-2-1-turbo-260628", "chat")).toEqual({ reasoning_effort: "low" });
+    expect(compatVendorBodyPatch("ark", "doubao-seed-evolving", "chat")).toEqual({ reasoning_effort: "low" });
+    expect(compatVendorBodyPatch("ark", "dola-seed-2-1-turbo-260628", "chat")).toEqual({ reasoning_effort: "low" });
+    expect(compatVendorBodyPatch("ark", "doubao-seed-2-0-lite-260428", "chat")).toEqual({});
+  });
+});
+
 describe("compatVendorBodyPatch for MiMo, TokenHub and Qianfan", () => {
   it("disables MiMo thinking for auxiliary requests only", () => {
     expect(compatVendorBodyPatch("mimo", "mimo-v2.6-flash", "auxiliary")).toEqual({ thinking: { type: "disabled" } });
@@ -77,6 +113,13 @@ describe("compatVendorBodyPatch for MiMo, TokenHub and Qianfan", () => {
       enable_thinking: false,
     });
     expect(compatVendorBodyPatch("qianfan", "ernie-5.1", "auxiliary")).toEqual({});
+  });
+
+  it("lowers GLM-5.x effort instead of disabling its forced thinking", () => {
+    expect(compatVendorBodyPatch("zhipu", "glm-5.3-flash", "chat")).toEqual({ reasoning_effort: "low" });
+    expect(compatVendorBodyPatch("zhipu", "glm-5.3", "auxiliary")).toEqual({ reasoning_effort: "low" });
+    expect(compatVendorBodyPatch("zhipu", "glm-5.2", "auxiliary")).toEqual({ reasoning_effort: "low" });
+    expect(compatVendorBodyPatch("zhipu", "glm-4.7-flash", "chat")).toEqual({});
   });
 
   it("recognises the native Zhipu endpoint as a vendor", () => {

@@ -67,6 +67,13 @@ const noPatch: BodyPatch = Object.freeze({});
 const QWEN_HYBRID = /^qwen3\.(?:[5-8]-(?:plus|flash)(?:-\d{4}-\d{2}-\d{2})?|8-max(?:-0902)?|7-max)$/u;
 /** Qwen3.8 默认 reasoning_effort 为 xhigh，合法取值 low / medium / xhigh */
 const QWEN_EFFORT = /^qwen3\.8-(?:max(?:-0902)?|flash)$/u;
+/**
+ * 方舟上确认为混合思考（默认开启、可用 thinking.type 关闭）的豆包 Seed 型号，含海外 BytePlus 的 dola-/seed- 命名。
+ * 方舟同时托管强制思考的第三方模型（传 disabled 会 400），代码预览版的思考开关未确认，因此只匹配已确认的型号
+ */
+const ARK_HYBRID = /^(?:doubao-seed-(?:1-8|2-[01]|evolving)|dola-seed-2|seed-2-)(?!.*code-preview)/u;
+/** 已确认接受 reasoning_effort（minimal / low / medium / high）的型号；其余型号的支持情况未核实，传了可能 400 */
+const ARK_EFFORT = /^(?:doubao-seed-2-1-(?:pro|turbo)|doubao-seed-evolving|dola-seed-2-1-turbo)/u;
 
 /** 按厂商与模型给出需要并入请求体的字段；未识别的厂商或模型不做任何改动 */
 export function compatVendorBodyPatch(
@@ -87,6 +94,10 @@ export function compatVendorBodyPatch(
       return QWEN_EFFORT.test(model) ? { reasoning_effort: "low" } : noPatch;
     case "minimax":
       return minimaxPatch(model.toLowerCase(), auxiliary);
+    case "ark":
+      // thinking.type 为 disabled 时 reasoning_effort 只能取 minimal，关闭思考时不再带强度字段
+      if (auxiliary) return ARK_HYBRID.test(model) ? { thinking: { type: "disabled" } } : noPatch;
+      return ARK_EFFORT.test(model) ? { reasoning_effort: "low" } : noPatch;
     case "mimo":
       // MiMo V2.5 起默认开启思考，只能用 thinking.type 开关，没有思考强度字段
       return auxiliary && model.startsWith("mimo-v2") ? { thinking: { type: "disabled" } } : noPatch;
@@ -97,6 +108,10 @@ export function compatVendorBodyPatch(
         return model.startsWith("hy3") || model.startsWith("hy4") ? { thinking: { type: "disabled" } } : noPatch;
       }
       return model.startsWith("hy3") ? { reasoning_effort: "low" } : noPatch;
+    case "zhipu":
+      // GLM-5.3 强制思考，传 thinking.disabled 会 400，默认档位 max 会耗尽小预算；官方建议改用 low 档，
+      // reasoning_effort 从 GLM-5.2 起才有
+      return /^glm-5\.[23]/u.test(model) ? { reasoning_effort: "low" } : noPatch;
     case "qianfan":
       // 文心只有 ernie-5.0-thinking-preview 默认开启思考且可用 enable_thinking 关闭，其余模型的开关未公开
       return auxiliary && model === "ernie-5.0-thinking-preview" ? { enable_thinking: false } : noPatch;

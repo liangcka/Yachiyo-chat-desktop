@@ -99,7 +99,7 @@ describe("LlmSettingsPanel", () => {
     expect(onSave).toHaveBeenCalledWith(
       "openai",
       VALID_KEY,
-      "doubao-pro-32k",
+      "doubao-seed-2-1-turbo-260628",
       "https://ark.cn-beijing.volces.com/api/v3",
     );
     expect(onActivate).toHaveBeenCalledWith("openai");
