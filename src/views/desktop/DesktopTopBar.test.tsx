@@ -23,8 +23,6 @@ describe("DesktopTopBar", () => {
       />,
     );
 
-    expect(screen.getByText("月见八千代")).toBeInTheDocument();
-
     const brandBtn = screen.getByRole("button", { name: "月见八千代" });
     await user.click(brandBtn);
     expect(onNewChat).toHaveBeenCalledTimes(1);

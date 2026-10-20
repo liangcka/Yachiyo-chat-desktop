@@ -1,76 +1,54 @@
+import type { Conversation } from "../../../domain/chat";
 import { useLocale } from "../../../i18n/locale-context";
 import type { UiCopy } from "../../../i18n/messages";
-import { SidebarGroupSection } from "./SidebarGroupSection";
-import type { ConversationGroup, TimeGroupKey } from "./types";
+import { SidebarConversationItem } from "./SidebarConversationItem";
 
 interface SidebarHistoryListProps {
   activeConversationId?: string;
-  collapsedGroups: Set<TimeGroupKey>;
+  conversations: Conversation[];
   copy: UiCopy;
-  groups: ConversationGroup[];
-  isSearching: boolean;
   onDeleteConversation: (id: string) => Promise<void>;
   onRenameConversation: (id: string, title: string) => Promise<void>;
   onSelectConversation: (id: string) => Promise<void>;
-  onToggleGroupCollapse: (key: TimeGroupKey) => void;
   onTogglePinConversation?: (id: string) => void;
   pinnedIds?: Set<string>;
-  totalCount: number;
-  totalMatches: number;
 }
 
 export function SidebarHistoryList({
   activeConversationId,
-  collapsedGroups,
+  conversations,
   copy,
-  groups,
-  isSearching,
   onDeleteConversation,
   onRenameConversation,
   onSelectConversation,
-  onToggleGroupCollapse,
   onTogglePinConversation,
   pinnedIds,
-  totalCount,
-  totalMatches,
 }: SidebarHistoryListProps) {
   const ja = useLocale() === "ja-JP";
   return (
-    <div className="desktop-sidebar__history">
-      {isSearching ? (
-        <div className="desktop-sidebar__search-status">
-          <span className="desktop-sidebar__search-status-label">{ja ? "検索結果" : "搜索结果"}</span>
-          <span className="desktop-sidebar__search-status-count">{`${totalMatches} / ${totalCount}`}</span>
-        </div>
-      ) : null}
-
+    <section className="desktop-sidebar__section desktop-sidebar__section--history" aria-label={ja ? "会話" : "对话"}>
+      <div className="desktop-sidebar__section-header">
+        <span className="desktop-sidebar__section-label">{ja ? "会話" : "对话"}</span>
+      </div>
       <div className="desktop-sidebar__history-list" role="list">
-        {totalCount === 0 ? (
-          <div className="desktop-sidebar__history-empty">
-            <p className="desktop-sidebar__empty-text">{copy.noHistory}</p>
-          </div>
-        ) : totalMatches === 0 && isSearching ? (
-          <div className="desktop-sidebar__history-empty">
-            <p className="desktop-sidebar__empty-text">{ja ? "一致する会話はありません" : "未找到匹配的会话"}</p>
-          </div>
+        {conversations.length === 0 ? (
+          <p className="desktop-sidebar__empty-text">{copy.noHistory}</p>
         ) : (
-          groups.map((group) => (
-            <SidebarGroupSection
-              key={group.key}
-              activeConversationId={activeConversationId}
+          conversations.map((conversation) => (
+            <SidebarConversationItem
+              key={conversation.id}
+              active={conversation.id === activeConversationId}
+              conversation={conversation}
               copy={copy}
-              group={group}
-              isCollapsed={collapsedGroups.has(group.key)}
-              onDeleteConversation={onDeleteConversation}
-              onRenameConversation={onRenameConversation}
-              onSelectConversation={onSelectConversation}
-              onToggleCollapse={() => onToggleGroupCollapse(group.key)}
-              onTogglePinConversation={onTogglePinConversation}
-              pinnedIds={pinnedIds}
+              isPinned={pinnedIds?.has(conversation.id) ?? false}
+              onDelete={onDeleteConversation}
+              onRename={onRenameConversation}
+              onSelect={onSelectConversation}
+              onTogglePin={onTogglePinConversation}
             />
           ))
         )}
       </div>
-    </div>
+    </section>
   );
 }

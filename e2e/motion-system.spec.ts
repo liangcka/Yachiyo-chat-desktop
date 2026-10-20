@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { enterApp } from "./helpers";
 
 async function sendMockMessage(page: Page): Promise<void> {
-  await page.getByRole("textbox", { name: "什么都可以告诉我" }).fill("今天有点累");
+  await page.getByRole("textbox", { name: "想问什么都可以，@ 引用文件，/ 执行动作" }).fill("今天有点累");
   await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect(page.getByRole("article", { name: "八千代的回复" }).last()).toContainText(
     "笑着递上热乎乎的松饼",
@@ -51,10 +51,8 @@ async function transformScale(locator: Locator): Promise<number> {
 test.describe("动效系统", () => {
   test.use({ serviceWorkers: "block" });
 
-  test("欢迎、会话和设置入口具有进入动效", async ({ page }) => {
+  test("会话和设置入口具有进入动效", async ({ page }) => {
     await enterApp(page);
-    await expectEffectiveAnimation(page.locator(".desktop-hero__intro"));
-    await expectEffectiveAnimation(page.locator(".desktop-hero__cards"));
     await sendMockMessage(page);
     await expectEffectiveAnimation(page.locator(".desktop-conversation-region"));
 
@@ -72,13 +70,6 @@ test.describe("动效系统", () => {
   test("减少动态效果时取消位移动画，保留淡入反馈", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await enterApp(page);
-    for (const selector of [".desktop-hero__intro", ".desktop-hero__cards"]) {
-      const element = page.locator(selector);
-      const motion = await motionStyle(element);
-      expect(motion.animationName).toBe("desktop-conversation-enter");
-      expect(maximumCssTimeInMilliseconds(motion.animationDelay)).toBe(0);
-      await expect(element).toHaveCSS("transform", "none");
-    }
     await sendMockMessage(page);
     expect((await motionStyle(page.locator(".desktop-conversation-region"))).animationName)
       .toBe("desktop-conversation-enter");
@@ -100,7 +91,7 @@ test.describe("动效系统", () => {
     await expect(statusBanner).toBeVisible();
     await expectEffectiveAnimation(statusBanner);
     await context.setOffline(false);
-    const input = page.getByRole("textbox", { name: "什么都可以告诉我" });
+    const input = page.getByRole("textbox", { name: "想问什么都可以，@ 引用文件，/ 执行动作" });
     await expect(input).toBeEnabled();
     await input.fill("/agent");
     await expect(page.getByRole("option", { name: /切换 Agent 模式/ })).toBeVisible();

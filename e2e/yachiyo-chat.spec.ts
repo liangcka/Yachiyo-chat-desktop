@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import { enterApp } from "./helpers";
 
 async function sendMockMessage(page: Page): Promise<void> {
-  await page.getByRole("textbox", { name: "什么都可以告诉我" }).fill("今天有点累");
+  await page.getByRole("textbox", { name: "想问什么都可以，@ 引用文件，/ 执行动作" }).fill("今天有点累");
   await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect(page.getByRole("article", { name: "八千代的回复" }).last()).toContainText(
     "笑着递上热乎乎的松饼",
@@ -54,7 +54,7 @@ test.describe("基础聊天布局", () => {
 test("多行输入不遮挡最新回复", async ({ page }) => {
   await enterApp(page);
   await sendMockMessage(page);
-  await page.getByRole("textbox", { name: "什么都可以告诉我" }).fill("第一行\n第二行\n第三行\n第四行");
+  await page.getByRole("textbox", { name: "想问什么都可以，@ 引用文件，/ 执行动作" }).fill("第一行\n第二行\n第三行\n第四行");
   await waitForFiniteAnimations(page);
   expect(await verticalGap(
     page.getByRole("article", { name: "八千代的回复" }).last(),
@@ -106,7 +106,7 @@ test("切换日文、提供附件入口，并在离线时禁止发送", async ({
   await enterApp(page);
   await page.getByRole("button", { name: /^(用户资料与菜单|用户账户与设置)$/ }).click();
   await page.getByRole("button", { name: "选择语言" }).click();
-  const input = page.getByRole("textbox", { name: "何でも話してね" });
+  const input = page.getByRole("textbox", { name: "何でも聞いてね。@ でファイル参照、/ でアクション" });
   await expect(input).toBeVisible();
   await page.keyboard.press("Escape");
   const attachment = page.locator('input[type="file"]');

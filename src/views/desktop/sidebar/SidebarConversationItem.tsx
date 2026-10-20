@@ -1,9 +1,10 @@
-import { Check, MessageCircle, Pencil, Pin, PinOff, Trash2, X } from "lucide-react";
+import { Check, Pencil, Pin, PinOff, Trash2, X } from "lucide-react";
 import type { FormEvent, MouseEvent as ReactMouseEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { Conversation } from "../../../domain/chat";
 import { useLocale } from "../../../i18n/locale-context";
 import type { UiCopy } from "../../../i18n/messages";
+import { formatRelativeTime } from "./use-conversation-groups";
 
 interface SidebarConversationItemProps {
   active: boolean;
@@ -26,7 +27,8 @@ export function SidebarConversationItem({
   onSelect,
   onTogglePin,
 }: SidebarConversationItemProps) {
-  const ja = useLocale() === "ja-JP";
+  const locale = useLocale();
+  const ja = locale === "ja-JP";
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(conversation.title);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -117,7 +119,6 @@ export function SidebarConversationItem({
             className="desktop-sidebar__history-main"
             onClick={() => void onSelect(conversation.id)}
           >
-            <MessageCircle size={14} className="desktop-sidebar__history-icon" />
             <span className="desktop-sidebar__history-title" title={conversation.title}>
               {conversation.title || copy.newChat}
             </span>
@@ -126,6 +127,9 @@ export function SidebarConversationItem({
                 <Pin size={11} />
               </span>
             ) : null}
+            <span className="desktop-sidebar__history-time">
+              {formatRelativeTime(conversation.updatedAt || conversation.createdAt, locale)}
+            </span>
           </button>
           <div className="desktop-sidebar__history-actions">
             {onTogglePin ? (

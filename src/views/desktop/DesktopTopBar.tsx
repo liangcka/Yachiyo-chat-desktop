@@ -9,11 +9,13 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Pencil,
+  Search,
   Square,
   X,
 } from "lucide-react";
 import type { FormEvent, MouseEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { BrandMark } from "../../components/brand/BrandMark";
 import { useLocale } from "../../i18n/locale-context";
 import type { UiCopy } from "../../i18n/messages";
 import { isDesktopApp } from "../../services/app-platform";
@@ -34,6 +36,7 @@ export interface DesktopTopBarProps {
   conversationTitle?: string;
   copy: UiCopy;
   onNewChat: () => Promise<void>;
+  onOpenSearch?: () => void;
   onRenameConversation?: (id: string, title: string) => Promise<void>;
   onSwitchView: (view: "chat" | "editor") => void;
   onToggleSidebar?: () => void;
@@ -48,6 +51,7 @@ export function DesktopTopBar({
   conversationTitle,
   copy,
   onNewChat,
+  onOpenSearch,
   onRenameConversation,
   onSwitchView,
   onToggleSidebar,
@@ -186,7 +190,7 @@ export function DesktopTopBar({
       onDoubleClick={handleDoubleClick}
       aria-label={ja ? "アプリのトップバー" : "应用顶栏"}
     >
-      {/* 1. 左侧：应用品牌徽章与侧栏折叠开关 + 会话标题与当前项目名 */}
+      {/* 1. 左侧：品牌字形、侧栏开关与搜索 + 会话标题与当前项目名 */}
       <div className="desktop-topbar__left" data-tauri-drag-region>
         <button
           type="button"
@@ -195,8 +199,7 @@ export function DesktopTopBar({
           title={ja ? "月見八千代 (Tsukimi Yachiyo)" : "月见八千代 (Tsukimi Yachiyo)"}
           aria-label={ja ? "月見八千代" : "月见八千代"}
         >
-          <img className="desktop-topbar__brand-mark" src="/yachiyo-mark.svg" alt="" aria-hidden="true" />
-          <span className="desktop-topbar__brand-title">{ja ? "月見八千代" : "月见八千代"}</span>
+          <BrandMark className="desktop-topbar__brand-mark" size={18} />
         </button>
 
         {onToggleSidebar ? (
@@ -216,6 +219,18 @@ export function DesktopTopBar({
           }
           >
             {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
+        ) : null}
+
+        {onOpenSearch ? (
+          <button
+            type="button"
+            className="desktop-topbar__collapse-btn"
+            onClick={onOpenSearch}
+            title={ja ? "会話・モデル・設定を検索 (Ctrl+K)" : "搜索对话、模型或设置 (Ctrl+K)"}
+            aria-label={ja ? "検索" : "搜索"}
+          >
+            <Search size={15} />
           </button>
         ) : null}
 

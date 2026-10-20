@@ -1,10 +1,8 @@
-import { ProjectSelector } from "../../../components/desktop/ProjectSelector";
-import { useState } from "react";
 import { SidebarFooter } from "./SidebarFooter";
 import { SidebarHistoryList } from "./SidebarHistoryList";
 import { SidebarNewChat } from "./SidebarNewChat";
+import { SidebarProjects } from "./SidebarProjects";
 import { SidebarRail } from "./SidebarRail";
-import { SidebarSearch } from "./SidebarSearch";
 import type { DesktopRightTab, DesktopSidebarProps } from "./types";
 import { useConversationGroups } from "./use-conversation-groups";
 import { useScrollbarLinger } from "./use-scrollbar-linger";
@@ -31,19 +29,9 @@ export function DesktopSidebar({
   resolvedTheme = "dark",
   showToast,
 }: DesktopSidebarProps) {
-  const [searchQuery, setSearchQuery] = useState("");
-
   const { handlePointerEnter, handlePointerLeave, pointerInside } = useScrollbarLinger();
 
-  const {
-    collapsedGroups,
-    groupedConversations,
-    isSearching,
-    pinnedIds,
-    toggleGroupCollapse,
-    togglePinConversation,
-    totalMatches,
-  } = useConversationGroups(conversations, locale, searchQuery);
+  const { orderedConversations, pinnedIds, togglePinConversation } = useConversationGroups(conversations);
 
   const handleTogglePin = onTogglePinConversation || togglePinConversation;
 
@@ -78,35 +66,30 @@ export function DesktopSidebar({
       onPointerEnter={handlePointerEnter}
       onPointerLeave={handlePointerLeave}
     >
-      {/* 2. 新建对话与项目选择下拉菜单 */}
       <SidebarNewChat
         copy={copy}
         onNewChat={onNewChat}
       />
 
-      <ProjectSelector variant="sidebar" onNewChat={onNewChat} onOpenSettings={() => onSelectRightTab?.("workspace")} />
+      {/* 项目与对话共用一个滚动区，项目较多时不会挤压对话列表 */}
+      <div className="desktop-sidebar__scroll">
+        <SidebarProjects
+          locale={locale}
+          onNewChat={onNewChat}
+          onOpenWorkspace={() => onSelectRightTab?.("workspace")}
+        />
+        <SidebarHistoryList
+          activeConversationId={activeConversationId}
+          conversations={orderedConversations}
+          copy={copy}
+          onDeleteConversation={onDeleteConversation}
+          onRenameConversation={onRenameConversation}
+          onSelectConversation={onSelectConversation}
+          onTogglePinConversation={handleTogglePin}
+          pinnedIds={pinnedIds}
+        />
+      </div>
 
-      {/* 3. 历史会话实时搜索过滤 */}
-      <SidebarSearch locale={locale} onChange={setSearchQuery} value={searchQuery} />
-
-      {/* 4. 中部历史对话列表（手风琴置顶与时间折叠、搜索结果展示） */}
-      <SidebarHistoryList
-        activeConversationId={activeConversationId}
-        collapsedGroups={collapsedGroups}
-        copy={copy}
-        groups={groupedConversations}
-        isSearching={isSearching}
-        onDeleteConversation={onDeleteConversation}
-        onRenameConversation={onRenameConversation}
-        onSelectConversation={onSelectConversation}
-        onToggleGroupCollapse={toggleGroupCollapse}
-        onTogglePinConversation={handleTogglePin}
-        pinnedIds={pinnedIds}
-        totalCount={conversations.length}
-        totalMatches={totalMatches}
-      />
-
-      {/* 5. 底部用户个人卡片入口与设置菜单 */}
       <SidebarFooter
         locale={locale}
         onCloseApp={onCloseApp}

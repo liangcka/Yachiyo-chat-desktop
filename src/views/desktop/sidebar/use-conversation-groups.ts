@@ -1,51 +1,10 @@
 import { useCallback, useMemo, useState } from "react";
 import type { Conversation, Locale } from "../../../domain/chat";
-import type { ConversationGroup, TimeGroupKey } from "./types";
 
-const STORAGE_COLLAPSED_GROUPS = "yachiyo-sidebar-collapsed-groups";
 const STORAGE_PINNED_CONVERSATIONS = "yachiyo-sidebar-pinned-conversations";
-
-const LABELS: Record<Locale, Record<TimeGroupKey, string>> = {
-  "zh-CN": {
-    pinned: "置顶会话",
-    today: "今天",
-    yesterday: "昨天",
-    previous7Days: "前 7 天",
-    older: "更早",
-  },
-  "ja-JP": {
-    pinned: "ピン留め",
-    today: "今日",
-    yesterday: "昨日",
-    previous7Days: "過去7日間",
-    older: "それ以前",
-  },
-};
-
-const GROUP_KEYS: TimeGroupKey[] = ["pinned", "today", "yesterday", "previous7Days", "older"];
-
-function readStoredCollapsedGroups(): Set<TimeGroupKey> {
-  try {
-    const raw = localStorage.getItem(STORAGE_COLLAPSED_GROUPS);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return new Set(parsed.filter((k): k is TimeGroupKey => GROUP_KEYS.includes(k)));
-      }
-    }
-  } catch {
-    /* localStorage 不可用时静默降级 */
-  }
-  return new Set();
-}
-
-function writeStoredCollapsedGroups(groups: Set<TimeGroupKey>): void {
-  try {
-    localStorage.setItem(STORAGE_COLLAPSED_GROUPS, JSON.stringify(Array.from(groups)));
-  } catch {
-    /* 忽略写入异常 */
-  }
-}
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
 
 function readStoredPinnedConversations(): Set<string> {
   try {
@@ -70,74 +29,27 @@ function writeStoredPinnedConversations(pinned: Set<string>): void {
   }
 }
 
-export function groupConversationsByDate(
-  conversations: Conversation[],
-  locale: Locale = "zh-CN",
-  pinnedIds?: Set<string>,
-): ConversationGroup[] {
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const yesterdayStart = todayStart - 86400000;
-  const sevenDaysAgoStart = todayStart - 6 * 86400000;
-
-  const groups: Record<TimeGroupKey, Conversation[]> = {
-    pinned: [],
-    today: [],
-    yesterday: [],
-    previous7Days: [],
-    older: [],
-  };
-
-  for (const conv of conversations) {
-    if (pinnedIds?.has(conv.id)) {
-      groups.pinned.push(conv);
-      continue;
-    }
-
-    const timestamp = conv.updatedAt || conv.createdAt || 0;
-    if (timestamp >= todayStart) {
-      groups.today.push(conv);
-    } else if (timestamp >= yesterdayStart) {
-      groups.yesterday.push(conv);
-    } else if (timestamp >= sevenDaysAgoStart) {
-      groups.previous7Days.push(conv);
-    } else {
-      groups.older.push(conv);
-    }
-  }
-
-  return GROUP_KEYS.map((key) => ({
-    key,
-    label: LABELS[locale]?.[key] ?? LABELS["zh-CN"][key],
-    items: groups[key],
-  })).filter((g) => g.items.length > 0);
+/** 侧栏条目右侧的紧凑相对时间：分钟、小时、天，超过 30 天显示月/日。 */
+export function formatRelativeTime(timestamp: number, locale: Locale = "zh-CN", now = Date.now()): string {
+  const elapsed = Math.max(0, now - timestamp);
+  const ja = locale === "ja-JP";
+  if (elapsed < MINUTE) return ja ? "今" : "刚刚";
+  if (elapsed < HOUR) return `${Math.floor(elapsed / MINUTE)}m`;
+  if (elapsed < DAY) return `${Math.floor(elapsed / HOUR)}h`;
+  if (elapsed < 30 * DAY) return `${Math.floor(elapsed / DAY)}${ja ? "日" : "天"}`;
+  const date = new Date(timestamp);
+  return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
-export function useConversationGroups(
-  conversations: Conversation[],
-  locale: Locale,
-  searchQuery = "",
-) {
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<TimeGroupKey>>(() =>
-    readStoredCollapsedGroups(),
-  );
+/** 置顶会话排在最前，其余保持传入顺序（最近更新在前）。 */
+export function orderConversations(conversations: Conversation[], pinnedIds: Set<string>): Conversation[] {
+  const pinned = conversations.filter((conversation) => pinnedIds.has(conversation.id));
+  const rest = conversations.filter((conversation) => !pinnedIds.has(conversation.id));
+  return [...pinned, ...rest];
+}
 
-  const [pinnedIds, setPinnedIds] = useState<Set<string>>(() =>
-    readStoredPinnedConversations(),
-  );
-
-  const toggleGroupCollapse = useCallback((key: TimeGroupKey) => {
-    setCollapsedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      writeStoredCollapsedGroups(next);
-      return next;
-    });
-  }, []);
+export function useConversationGroups(conversations: Conversation[]) {
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => readStoredPinnedConversations());
 
   const togglePinConversation = useCallback((id: string) => {
     setPinnedIds((prev) => {
@@ -152,27 +64,10 @@ export function useConversationGroups(
     });
   }, []);
 
-  const filteredConversations = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return conversations;
-    return conversations.filter((c) => (c.title || "").toLowerCase().includes(query));
-  }, [conversations, searchQuery]);
-
-  const groupedConversations = useMemo(
-    () => groupConversationsByDate(filteredConversations, locale, pinnedIds),
-    [filteredConversations, locale, pinnedIds],
+  const orderedConversations = useMemo(
+    () => orderConversations(conversations, pinnedIds),
+    [conversations, pinnedIds],
   );
 
-  const totalMatches = filteredConversations.length;
-  const isSearching = searchQuery.trim().length > 0;
-
-  return {
-    collapsedGroups,
-    groupedConversations,
-    isSearching,
-    pinnedIds,
-    toggleGroupCollapse,
-    togglePinConversation,
-    totalMatches,
-  };
+  return { orderedConversations, pinnedIds, togglePinConversation };
 }

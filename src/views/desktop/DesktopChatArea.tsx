@@ -16,6 +16,7 @@ import { ContextMeter } from "../../components/ContextMeter";
 import { ConversationView } from "../../components/ConversationView";
 import { ModelSelect } from "../../components/desktop/ModelSelect";
 import { PlanStrip } from "../../components/desktop/PlanStrip";
+import { ProjectSelector } from "../../components/desktop/ProjectSelector";
 import { PermissionCard } from "../../components/tools/PermissionCard";
 import { appendAttachments, COMPOSER_CHARACTER_LIMIT, readTextAttachment, type TextAttachment } from "../../features/file-reference/attachments";
 import { extractLatestTodos } from "../../domain/chat";
@@ -135,7 +136,7 @@ export function DesktopChatArea({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    const nextHeight = Math.min(Math.max(el.scrollHeight, 40), 280);
+    const nextHeight = Math.min(Math.max(el.scrollHeight, 20), 280);
     el.style.height = `${nextHeight}px`;
   }, [composerValue]);
 
@@ -163,10 +164,6 @@ export function DesktopChatArea({
     prepareTransition();
     onSend(content);
     setAttachments([]);
-  };
-
-  const handleHeroPrompt = (text: string) => {
-    if (!composerUnavailable && !isStreaming) sendMessage(text);
   };
 
   // @ 引用文件模糊搜索浮层状态
@@ -455,6 +452,8 @@ export function DesktopChatArea({
         {activeSkills.map((skill) => <button type="button" key={skill.id} onClick={() => void onSkillToggle?.(skill.id, false)} title={isJapanese ? `スキル ${skillLabel(skill, controller.locale).name} を外す` : `移除技能 ${skill.name}`}>{skillLabel(skill, controller.locale).name}<X size={12} /></button>)}
         {attachments.map((file, index) => <button type="button" key={`${file.name}-${index}`} title={isJapanese ? `添付 ${file.name} を削除` : `移除附件 ${file.name}`} onClick={() => setAttachments((previous) => previous.filter((_, i) => i !== index))}>{file.name}<X size={12} /></button>)}
       </div> : null}
+      {/* 空白对话时在输入框上方选择项目，新对话即绑定该工作区 */}
+      {isBlank ? <ProjectSelector variant="composer" className="desktop-composer-project" onNewChat={onNewChat} /> : null}
       {/* 输入框主卡片 */}
       <div className="dsh-composer-card"
         onDragOver={(event) => { if (!composerUnavailable && event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
@@ -756,10 +755,8 @@ export function DesktopChatArea({
       <div className={`desktop-chat-body ${isBlank ? "desktop-chat-body--welcome" : ""}`}>
         {isBlank ? (
           <DesktopWelcome
-            disabled={composerUnavailable || isStreaming}
             locale={controller.locale}
             needsModelSetup={needsModelSetup}
-            onPrompt={handleHeroPrompt}
             onSetupModel={() => onOpenSettings?.("models")}
           />
         ) : (

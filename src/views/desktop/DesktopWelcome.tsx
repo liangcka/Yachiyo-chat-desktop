@@ -1,99 +1,33 @@
-import { Camera, Globe, KeyRound, MessageCircle, Terminal } from "lucide-react";
+import { KeyRound } from "lucide-react";
 import type { Locale } from "../../domain/chat";
-import { useLocalUserSettings } from "../../services/user-settings";
 
 interface DesktopWelcomeProps {
-  disabled: boolean;
   locale: Locale;
   /** 桌面端尚未配置任何模型：显示配置引导，替代发送后才报错 */
   needsModelSetup?: boolean;
-  onPrompt: (prompt: string) => void;
   onSetupModel?: () => void;
 }
 
-export function DesktopWelcome({
-  disabled,
-  locale,
-  needsModelSetup = false,
-  onPrompt,
-  onSetupModel,
-}: DesktopWelcomeProps) {
-  const [{ username }] = useLocalUserSettings();
-  const hour = new Date().getHours();
-  const greeting = locale === "ja-JP"
-    ? (hour < 11 ? "おはよう" : hour < 18 ? "こんにちは" : "こんばんは")
-    : (hour < 11 ? "早上好" : hour < 14 ? "中午好" : hour < 18 ? "下午好" : "晚上好");
+/** 空白对话只保留首次配置引导，输入框本身就是入口。 */
+export function DesktopWelcome({ locale, needsModelSetup = false, onSetupModel }: DesktopWelcomeProps) {
+  if (!needsModelSetup) return null;
   const isJapanese = locale === "ja-JP";
-  const suggestions = [
-    {
-      icon: Terminal,
-      title: isJapanese ? "コードを読み解く" : "看看工作区",
-      prompt: isJapanese
-        ? "八千代、今のワークスペースのファイルとフォルダーを確認して、プロジェクトを簡単に紹介して。"
-        : "八千代，请帮我查看当前工作区根目录下有哪些文件和文件夹，向我简要介绍一下。",
-    },
-    {
-      icon: MessageCircle,
-      title: isJapanese ? "ちょっとおしゃべり" : "聊聊今天",
-      prompt: isJapanese
-        ? "八千代、今日は何か面白いことあった？ 一緒におしゃべりしよう。"
-        : "八千代，今天有什么有趣的事情发生吗？陪我聊聊天吧~",
-    },
-    {
-      icon: Globe,
-      title: isJapanese ? "気になることを調べる" : "探索新知",
-      prompt: isJapanese
-        ? "八千代、DeepSeek のオープンソース開発や技術の最新情報を調べて。"
-        : "八千代，请帮我搜索关于 DeepSeek 最新开源进展和技术动态。",
-    },
-    {
-      icon: Camera,
-      title: isJapanese ? "画像を一緒に見る" : "读懂图片",
-      prompt: isJapanese
-        ? "八千代、画像認識や画像分析でどんなことができるか教えて。"
-        : "八千代，请向我介绍一下你支持哪些视觉与图片分析功能？",
-    },
-  ];
-
   return (
-    <>
-      <section className="desktop-hero__intro" aria-label={isJapanese ? "ようこそ" : "欢迎体验"}>
-        <img className="desktop-hero__avatar" src="/yachiyo-mark.svg" alt="" aria-hidden="true" />
-        <h1 className="desktop-hero__title">{greeting}{isJapanese ? "、" : "，"}{username}</h1>
-        <p className="desktop-hero__subtitle">
-          {isJapanese ? "八千代だよ。今日は何を一緒にしようか？" : "我是八千代，今天想一起做点什么？"}
-        </p>
-        {needsModelSetup ? (
-          <div className="desktop-hero__setup" role="note">
-            <KeyRound className="desktop-hero__setup-icon" size={18} aria-hidden="true" />
-            <div className="desktop-hero__setup-text">
-              <strong>{isJapanese ? "まずはモデルを接続しよう" : "先连接一个模型"}</strong>
-              <span>
-                {isJapanese
-                  ? "いずれかのプロバイダーの API キーを入力すると会話を始められます。キーはこの PC に暗号化して保存されます。"
-                  : "填写任一厂商的 API Key 即可开始对话，Key 只加密保存在这台电脑上。"}
-              </span>
-            </div>
-            <button type="button" className="desktop-hero__setup-action" onClick={onSetupModel}>
-              {isJapanese ? "モデルを設定" : "配置模型"}
-            </button>
-          </div>
-        ) : null}
-      </section>
-      <div className="desktop-hero__cards" aria-label={isJapanese ? "会話のきっかけ" : "试试这些话题"}>
-        {suggestions.map(({ icon: Icon, title, prompt }) => (
-          <button
-            key={title}
-            type="button"
-            className="desktop-hero-card"
-            disabled={disabled}
-            onClick={() => onPrompt(prompt)}
-          >
-            <Icon className="desktop-hero-card__icon" size={18} aria-hidden="true" />
-            <span className="desktop-hero-card__title">{title}</span>
-          </button>
-        ))}
+    <section className="desktop-hero__intro" aria-label={isJapanese ? "ようこそ" : "欢迎体验"}>
+      <div className="desktop-hero__setup" role="note">
+        <KeyRound className="desktop-hero__setup-icon" size={18} aria-hidden="true" />
+        <div className="desktop-hero__setup-text">
+          <strong>{isJapanese ? "まずはモデルを接続しよう" : "先连接一个模型"}</strong>
+          <span>
+            {isJapanese
+              ? "いずれかのプロバイダーの API キーを入力すると会話を始められます。キーはこの PC に暗号化して保存されます。"
+              : "填写任一厂商的 API Key 即可开始对话，Key 只加密保存在这台电脑上。"}
+          </span>
+        </div>
+        <button type="button" className="desktop-hero__setup-action" onClick={onSetupModel}>
+          {isJapanese ? "モデルを設定" : "配置模型"}
+        </button>
       </div>
-    </>
+    </section>
   );
 }

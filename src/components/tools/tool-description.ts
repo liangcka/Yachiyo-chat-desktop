@@ -19,6 +19,8 @@ function extractDomain(rawUrl: string): string {
  * 映射规则：
  * - read_file → "读取 <路径>" / "<路径> を読み込み"
  * - list_directory → "查看 <路径>" / "<路径> を表示"
+ * - glob → "查找文件 <模式>" / "<模式> のファイルを検索"
+ * - grep → "搜索 <正则>" / "<正则> を検索"
  * - write_file / edit_file → "编辑 <路径>" / "<路径> を編集"
  * - run_command → "运行 `<命令>`" / "`<命令>` を実行"
  * - web_fetch → "抓取 <域名>" / "<域名> を取得"
@@ -56,6 +58,22 @@ export function formatToolDescription(
         return isJa ? `${path} を表示` : `查看 ${path}`;
       }
       return isJa ? "ディレクトリを表示" : "查看目录";
+    }
+
+    case "glob": {
+      const pattern = typeof args?.pattern === "string" ? args.pattern : "";
+      if (pattern) {
+        return isJa ? `${pattern} のファイルを検索` : `查找文件 ${pattern}`;
+      }
+      return isJa ? "ファイルを検索" : "查找文件";
+    }
+
+    case "grep": {
+      const pattern = typeof args?.pattern === "string" ? args.pattern : "";
+      if (pattern) {
+        return isJa ? `\`${pattern}\` を検索` : `搜索 \`${pattern}\``;
+      }
+      return isJa ? "コードを検索" : "搜索代码";
     }
 
     case "write_file":

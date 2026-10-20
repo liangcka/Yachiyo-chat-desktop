@@ -1,5 +1,6 @@
 pub mod fs;
 pub mod git;
+pub mod search;
 pub mod shell;
 pub mod web;
 
@@ -56,7 +57,8 @@ pub fn tool_risk(name: &str) -> Option<ToolRisk> {
         return Some(ToolRisk::Write);
     }
     match name {
-        "read_file" | "list_directory" | "git_status" | "git_diff" | "web_fetch" | "todo_write" => {
+        "read_file" | "list_directory" | "glob" | "grep" | "git_status" | "git_diff" | "web_fetch"
+        | "todo_write" => {
             Some(ToolRisk::Read)
         }
         "write_file" | "edit_file" | "run_command" => Some(ToolRisk::Write),
@@ -68,6 +70,7 @@ pub fn tool_risk(name: &str) -> Option<ToolRisk> {
 fn tool_output_limit(name: &str) -> usize {
     match name {
         "read_file" => 64 * 1024,
+        "grep" => 32 * 1024,
         "run_command" => 16 * 1024,
         "web_fetch" => 32 * 1024,
         _ => 16 * 1024,
@@ -327,6 +330,45 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
         serde_json::json!({
             "type": "function",
             "function": {
+                "name": "glob",
+                "description": "按文件名模式查找工作区文件，结果按修改时间倒序。支持 **、*、?、[...]、{a,b}，不含 / 的模式匹配任意层级（如 \"*.tsx\"、\"src/**/*.rs\"）。按名称找文件时使用，禁止改用 run_command 执行 dir、ls、find、Get-ChildItem。需先选择项目。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "pattern": { "type": "string", "description": "glob 模式" },
+                        "path": { "type": "string", "description": "搜索起点目录（工作区内），默认工作区根目录" }
+                    },
+                    "required": ["pattern"]
+                }
+            }
+        }),
+        serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "grep",
+                "description": "按正则表达式检索工作区文件内容（Rust regex 语法），自动跳过二进制、依赖与构建目录。查找符号定义、引用、报错文案时使用，禁止改用 run_command 执行 grep、rg、findstr、Select-String。默认只返回匹配文件列表，需要看匹配行时设 output_mode 为 content。需先选择项目。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "pattern": { "type": "string", "description": "正则表达式" },
+                        "path": { "type": "string", "description": "搜索起点目录或文件（工作区内），默认工作区根目录" },
+                        "glob": { "type": "string", "description": "只检索文件名匹配该 glob 的文件，如 \"*.ts\"" },
+                        "output_mode": {
+                            "type": "string",
+                            "enum": ["files_with_matches", "content", "count"],
+                            "description": "files_with_matches 列出文件（默认）；content 列出匹配行（文件:行号:内容）；count 统计每个文件的匹配行数"
+                        },
+                        "case_insensitive": { "type": "boolean", "default": false, "description": "是否忽略大小写" },
+                        "context": { "type": "integer", "minimum": 0, "maximum": 10, "description": "content 模式下每处匹配前后附带的行数" },
+                        "head_limit": { "type": "integer", "minimum": 1, "description": "最多返回的输出行数，默认 250" }
+                    },
+                    "required": ["pattern"]
+                }
+            }
+        }),
+        serde_json::json!({
+            "type": "function",
+            "function": {
                 "name": "run_command",
                 "description": "在终端执行命令（Windows 使用 PowerShell，Unix 使用 sh，需彩叶批准）。只用于构建、测试、git 和查询系统信息；禁止用 Get-Content、Set-Content、cat、echo > 等命令读写文件，读取使用 read_file，局部修改使用 edit_file，新建或整体重写使用 write_file。未选择项目时在默认用户环境中执行。（宿主探查准则：遇到存疑、溢出或冲突数据必须多步交叉求证；Windows 下查询显存请使用 nvidia-smi 或注册表 HardwareInformation.qwMemorySize，避免使用有 4GB 截断限制的 Win32_VideoController.AdapterRAM）。",
                 "parameters": {
@@ -463,6 +505,27 @@ pub async fn execute_tool_with_context(
                 fs::list_directory(".", &target)?
             };
             serde_json::to_string_pretty(&entries).map_err(|e| e.to_string())
+        }
+        "glob" => {
+            let root = workspace_root.ok_or(search::PROJECT_REQUIRED_FOR_SEARCH)?;
+            let pattern = args.get("pattern").and_then(|v| v.as_str()).ok_or("缺少 pattern 参数")?;
+            let path = args.get("path").and_then(|v| v.as_str());
+            search::glob_files(pattern, path, root)
+        }
+        "grep" => {
+            let root = workspace_root.ok_or(search::PROJECT_REQUIRED_FOR_SEARCH)?;
+            let pattern = args.get("pattern").and_then(|v| v.as_str()).ok_or("缺少 pattern 参数")?;
+            let usize_arg = |key: &str| args.get(key).and_then(|v| v.as_u64()).map(|n| n as usize);
+            let options = search::GrepOptions {
+                pattern,
+                path: args.get("path").and_then(|v| v.as_str()),
+                glob: args.get("glob").and_then(|v| v.as_str()).filter(|g| !g.trim().is_empty()),
+                output_mode: search::GrepOutputMode::parse(args.get("output_mode").and_then(|v| v.as_str()))?,
+                case_insensitive: args.get("case_insensitive").and_then(|v| v.as_bool()).unwrap_or(false),
+                context: usize_arg("context").unwrap_or(0),
+                head_limit: usize_arg("head_limit"),
+            };
+            search::grep_files(&options, root)
         }
         "run_command" => {
             let command = args.get("command").and_then(|v| v.as_str()).ok_or("Missing 'command' argument")?;
