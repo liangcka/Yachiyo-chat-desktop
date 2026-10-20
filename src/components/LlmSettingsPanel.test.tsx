@@ -160,6 +160,22 @@ describe("LlmSettingsPanel", () => {
     expect(onSave).toHaveBeenCalledWith("openai", KEYSTORE_MANAGED_API_KEY, "kimi-k3", "https://api.moonshot.cn/v1");
   });
 
+  it("lets a native card reuse its own stored key even when another card shares the provider", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn(async () => undefined);
+    mount({
+      onSave,
+      entries: [{ provider: "claude", apiKey: KEYSTORE_MANAGED_API_KEY, model: "claude-opus-5-5" }],
+    });
+
+    await user.click(screen.getByRole("button", { name: "添加模型" }));
+    await user.click(within(screen.getByRole("dialog", { name: "添加模型" })).getByText("Anthropic (Claude)"));
+    const dialog = screen.getByRole("dialog", { name: "配置模型" });
+    await user.click(within(dialog).getByRole("button", { name: "保存并启用" }));
+
+    expect(onSave).toHaveBeenCalledWith("claude", KEYSTORE_MANAGED_API_KEY, "claude-opus-5-5", undefined);
+  });
+
   it("asks for the key again when the endpoint of a stored key is changed", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn(async () => undefined);

@@ -442,20 +442,22 @@ function endpointHost(url: string | undefined): string | undefined {
 
 /**
  * 多张厂商卡片共用同一 ProviderId 存储槽（火山、Kimi、百炼等都映射到 openai），
- * 按端点主机名找回已保存配置所属的卡片；未自定义端点时对应不带默认端点的原生卡片。
+ * 按端点主机名找回已保存配置所属的卡片；未自定义端点时对应不带默认端点的卡片，
+ * 仍有多张时优先取 id 与存储槽同名的原生卡片。
  */
 export function findVendorForEntry(
   provider: ProviderId,
   baseUrl: string | undefined,
 ): ModelVendorItem | undefined {
   const host = endpointHost(baseUrl);
-  return MODEL_VENDORS.find(
+  const candidates = MODEL_VENDORS.filter(
     (vendor) =>
       vendor.mappedProvider === provider &&
       (host === undefined
         ? vendor.defaultBaseUrl === undefined
         : endpointHost(vendor.defaultBaseUrl) === host),
   );
+  return candidates.find((vendor) => vendor.id === provider) ?? candidates[0];
 }
 
 /** 前端 API Key 宽松校验：非空、长度 20-512、可打印 ASCII（与后端 isValidApiKey 对齐） */
