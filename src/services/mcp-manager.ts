@@ -56,29 +56,10 @@ export interface McpPreset {
   config: McpServerConfig;
 }
 
-/** 内置桌面控制的服务 ID：由桌面端进程内原生执行，transport 字段不参与运行 */
+/** 内置电脑控制的服务 ID：由桌面端进程内原生执行，启停在设置「插件」页，不在 MCP 面板中展示 */
 export const BUILTIN_DESKTOP_CONTROL_ID = "windows_mcp";
 
 export const MCP_PRESETS: McpPreset[] = [
-  {
-    id: BUILTIN_DESKTOP_CONTROL_ID,
-    name: "Windows 桌面控制 (Windows MCP)",
-    description: "内置桌面控制，支持启动与切换应用、模拟鼠标点击与键盘输入、列出窗口与截图",
-    ja: { name: "Windows デスクトップ操作 (Windows MCP)", description: "内蔵のデスクトップ操作。アプリの起動と切り替え、マウスクリック、キーボード入力、ウィンドウ一覧、スクリーンショットに対応" },
-    category: "general",
-    config: {
-      id: BUILTIN_DESKTOP_CONTROL_ID,
-      name: "Windows 桌面控制",
-      description: "内置桌面控制：启动与切换应用、模拟鼠标键盘、列出窗口与截图，无需额外安装",
-      enabled: true,
-      transport: {
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@modelcontextprotocol/server-windows"],
-        env: {},
-      },
-    },
-  },
   {
     id: "sqlite",
     name: "SQLite 数据库",

@@ -7082,6 +7082,12 @@
   background: var(--interactive-hover);
 }
 
+.plugins-panel__icon {
+  display: grid;
+  place-items: center;
+  color: var(--accent-brand);
+}
+
 .plugins-panel__link {
   margin-left: 6px;
   padding: 0;

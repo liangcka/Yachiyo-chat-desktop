@@ -351,6 +351,27 @@ fn export_claude_mcp_config(state: State<DesktopState>) -> Result<String, String
     state.mcp_manager.export_claude_config()
 }
 
+#[derive(serde::Serialize)]
+struct ComputerControlState {
+    supported: bool,
+    enabled: bool,
+    reason: Option<String>,
+}
+
+#[tauri::command]
+fn get_computer_control_state(state: State<DesktopState>) -> ComputerControlState {
+    ComputerControlState {
+        supported: computer::is_supported(),
+        enabled: state.mcp_manager.computer_control_enabled(),
+        reason: computer::availability().err(),
+    }
+}
+
+#[tauri::command]
+fn set_computer_control_enabled(state: State<DesktopState>, enabled: bool) -> Result<(), String> {
+    state.mcp_manager.set_computer_control_enabled(enabled)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     info!("Starting Yachiyo Desktop App...");
@@ -490,6 +511,8 @@ pub fn run() {
             get_mcp_server_status,
             import_claude_mcp_config,
             export_claude_mcp_config,
+            get_computer_control_state,
+            set_computer_control_enabled,
             control_overlay::show_control_overlay,
             control_overlay::hide_control_overlay,
             control_overlay::get_control_overlay_state,

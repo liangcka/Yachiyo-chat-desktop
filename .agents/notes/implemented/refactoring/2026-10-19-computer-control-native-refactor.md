@@ -131,3 +131,32 @@ Status: implemented
 
 - `cargo test`、`cargo check --target x86_64-pc-windows-gnu --lib`、`npm run typecheck`、`npm run lint`、`npm run test:unit`、`npm run test:functions`：见提交记录。
 - 光标替换与恢复、全局 Esc 检测仍需在 Windows 上实测（含多显示器、高缩放比例）。
+
+## 第四轮迭代（迁移到插件页、提示词按需注入、启动等待新窗口、inspect 名称筛选）
+
+### 开关迁移到「插件」页
+
+- 电脑控制的启停从 MCP 面板移到设置「插件」页（仅桌面端显示）。底层仍是 `mcp_servers.json` 中 `windows_mcp` 条目的 `enabled`，工具名、权限键与遮罩判定不变。
+- 新增 Tauri 命令 `get_computer_control_state`（`supported` / `enabled` / 不可用原因）与 `set_computer_control_enabled`；条目被删过时按内置默认配置补回。非 Windows 系统开关置灰并显示原因。
+- MCP 面板不再列出内置服务，预设中移除该项，自定义服务不允许使用保留 ID `windows_mcp`；导出 Claude Desktop 配置时跳过内置条目（其 transport 只为格式兼容，导出到别的客户端会是一个不存在的 npx 包）。
+
+### 提示词按需注入
+
+- 此前 Agent 系统提示词无论电脑控制是否启用、是否 Windows、是否只读模式，都写入整段桌面控制说明：模型会去调用不存在的工具，每次请求也白占约一千字。
+- 现在 `build_agent_system_prompt` 多一个 `desktop_control` 参数，由运行时按本次实际下发的工具清单是否含 `mcp__windows_mcp__*` 决定；无工具时只保留通用的 `run_command` 说明。
+
+### 启动应用等待新窗口
+
+- `app launch` 原先固定等待 1.5 秒：应用启动慢时下一步落在旧界面上，快时又白等。现在记录启动前的顶层窗口，每 200ms 轮询，出现新窗口后再等 400ms 让其完成首帧与控件树，最长 10 秒；结果回报新窗口标题、进程与当前前台窗口，超时如实说明。
+- 提示词据此去掉「launch 后再 snapshot 确认前台」这一步，常见任务少一轮工具调用。
+
+### inspect 名称筛选
+
+- `inspect` 新增可选参数 `query`，只收集名称包含关键词（不区分大小写）的元素，40 个元素的上限不再挡住列表靠后的目标按钮；结果被截断时提示改用 query，而不是让模型凭位置猜坐标。
+
+### 验证（第四轮）
+
+- `cargo test --manifest-path src-tauri/Cargo.toml`：全部通过，新增提示词按需注入（中日两种语言）、插件开关补回内置条目与持久化、导出跳过内置条目、inspect 参数解析用例。
+- `cargo check --target x86_64-pc-windows-gnu --lib`：通过，无警告。
+- `npm run typecheck`、`npm run lint`（仅既有警告）、`npm run test:unit`：通过，新增插件页电脑控制用例（网页版隐藏、桌面端读取与切换、不支持时禁用并显示原因）。
+- 启动轮询与 inspect 筛选的运行时行为需在 Windows 上实测。

@@ -715,7 +715,11 @@ pub fn run_agent_chat_stream(
             tools_schema.extend(mcp_schema);
         }
 
-        let system_prompt = build_agent_system_prompt(request.locale, request.current_time.as_deref(), root.as_deref());
+        let desktop_control = tools_schema.iter().any(|schema| {
+            schema.get("function").and_then(|function| function.get("name")).and_then(|name| name.as_str())
+                .is_some_and(|name| name.starts_with(crate::computer::TOOL_PREFIX))
+        });
+        let system_prompt = build_agent_system_prompt(request.locale, request.current_time.as_deref(), root.as_deref(), desktop_control);
         let executor = HttpTurnExecutor {
             client: client.clone(),
             fallback_client,

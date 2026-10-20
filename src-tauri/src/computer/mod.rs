@@ -18,8 +18,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub use input::Key;
 
-/// 内置桌面控制在 MCP 服务列表中的 ID，启停沿用 MCP 面板的开关
+/// 内置桌面控制在 MCP 服务列表中的 ID，启停由设置「插件」页的电脑控制开关写入该条目
 pub const BUILTIN_SERVER_ID: &str = "windows_mcp";
+
+/// 暴露给模型的工具名前缀（`mcp__{服务 ID}__`），用于判断本次运行是否带有桌面控制
+pub const TOOL_PREFIX: &str = "mcp__windows_mcp__";
 
 /// 全屏控制遮罩窗口标题（与 tauri.conf.json 中 control_overlay 一致），注入前的自身窗口判定需排除它
 pub const OVERLAY_WINDOW_TITLE: &str = "Yachiyo Computer Control";
@@ -107,8 +110,8 @@ pub enum Action {
     Shortcut { label: String, keys: Vec<Key> },
     Screenshot,
     Snapshot,
-    /// 枚举前台窗口的可点击元素及其中心坐标，供模型据此精确点击
-    Inspect,
+    /// 枚举前台窗口的可点击元素及其中心坐标，供模型据此精确点击；query 按名称筛选
+    Inspect { query: Option<String> },
 }
 
 fn coordinate(args: &serde_json::Value, field: &str) -> Result<Option<i32>, String> {
@@ -175,7 +178,10 @@ pub fn parse_action(tool: &str, args: &serde_json::Value) -> Result<Action, Stri
         }
         "screenshot" => Ok(Action::Screenshot),
         "snapshot" => Ok(Action::Snapshot),
-        "inspect" => Ok(Action::Inspect),
+        "inspect" => {
+            let query = text_arg("query");
+            Ok(Action::Inspect { query: (!query.is_empty()).then(|| query.to_string()) })
+        }
         other => Err(format!("未知的桌面控制工具: {}", other)),
     }
 }
@@ -184,10 +190,11 @@ pub fn parse_action(tool: &str, args: &serde_json::Value) -> Result<Action, Stri
 #[cfg_attr(not(windows), allow(dead_code))]
 fn settle_after(action: &Action) -> Duration {
     Duration::from_millis(match action {
-        Action::App { mode: AppMode::Launch, .. } => 1500,
+        // 启动已在执行层等到新窗口出现
+        Action::App { mode: AppMode::Launch, .. } => 0,
         Action::App { .. } => 400,
         Action::Click { .. } | Action::Type { .. } | Action::Shortcut { .. } => 150,
-        Action::Screenshot | Action::Snapshot | Action::Inspect => 0,
+        Action::Screenshot | Action::Snapshot | Action::Inspect { .. } => 0,
     })
 }
 
@@ -209,7 +216,7 @@ pub async fn execute(tool: &str, args: &serde_json::Value) -> Result<String, Str
     }
 }
 
-/// 不支持的平台返回错误，MCP 面板据此显示离线原因
+/// 不支持的平台返回错误，插件页据此显示不可用原因
 pub fn availability() -> Result<(), String> {
     if is_supported() {
         Ok(())
@@ -231,7 +238,7 @@ pub fn tools() -> Vec<McpTool> {
     vec![
         tool(
             "app",
-            "启动、切换到或关闭桌面应用。launch 时若已有匹配窗口则直接切到前台；focus/close 按可执行文件名或窗口标题匹配（先用 snapshot 查看）",
+            "启动、切换到或关闭桌面应用。launch 时若已有匹配窗口则直接切到前台，否则启动并等到新窗口出现；结果会回报当前前台窗口。focus/close 按可执行文件名或窗口标题匹配（先用 snapshot 查看）",
             json!({
                 "type": "object",
                 "properties": {
@@ -243,8 +250,13 @@ pub fn tools() -> Vec<McpTool> {
         ),
         tool(
             "inspect",
-            "分析前台窗口的可点击元素，返回每个元素的类型、名称与中心坐标。点击前先用它拿到准确坐标，不要凭猜测或估算坐标点击",
-            json!({ "type": "object", "properties": {} }),
+            "分析前台窗口的可点击元素，返回每个元素的类型、名称与中心坐标。点击前先用它拿到准确坐标，不要凭猜测或估算坐标点击；元素较多或要找特定按钮时传 query 按名称筛选",
+            json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "可选，只返回名称包含该文字的元素（不区分大小写），如 发送、搜索" }
+                }
+            }),
         ),
         tool(
             "click",
@@ -338,7 +350,11 @@ mod tests {
         ));
         assert!(parse_action("shortcut", &json!({})).is_err());
         assert!(parse_action("powershell", &json!({})).is_err());
-        assert_eq!(parse_action("inspect", &json!({})).unwrap(), Action::Inspect);
+        assert_eq!(parse_action("inspect", &json!({})).unwrap(), Action::Inspect { query: None });
+        assert_eq!(
+            parse_action("inspect", &json!({ "query": " 发送 " })).unwrap(),
+            Action::Inspect { query: Some("发送".to_string()) }
+        );
     }
 
     #[test]

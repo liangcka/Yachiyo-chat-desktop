@@ -35,6 +35,35 @@ export async function checkDesktopUpdate(): Promise<DesktopUpdateInfo | undefine
   }
 }
 
+export interface ComputerControlState {
+  supported: boolean;
+  enabled: boolean;
+  /** 不支持时的原因（如非 Windows 系统） */
+  reason: string | null;
+}
+
+/** 电脑控制插件状态；非桌面端或调用失败返回 undefined */
+export async function getComputerControlState(): Promise<ComputerControlState | undefined> {
+  if (!isDesktopApp()) return undefined;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return await invoke<ComputerControlState>("get_computer_control_state");
+  } catch {
+    return undefined;
+  }
+}
+
+export async function setComputerControlEnabled(enabled: boolean): Promise<boolean> {
+  if (!isDesktopApp()) return false;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("set_computer_control_enabled", { enabled });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function getDesktopWorkspaceRoot(): Promise<string | undefined> {
   if (!isDesktopApp()) return undefined;
   try {

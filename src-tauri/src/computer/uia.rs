@@ -77,12 +77,24 @@ fn describe(element: &UIElement) -> Option<Element> {
     Some(Element { label, name, x, y })
 }
 
-fn walk(walker: &UITreeWalker, element: &UIElement, depth: usize, visits: &mut usize, out: &mut Vec<Element>) {
+/// 名称筛选：忽略大小写的包含匹配；未给关键词时全部收录
+fn matches_query(name: &str, query: Option<&str>) -> bool {
+    query.map_or(true, |q| name.to_lowercase().contains(&q.to_lowercase()))
+}
+
+fn walk(
+    walker: &UITreeWalker,
+    element: &UIElement,
+    depth: usize,
+    query: Option<&str>,
+    visits: &mut usize,
+    out: &mut Vec<Element>,
+) {
     if depth > MAX_DEPTH || *visits >= MAX_VISITS || out.len() >= MAX_ELEMENTS {
         return;
     }
     *visits += 1;
-    if let Some(found) = describe(element) {
+    if let Some(found) = describe(element).filter(|found| matches_query(&found.name, query)) {
         // 坐标接近、标签与名称相同的元素视为重复（容器与其命中区常重叠）
         let dup = out
             .iter()
@@ -93,7 +105,7 @@ fn walk(walker: &UITreeWalker, element: &UIElement, depth: usize, visits: &mut u
     }
     let mut child = walker.get_first_child(element).ok();
     while let Some(node) = child {
-        walk(walker, &node, depth + 1, visits, out);
+        walk(walker, &node, depth + 1, query, visits, out);
         if out.len() >= MAX_ELEMENTS || *visits >= MAX_VISITS {
             break;
         }
@@ -102,7 +114,7 @@ fn walk(walker: &UITreeWalker, element: &UIElement, depth: usize, visits: &mut u
 }
 
 /// 枚举指定前台窗口的可点击元素（hwnd 以 isize 传入，避免 windows / windows-sys 的 HWND 类型差异）
-pub fn inspect(hwnd: isize, window_title: &str) -> Result<String, String> {
+pub fn inspect(hwnd: isize, window_title: &str, query: Option<&str>) -> Result<String, String> {
     let automation = UIAutomation::new().map_err(|e| format!("UI Automation 初始化失败: {}", e))?;
     let root = automation
         .element_from_handle(Handle::from(hwnd))
@@ -113,18 +125,29 @@ pub fn inspect(hwnd: isize, window_title: &str) -> Result<String, String> {
 
     let mut out = Vec::new();
     let mut visits = 0usize;
-    walk(&walker, &root, 0, &mut visits, &mut out);
+    walk(&walker, &root, 0, query, &mut visits, &mut out);
 
     if out.is_empty() {
+        if let Some(q) = query {
+            return Ok(format!(
+                "前台窗口「{}」中没有名称包含「{}」的可点击元素。可以换个关键词，或不带 query 查看全部元素。",
+                window_title, q
+            ));
+        }
         return Ok(format!(
             "前台窗口「{}」没有读取到可点击元素（可能是全自绘界面或未暴露无障碍信息）。可以改用 screenshot 让彩叶查看，或请彩叶描述界面。",
             window_title
         ));
     }
-    let mut text = format!("前台窗口「{}」的可点击元素（坐标为中心点物理像素，直接用于 click）：\n", window_title);
+    let scope = query.map(|q| format!("名称包含「{}」的", q)).unwrap_or_default();
+    let mut text = format!("前台窗口「{}」{}可点击元素（坐标为中心点物理像素，直接用于 click）：\n", window_title, scope);
     for (index, element) in out.iter().enumerate() {
         let name = if element.name.is_empty() { String::new() } else { format!(" \"{}\"", element.name) };
         text.push_str(&format!("[{}] {}{} ({}, {})\n", index + 1, element.label, name, element.x, element.y));
+    }
+    // 截断后目标元素可能不在列表里，提示用 query 精确查找，而不是凭位置猜
+    if out.len() >= MAX_ELEMENTS || visits >= MAX_VISITS {
+        text.push_str("（元素较多，只列出了一部分；找不到目标时传 query 按名称筛选）\n");
     }
     Ok(text)
 }
@@ -149,6 +172,14 @@ mod tests {
         assert_eq!(truncate("  表情  ", 32), "表情");
         assert_eq!(truncate("搜索框", 2), "搜索…");
         assert_eq!(truncate("abc", 10), "abc");
+    }
+
+    #[test]
+    fn query_matches_names_case_insensitively() {
+        assert!(matches_query("发送(S)", Some("发送")));
+        assert!(matches_query("Send", Some("send")));
+        assert!(!matches_query("表情", Some("发送")));
+        assert!(matches_query("", None));
     }
 
     #[test]
