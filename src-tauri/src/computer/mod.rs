@@ -8,6 +8,7 @@ mod bmp;
 mod input;
 #[cfg(windows)]
 mod uia;
+pub mod vision;
 #[cfg(windows)]
 mod win;
 
@@ -109,6 +110,8 @@ pub enum Action {
     Type { text: String },
     Shortcut { label: String, keys: Vec<Key> },
     Screenshot,
+    /// 截取画面交给模型查看；window 为前台窗口，否则为整个屏幕
+    Look { window: bool },
     Snapshot,
     /// 枚举前台窗口的可点击元素及其中心坐标，供模型据此精确点击；query 按名称筛选
     Inspect { query: Option<String> },
@@ -122,6 +125,31 @@ fn coordinate(args: &serde_json::Value, field: &str) -> Result<Option<i32>, Stri
             .filter(|v| v.is_finite())
             .map(|v| Some(v.round() as i32))
             .ok_or_else(|| format!("坐标 '{}' 必须是数字", field)),
+    }
+}
+
+/// look 截图上的坐标换算为屏幕坐标，模型不需要自己做缩放换算
+fn image_point(args: &serde_json::Value) -> Result<Option<(i32, i32)>, String> {
+    let read = |field: &str| match args.get(field) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(value) => value
+            .as_f64()
+            .filter(|v| v.is_finite())
+            .map(Some)
+            .ok_or_else(|| format!("坐标 '{}' 必须是数字", field)),
+    };
+    match (read("image_x")?, read("image_y")?) {
+        (None, None) => Ok(None),
+        (Some(x), Some(y)) => {
+            let mapping = vision::last_capture().ok_or("还没有截图可供换算，请先用 look 查看画面")?;
+            mapping.to_screen(x, y).map(Some).ok_or_else(|| {
+                format!(
+                    "图上坐标 ({}, {}) 超出最近一次截图范围 {}x{}",
+                    x, y, mapping.image_width, mapping.image_height
+                )
+            })
+        }
+        _ => Err("image_x 与 image_y 需要同时提供".to_string()),
     }
 }
 
@@ -143,9 +171,11 @@ pub fn parse_action(tool: &str, args: &serde_json::Value) -> Result<Action, Stri
             Ok(Action::App { name: name.to_string(), mode })
         }
         "click" => {
-            let point = match (coordinate(args, "x")?, coordinate(args, "y")?) {
-                (Some(x), Some(y)) => Some((x, y)),
-                (None, None) => None,
+            let point = match (coordinate(args, "x")?, coordinate(args, "y")?, image_point(args)?) {
+                (Some(x), Some(y), None) => Some((x, y)),
+                (None, None, Some(point)) => Some(point),
+                (None, None, None) => None,
+                (_, _, Some(_)) => return Err("x/y 与 image_x/image_y 只能二选一".to_string()),
                 _ => return Err("x 与 y 需要同时提供；都省略时在光标当前位置点击".to_string()),
             };
             let button = match text_arg("button") {
@@ -177,6 +207,11 @@ pub fn parse_action(tool: &str, args: &serde_json::Value) -> Result<Action, Stri
             Ok(Action::Shortcut { label: label.to_string(), keys })
         }
         "screenshot" => Ok(Action::Screenshot),
+        "look" => match text_arg("scope") {
+            "" | "window" => Ok(Action::Look { window: true }),
+            "screen" => Ok(Action::Look { window: false }),
+            other => Err(format!("不支持的 scope '{}'，可选 window / screen", other)),
+        },
         "snapshot" => Ok(Action::Snapshot),
         "inspect" => {
             let query = text_arg("query");
@@ -194,7 +229,7 @@ fn settle_after(action: &Action) -> Duration {
         Action::App { mode: AppMode::Launch, .. } => 0,
         Action::App { .. } => 400,
         Action::Click { .. } | Action::Type { .. } | Action::Shortcut { .. } => 150,
-        Action::Screenshot | Action::Snapshot | Action::Inspect { .. } => 0,
+        Action::Screenshot | Action::Look { .. } | Action::Snapshot | Action::Inspect { .. } => 0,
     })
 }
 
@@ -260,12 +295,14 @@ pub fn tools() -> Vec<McpTool> {
         ),
         tool(
             "click",
-            "在屏幕物理像素坐标处点击鼠标；省略 x/y 时在光标当前位置点击。坐标必须来自 inspect 返回的元素中心，不要自己估算；点击后会回传实际点中的元素名作为反馈",
+            "点击鼠标。坐标二选一：x/y 为 inspect 返回的元素中心（屏幕物理像素）；image_x/image_y 为最近一次 look 截图上的像素位置，由系统换算成屏幕坐标。都省略时在光标当前位置点击。不要自己估算或换算坐标；点击后会回传实际点中的元素名作为反馈",
             json!({
                 "type": "object",
                 "properties": {
-                    "x": { "type": "number", "description": "屏幕物理像素坐标 X" },
-                    "y": { "type": "number", "description": "屏幕物理像素坐标 Y" },
+                    "x": { "type": "number", "description": "屏幕物理像素坐标 X（来自 inspect）" },
+                    "y": { "type": "number", "description": "屏幕物理像素坐标 Y（来自 inspect）" },
+                    "image_x": { "type": "number", "description": "最近一次 look 截图上的 X（图片像素）" },
+                    "image_y": { "type": "number", "description": "最近一次 look 截图上的 Y（图片像素）" },
                     "button": { "type": "string", "enum": ["left", "right", "middle"], "description": "默认 left" },
                     "clicks": { "type": "number", "description": "点击次数 1-3，2 为双击，默认 1" }
                 }
@@ -295,8 +332,18 @@ pub fn tools() -> Vec<McpTool> {
         ),
         tool(
             "screenshot",
-            "把整个桌面截图保存为本地 BMP 文件并返回路径与分辨率，供彩叶查看；你无法看到图片内容，定位窗口请用 snapshot",
+            "把整个桌面截图保存为本地 BMP 文件并返回路径与分辨率，供彩叶查看；这个工具不会把画面交给你，需要自己看画面请用 look",
             json!({ "type": "object", "properties": {} }),
+        ),
+        tool(
+            "look",
+            "截取前台窗口（或整个屏幕）的画面交给你查看。用于游戏、自绘界面等 inspect 找不到元素的场景：看图判断界面状态，再用 click 的 image_x/image_y 传图上位置点击。每张图消耗约一千多 token，常规窗口优先用 inspect",
+            json!({
+                "type": "object",
+                "properties": {
+                    "scope": { "type": "string", "enum": ["window", "screen"], "description": "默认 window（前台窗口）；screen 为整个屏幕" }
+                }
+            }),
         ),
         tool(
             "snapshot",
@@ -355,6 +402,29 @@ mod tests {
             parse_action("inspect", &json!({ "query": " 发送 " })).unwrap(),
             Action::Inspect { query: Some("发送".to_string()) }
         );
+    }
+
+    #[test]
+    fn converts_look_coordinates_for_click() {
+        assert_eq!(parse_action("look", &json!({})).unwrap(), Action::Look { window: true });
+        assert_eq!(parse_action("look", &json!({ "scope": "screen" })).unwrap(), Action::Look { window: false });
+        assert!(parse_action("look", &json!({ "scope": "desk" })).is_err());
+
+        vision::remember_capture(vision::CaptureMapping {
+            left: 0,
+            top: 0,
+            width: 2560,
+            height: 1440,
+            image_width: 1280,
+            image_height: 720,
+        });
+        assert_eq!(
+            parse_action("click", &json!({ "image_x": 100, "image_y": 50 })).unwrap(),
+            Action::Click { point: Some((201, 101)), button: MouseButton::Left, clicks: 1 }
+        );
+        assert!(parse_action("click", &json!({ "image_x": 2000, "image_y": 50 })).is_err());
+        assert!(parse_action("click", &json!({ "image_x": 10 })).is_err());
+        assert!(parse_action("click", &json!({ "x": 1, "y": 1, "image_x": 1, "image_y": 1 })).is_err());
     }
 
     #[test]

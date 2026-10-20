@@ -183,6 +183,8 @@ pub async fn run_agent_loop_ext(
         });
 
         let mut turn_outputs: Vec<String> = Vec::with_capacity(outcome.tool_calls.len());
+        // look 截图：工具结果只回填文字，图片在本轮工具结果之后作为一条带图消息交给模型
+        let mut turn_image: Option<String> = None;
         for call in &outcome.tool_calls {
             if cancelled.load(Ordering::Relaxed) { return Ok(LoopOutcome::Cancelled); }
             sink(LoopEmit::Event(ClientStreamEvent::ToolCall {
@@ -292,7 +294,13 @@ pub async fn run_agent_loop_ext(
                 } else if call.name.starts_with("mcp__") {
                     if let Some(mcp) = mcp_manager {
                         match mcp.execute_tool(&call.name, &call.arguments).await {
-                            Ok(out) => (out, false),
+                            Ok(out) => {
+                                let (text, image) = crate::computer::vision::split_image_output(out);
+                                if image.is_some() {
+                                    turn_image = image;
+                                }
+                                (text, false)
+                            }
                             Err(err) => (err, true),
                         }
                     } else {
@@ -348,6 +356,10 @@ pub async fn run_agent_loop_ext(
             });
         }
 
+        if let Some(image) = turn_image {
+            attach_screenshot(&mut messages, image);
+        }
+
         match loop_detector.record(&outcome.tool_calls, &turn_outputs) {
             ToolLoopVerdict::Progressing => {}
             ToolLoopVerdict::Nudge => {
@@ -359,6 +371,23 @@ pub async fn run_agent_loop_ext(
             ToolLoopVerdict::Stop => return Ok(LoopOutcome::LoopDetected { usage }),
         }
     }
+}
+
+pub const SCREENSHOT_MESSAGE: &str = "【系统附图】这是 look 工具刚截取的画面，请据此判断界面状态；需要点击时用图上的像素坐标作为 click 的 image_x / image_y。";
+const SCREENSHOT_EXPIRED: &str = "（较早的截图已省略，以最新截图为准）";
+
+/// 追加最新截图；较早截图的图片随后每一轮都会重复计费，只保留最新一张，旧的换成说明文字。
+/// 截图消息紧跟工具结果，各家协议都接受（Anthropic 构造请求时会并入同一条用户消息）
+pub fn attach_screenshot(messages: &mut Vec<AgentMessage>, image_data_url: String) {
+    for message in messages.iter_mut() {
+        if let AgentMessage::User { text, image_data_url: image } = message {
+            if image.is_some() && text.starts_with(SCREENSHOT_MESSAGE) {
+                *image = None;
+                text.push_str(SCREENSHOT_EXPIRED);
+            }
+        }
+    }
+    messages.push(AgentMessage::User { text: SCREENSHOT_MESSAGE.to_string(), image_data_url: Some(image_data_url) });
 }
 
 /// 真实执行器：走上游 HTTP 流式接口，透传 thought/delta/sources 事件
@@ -773,6 +802,7 @@ pub fn run_agent_chat_stream(
         };
 
         let execution_mode = request.agent.as_ref().map(|config| config.execution_mode).unwrap_or_default();
+        let vision = request.agent.as_ref().is_some_and(|config| config.vision);
         let web_search = request.web_search.unwrap_or(false);
         let mut tools_schema = crate::tools::get_agent_tools_schema();
         // 联网搜索开关关闭时不下发 web_search，尊重用户的离线选择
@@ -784,7 +814,11 @@ pub fn run_agent_chat_stream(
                 .map(|name| tool_risk(name) == Some(ToolRisk::Read)).unwrap_or(false));
         } else {
             let mcp_schema = mcp_manager.get_agent_tools_schema().await;
-            tools_schema.extend(mcp_schema);
+            let look_tool = format!("{}look", crate::computer::TOOL_PREFIX);
+            // 不能接收图片的模型拿到截图会直接报错，只给视觉模型下发 look
+            tools_schema.extend(mcp_schema.into_iter().filter(|schema| {
+                vision || schema.get("function").and_then(|function| function.get("name")).and_then(|name| name.as_str()) != Some(look_tool.as_str())
+            }));
         }
 
         let desktop_control = tools_schema.iter().any(|schema| {

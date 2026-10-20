@@ -3,7 +3,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ChatMessage, ChatSource, Conversation, Locale, MessageContentSegment, StoredImage, TokenUsage, ToolStep } from "../domain/chat";
 import { archiveBranch, restoreBranch } from "../domain/message-branches";
 import { appendContentSegment, finishThoughtSegment } from "../domain/message-content";
-import type { ActiveLlmConfig } from "../domain/llm";
+import { supportsImageInput, type ActiveLlmConfig } from "../domain/llm";
 import type { SkillDefinition } from "../skills";
 import { desktopFileReader, expandFileReferences, hasFileReferences } from "../features/file-reference/expand-file-references";
 
@@ -959,6 +959,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
                     enabled: true,
                     executionMode: agentModeRef.current,
                     workspace: projectManager.getState().activeProject ?? undefined,
+                    // 只有能收图的模型才会拿到 look 截图工具
+                    vision: activeConfig !== undefined && supportsImageInput(activeConfig),
                   },
                 }
               : {}),

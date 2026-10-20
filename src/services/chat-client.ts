@@ -31,7 +31,15 @@ export interface StreamChatRequest {
   /** 智能搜索：联网搜索开启时启用双市场并行检索（结果更多、带发布日期） */
   smartSearch?: boolean;
   /** Agent 模式：开启后服务端启用多轮工具调用循环 */
-  agent?: { enabled: true; executionMode?: "readonly" | "confirm" | "full_auto"; auto?: boolean; maxTurns?: number; workspace?: string };
+  agent?: {
+    enabled: true;
+    executionMode?: "readonly" | "confirm" | "full_auto";
+    auto?: boolean;
+    maxTurns?: number;
+    workspace?: string;
+    /** 当前模型能接收图片，桌面网关据此决定是否下发 look 截图工具 */
+    vision?: boolean;
+  };
 }
 
 export interface StreamChatResult {

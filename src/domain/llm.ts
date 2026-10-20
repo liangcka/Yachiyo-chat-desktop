@@ -187,6 +187,16 @@ export interface ActiveLlmConfig {
   readonly baseUrl?: string;
 }
 
+/**
+ * 当前配置能否发送图片：内置预设模型按白名单判断；自定义端点或非内置模型交由上游判定；
+ * 未配置（服务端 fallback）视为支持
+ */
+export function supportsImageInput(config: ActiveLlmConfig | undefined): boolean {
+  if (config === undefined || config.baseUrl !== undefined) return true;
+  const meta = PROVIDER_METADATA[config.provider];
+  return !meta.models.includes(config.model) || meta.imageModels.includes(config.model);
+}
+
 /** 扩展供应商展示卡片模型（支持图 2 丰富的供应商选择列表） */
 export interface ModelVendorItem {
   readonly id: string;

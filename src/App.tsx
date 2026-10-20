@@ -5,7 +5,7 @@ import { DesktopUpdateNotice } from "./components/desktop/DesktopUpdateNotice";
 import { ConversationRepository } from "./data/conversation-repository";
 import { YachiyoDatabase } from "./data/db";
 import type { Conversation, Locale, StoredImage } from "./domain/chat";
-import { PROVIDER_METADATA, type ActiveLlmConfig, type ProviderId } from "./domain/llm";
+import { supportsImageInput, type ActiveLlmConfig, type ProviderId } from "./domain/llm";
 import {
   ImageProcessingError,
   processImage,
@@ -608,11 +608,7 @@ export function App({ services, autoAiTitle }: AppProps) {
   };
 
   // 自定义端点或自定义指定的非内置模型图片能力交由上游判定，内置预设模型遵循白名单
-  const activeProviderSupportsImage =
-    activeLlmConfig === undefined ||
-    activeLlmConfig.baseUrl !== undefined ||
-    !PROVIDER_METADATA[activeLlmConfig.provider].models.includes(activeLlmConfig.model) ||
-    PROVIDER_METADATA[activeLlmConfig.provider].imageModels.includes(activeLlmConfig.model);
+  const activeProviderSupportsImage = supportsImageInput(activeLlmConfig);
 
   useEffect(() => {
     const handleGlobalPaste = (event: ClipboardEvent) => {

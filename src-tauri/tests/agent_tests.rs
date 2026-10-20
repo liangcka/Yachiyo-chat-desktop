@@ -1348,3 +1348,42 @@ fn test_hunyuan_and_qianfan_agent_bodies_replay_non_empty_reasoning() {
         assert!(body["messages"][4].get("reasoning_content").is_none(), "{model}");
     }
 }
+
+#[test]
+fn screenshot_messages_keep_only_the_latest_image() {
+    use yachiyo_desktop_lib::gateway::agent::runtime::{attach_screenshot, SCREENSHOT_MESSAGE};
+    let mut messages = vec![AgentMessage::User { text: "看看游戏".to_string(), image_data_url: None }];
+    attach_screenshot(&mut messages, "data:image/png;base64,AAAA".to_string());
+    attach_screenshot(&mut messages, "data:image/png;base64,BBBB".to_string());
+    let images: Vec<Option<&str>> = messages
+        .iter()
+        .map(|message| match message {
+            AgentMessage::User { image_data_url, .. } => image_data_url.as_deref(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(images, vec![None, None, Some("data:image/png;base64,BBBB")]);
+    assert!(matches!(&messages[1], AgentMessage::User { text, .. } if text.starts_with(SCREENSHOT_MESSAGE) && text.contains("已省略")));
+}
+
+#[test]
+fn anthropic_merges_screenshot_into_tool_result_turn() {
+    use yachiyo_desktop_lib::gateway::providers::anthropic::build_anthropic_agent_body;
+    let messages = vec![
+        AgentMessage::User { text: "看看画面".to_string(), image_data_url: None },
+        AgentMessage::Assistant {
+            text: String::new(),
+            reasoning: String::new(),
+            tool_calls: vec![ToolInvocation { id: "c1".to_string(), name: "mcp__windows_mcp__look".to_string(), arguments: serde_json::json!({}) }],
+            native: Vec::new(),
+        },
+        AgentMessage::ToolResult { tool_call_id: "c1".to_string(), name: "mcp__windows_mcp__look".to_string(), content: "已截取".to_string() },
+        AgentMessage::User { text: "【系统附图】".to_string(), image_data_url: Some("data:image/png;base64,AAAA".to_string()) },
+    ];
+    let body = build_anthropic_agent_body("claude-sonnet-5-5", &messages, "system", &[]);
+    let turns = body["messages"].as_array().unwrap();
+    assert_eq!(turns.len(), 3, "截图并入工具结果所在的用户消息");
+    let last = turns[2]["content"].as_array().unwrap();
+    assert_eq!(last[0]["type"], "tool_result");
+    assert_eq!(last.last().unwrap()["type"], "image");
+}

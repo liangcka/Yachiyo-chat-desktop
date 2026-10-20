@@ -4,7 +4,7 @@ Status: implemented
 
 ## Problem
 
-聊天控制器只有一个 `activeRef` 运行槽，`selectConversation` / `newConversation` 开头都会 `stop()`：切换或新建对话会直接中断正在运行的 Agent 任务。发送锁 `sendingRef` 是全局布尔值，并且在整个流式期间保持为真，一个会话在跑时其他会话也无法发送。桌面网关的工作区租约是独占的，两个对话在同一项目里同时运行时第二个直接报 `WORKSPACE_BUSY`。
+两个对话同时运行（各用不同模型）时会出错：聊天控制器只有一个 `activeRef` 运行槽，`selectConversation` / `newConversation` 开头都会 `stop()`：切换或新建对话会直接中断正在运行的 Agent 任务。发送锁 `sendingRef` 是全局布尔值，并且在整个流式期间保持为真，一个会话在跑时其他会话也无法发送。桌面网关的工作区租约是独占的，两个对话在同一项目里同时运行时第二个直接报 `WORKSPACE_BUSY`。
 
 ## Decision
 
