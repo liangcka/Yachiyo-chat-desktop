@@ -332,8 +332,12 @@
 .dsh-add-menu__item-main { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .dsh-add-menu__arrow { color: var(--text-muted); flex-shrink: 0; }
 .desktop-mode-select { position: relative; display: inline-flex; align-items: center; gap: 5px; min-width: 58px; width: auto; white-space: nowrap; justify-content: center; background: transparent; color: var(--text-muted); }
-.desktop-mode-select select { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
-.desktop-mode-select:has(select:focus-visible) { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.desktop-mode-select-root { position: relative; display: inline-flex; }
+.desktop-mode-select { cursor: pointer; border: 1px solid transparent; font: inherit; }
+.desktop-mode-select:disabled { cursor: not-allowed; opacity: 0.6; }
+.desktop-mode-select:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.desktop-mode-select[aria-expanded="true"] { background: var(--interactive-hover); }
+.dsh-composer-card__tools-left .desktop-mode-select__menu { left: 0; right: auto; width: 150px; transform-origin: bottom left; animation: project-dropdown-up 150ms var(--ease-out); }
 .desktop-mode-select:hover { background: var(--interactive-hover); }
 .desktop-mode-select--readonly { background: transparent; color: var(--text-muted); }
 .desktop-mode-select--confirm { background: transparent; color: var(--text-muted); }
@@ -408,7 +412,8 @@
 @media (prefers-reduced-motion: reduce) {
   .dsh-composer-card,
   .context-meter-fill,
-  .dsh-model-select__menu {
+  .dsh-model-select__menu,
+  .desktop-mode-select__menu {
     transition: none !important;
     animation: none !important;
   }
