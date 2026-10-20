@@ -409,7 +409,7 @@ pub fn list_directory(path_str: &str, workspace_root: &Path) -> Result<Vec<Strin
 }
 
 /// 默认排除的大型开发与依赖目录，避免深度递归卡顿
-const SEARCH_IGNORE_DIRS: &[&str] = &[
+pub(crate) const SEARCH_IGNORE_DIRS: &[&str] = &[
     ".git",
     "node_modules",
     "target",

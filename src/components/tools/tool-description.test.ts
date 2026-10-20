@@ -10,6 +10,12 @@ describe("formatToolDescription", () => {
       expect(formatToolDescription("read_file", undefined, "zh-CN")).toBe("读取文件");
     });
 
+    it("正确映射 glob 与 grep", () => {
+      expect(formatToolDescription("glob", { pattern: "src/**/*.tsx" }, "zh-CN")).toBe("查找文件 src/**/*.tsx");
+      expect(formatToolDescription("grep", { pattern: "useChat" }, "zh-CN")).toBe("搜索 `useChat`");
+      expect(formatToolDescription("grep", {}, "zh-CN")).toBe("搜索代码");
+    });
+
     it("正确映射 list_directory", () => {
       expect(formatToolDescription("list_directory", { path: "src/components" }, "zh-CN")).toBe("查看 src/components");
       expect(formatToolDescription("list_directory", { dir_path: "public" }, "zh-CN")).toBe("查看 public");
@@ -59,6 +65,11 @@ describe("formatToolDescription", () => {
     it("正确映射 read_file", () => {
       expect(formatToolDescription("read_file", { path: "src/App.tsx" }, "ja-JP")).toBe("src/App.tsx を読み込み");
       expect(formatToolDescription("read_file", {}, "ja-JP")).toBe("ファイルを読み込み");
+    });
+
+    it("正确映射 glob 与 grep", () => {
+      expect(formatToolDescription("glob", { pattern: "*.rs" }, "ja-JP")).toBe("*.rs のファイルを検索");
+      expect(formatToolDescription("grep", { pattern: "useChat" }, "ja-JP")).toBe("`useChat` を検索");
     });
 
     it("正确映射 list_directory", () => {

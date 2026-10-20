@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, ChevronDown, ChevronRight, Copy, FileCode, Globe, Play, Server, Terminal } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, FileCode, Globe, Play, Search, Server, Terminal } from "lucide-react";
 import type { Locale } from "../../domain/chat";
 import { formatToolDescription } from "./tool-description";
 import { projectManager } from "../../services/project-manager";
@@ -32,6 +32,9 @@ export function ToolCard({ toolName, args, output, isError, isRunning, isWaiting
       case "edit_file":
       case "list_directory":
         return <FileCode size={14} className="tool-card__icon" aria-hidden="true" />;
+      case "glob":
+      case "grep":
+        return <Search size={14} className="tool-card__icon" aria-hidden="true" />;
       case "web_fetch":
         return <Globe size={14} className="tool-card__icon" aria-hidden="true" />;
       default:
