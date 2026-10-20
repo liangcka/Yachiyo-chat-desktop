@@ -1484,143 +1484,10 @@
   color: #059669;
 }
 
-/* ─── 紧凑 Rail 侧边栏模式 ───────────────────────────────── */
-[data-sidebar-collapsed] .desktop-shell__sidebar,
-.desktop-sidebar--rail {
-  overflow: visible;
-}
-
-.desktop-sidebar--rail {
-  padding: 8px 6px;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-}
-
-.desktop-sidebar__rail-top {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-}
-
-.desktop-sidebar__rail-bottom {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  margin-top: auto;
-  width: 100%;
-}
-
-.desktop-sidebar__rail-avatar-btn {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  border: 1px solid transparent;
-  background: transparent;
-  cursor: pointer;
-  padding: 0;
-  transition:
-    background var(--ds-transition-duration-fast) var(--ds-ease-hover),
-    border-color var(--ds-transition-duration-fast) var(--ds-ease-hover),
-    transform var(--motion-duration-press) var(--ease-out);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .desktop-sidebar__rail-avatar-btn:hover {
-    background: var(--dsw-alias-interactive-bg-hover);
-  }
-}
-
-.desktop-sidebar__rail-avatar-btn:active {
-  transform: scale(var(--motion-scale-pressed));
-}
-
-.desktop-sidebar__rail-avatar-btn--active {
-  background: var(--dsw-alias-interactive-bg-hover);
-  border-color: var(--dsw-alias-border-l1);
-}
-
-.desktop-sidebar__rail-avatar-img {
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-  object-fit: cover;
-}
-
-.desktop-sidebar__rail-avatar-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-  background: var(--accent-brand-soft);
-  color: var(--accent-brand);
-}
-
-/* 在 Rail 模式下的 Popover 定位在侧栏右侧弹出 */
-.desktop-sidebar--rail .desktop-sidebar__user-popover {
-  left: calc(100% + 10px);
-  right: auto;
-  bottom: 0;
-  width: 280px;
-}
-
-.desktop-sidebar__rail-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: none;
-  border-radius: 9px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  cursor: pointer;
-  transition:
-    transform var(--motion-duration-press) var(--ease-out),
-    background var(--ds-transition-duration-fast) var(--ds-ease-hover),
-    color var(--ds-transition-duration-fast) var(--ds-ease-hover);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .desktop-sidebar__rail-btn:hover {
-    background: var(--dsw-alias-interactive-bg-hover);
-    color: var(--dsw-alias-label-primary);
-  }
-
-  .desktop-sidebar__rail-btn--highlight:hover {
-    background: var(--text-primary);
-    color: var(--surface-sidebar, #17191d);
-    opacity: 0.92;
-  }
-
-  .desktop-sidebar__rail-btn--danger:hover {
-    background: var(--dsw-alias-interactive-bg-hover-danger);
-    color: var(--dsw-alias-state-error-primary);
-  }
-}
-
-.desktop-sidebar__rail-btn:active {
-  transform: scale(var(--motion-scale-pressed));
-}
-
-.desktop-sidebar__rail-btn--active {
-  background: var(--dsw-alias-interactive-bg-hover-accent);
-  color: var(--accent-brand);
-}
-
-.desktop-sidebar__rail-btn--highlight {
-  background: var(--text-primary);
-  color: var(--surface-sidebar, #17191d);
+/* ─── 侧边栏折叠：列宽收为 0，不保留任何内容 ─────────────────── */
+[data-sidebar-collapsed] .desktop-shell__sidebar {
+  overflow: hidden;
+  border-right: none;
 }
 
 /* ─── 4. 对话工作台主区 (ConversationRoot) ─────────────────── */
@@ -5960,17 +5827,11 @@
   text-align: left;
 }
 
-.project-selector--sidebar .project-dropdown,
-.project-selector--rail .project-dropdown {
+.project-selector--sidebar .project-dropdown {
   top: calc(100% + 6px);
   bottom: auto;
   width: 260px;
   max-width: calc(100vw - 80px);
-}
-
-.project-selector--rail .project-dropdown {
-  left: calc(100% + 8px);
-  top: 0;
 }
 
 .project-selector__composer-trigger:hover,
@@ -7231,7 +7092,7 @@
   cursor: pointer;
 }
 
-.plugins-panel__check {
+.plugins-panel__note {
   display: block;
   margin-top: 4px;
   color: var(--text-muted);

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Folder, FolderCode, FolderPlus, FolderX, Settings, X } from "lucide-react";
+import { Check, ChevronDown, Folder, FolderPlus, FolderX, Settings, X } from "lucide-react";
 import { useLocale } from "../../i18n/locale-context";
 import {
   getProjectDisplayName,
@@ -8,8 +8,8 @@ import {
 } from "../../services/project-manager";
 
 export interface ProjectSelectorProps {
-  /** 触发样式变体：'composer' (对话框上方项目切换器), 'chip' (胶囊标签), 'new-chat' (旧版侧栏新建对话), 'header' (顶栏), 'sidebar' (侧边栏), 'rail' (紧凑栏), 'workspace' (工作区单行面板) */
-  variant?: "composer" | "chip" | "new-chat" | "header" | "sidebar" | "rail" | "workspace";
+  /** 触发样式变体：'composer' (对话框上方项目切换器), 'chip' (胶囊标签), 'new-chat' (旧版侧栏新建对话), 'header' (顶栏), 'sidebar' (侧边栏), 'workspace' (工作区单行面板) */
+  variant?: "composer" | "chip" | "new-chat" | "header" | "sidebar" | "workspace";
   label?: string;
   className?: string;
   changeLabel?: string;
@@ -153,18 +153,6 @@ export function ProjectSelector({
             {activeProject ? (changeLabel ?? (ja ? "変更" : "更换")) : (selectLabel ?? (ja ? "プロジェクトを選択" : "选择项目"))}
           </button>
         </div>
-      ) : variant === "rail" ? (
-        <button
-          type="button"
-          className="desktop-sidebar__rail-btn"
-          onClick={handleToggle}
-          aria-haspopup="menu"
-          aria-expanded={isOpen}
-          aria-label={ja ? "ワークスペースのプロジェクト" : "工作区项目"}
-          title={ja ? `ワークスペースのプロジェクト：${activeDisplayName}` : `工作区项目：${activeDisplayName}`}
-        >
-          <FolderCode size={17} />
-        </button>
       ) : variant === "composer" || variant === "chip" || variant === "sidebar" ? (
         <button
           type="button"

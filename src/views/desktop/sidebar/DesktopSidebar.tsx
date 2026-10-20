@@ -2,7 +2,6 @@ import { SidebarFooter } from "./SidebarFooter";
 import { SidebarHistoryList } from "./SidebarHistoryList";
 import { SidebarNewChat } from "./SidebarNewChat";
 import { SidebarProjects } from "./SidebarProjects";
-import { SidebarRail } from "./SidebarRail";
 import type { DesktopRightTab, DesktopSidebarProps } from "./types";
 import { useConversationGroups } from "./use-conversation-groups";
 import { useScrollbarLinger } from "./use-scrollbar-linger";
@@ -10,7 +9,6 @@ import { useScrollbarLinger } from "./use-scrollbar-linger";
 export function DesktopSidebar({
   activeConversationId,
   activeRightTab,
-  collapsed = false,
   conversations,
   copy,
   locale,
@@ -23,7 +21,6 @@ export function DesktopSidebar({
   onSelectRightTab,
   onSignOut,
   onCloseApp,
-  onToggleCollapse,
   onTogglePinConversation,
   onToggleTheme,
   resolvedTheme = "dark",
@@ -34,25 +31,6 @@ export function DesktopSidebar({
   const { orderedConversations, pinnedIds, togglePinConversation } = useConversationGroups(conversations);
 
   const handleTogglePin = onTogglePinConversation || togglePinConversation;
-
-  if (collapsed) {
-    return (
-      <SidebarRail
-        copy={copy}
-        locale={locale}
-        onCloseApp={onCloseApp}
-        onLocale={onLocale}
-        onNewChat={onNewChat}
-        onOpenSettings={onOpenSettings}
-        onOpenWorkspace={() => onSelectRightTab?.("workspace")}
-        onSignOut={onSignOut}
-        onToggleCollapse={onToggleCollapse}
-        onToggleTheme={onToggleTheme}
-        resolvedTheme={resolvedTheme}
-        showToast={showToast}
-      />
-    );
-  }
 
   const toggleTab = (tab: "llm" | "settings") => {
     const nextTab: DesktopRightTab = activeRightTab === tab ? "none" : tab;

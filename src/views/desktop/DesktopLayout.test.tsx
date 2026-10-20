@@ -280,30 +280,46 @@ describe("DesktopLayout", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "设置中心" })).not.toBeInTheDocument();
 
-    // 折叠侧边栏为 Rail 模式
+    // 折叠侧边栏：不保留任何内容
     fireEvent.keyDown(window, { ctrlKey: true, key: "[" });
-    expect(screen.getByRole("complementary", { name: "紧凑导航栏" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "桌面导航与历史会话" })).not.toBeInTheDocument();
 
     // 再次按快捷键展开侧边栏
     fireEvent.keyDown(window, { ctrlKey: true, key: "[" });
     expect(screen.getByRole("complementary", { name: "桌面导航与历史会话" })).toBeInTheDocument();
   });
 
-  it("toggles rail sidebar mode via collapse button and restores wide mode", async () => {
+  it("折叠侧边栏后不显示任何内容，可从标题栏展开", async () => {
     const user = userEvent.setup();
     const props = createMockProps();
-    render(<DesktopLayout {...props} />);
+    const { container } = render(<DesktopLayout {...props} />);
 
     const collapseBtn = screen.getByTitle("折叠侧边栏 (Ctrl+[)");
     await user.click(collapseBtn);
 
-    expect(screen.getByRole("complementary", { name: "紧凑导航栏" })).toBeInTheDocument();
+    const sidebarColumn = container.querySelector(".desktop-shell__sidebar");
+    expect(sidebarColumn).toBeEmptyDOMElement();
+    expect(container.querySelector<HTMLElement>(".desktop-shell")?.style.gridTemplateColumns).toMatch(/^0px /u);
 
     const expandBtns = screen.getAllByTitle("展开侧边栏 (Ctrl+[)");
     expect(expandBtns).toHaveLength(1);
     await user.click(expandBtns[0]);
 
     expect(screen.getByRole("complementary", { name: "桌面导航与历史会话" })).toBeInTheDocument();
+  });
+
+  it("窄视口默认折叠，可从标题栏临时展开", async () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 800 });
+    try {
+      const user = userEvent.setup();
+      render(<DesktopLayout {...createMockProps()} />);
+      expect(screen.queryByRole("complementary", { name: "桌面导航与历史会话" })).not.toBeInTheDocument();
+      await user.click(screen.getByTitle("展开侧边栏 (Ctrl+[)"));
+      expect(screen.getByRole("complementary", { name: "桌面导航与历史会话" })).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+    }
   });
 
   it("空白对话只显示输入框与上方的项目选择", () => {

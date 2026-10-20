@@ -274,7 +274,6 @@
   color: var(--text-primary);
 }
 
-.desktop-shell-root .desktop-sidebar__rail-btn--highlight,
 .desktop-shell-root .settings-toggle-switch--active {
   background: var(--text-primary);
   color: var(--surface-card);

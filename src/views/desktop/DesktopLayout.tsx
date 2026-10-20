@@ -29,10 +29,7 @@ const SettingsModal = lazy(() =>
 const SIDEBAR_MIN = 200;
 const SIDEBAR_MAX = 400;
 const SIDEBAR_DEFAULT = 260;
-/** 折叠态 rail 宽度（仅图标列） */
-const SIDEBAR_COLLAPSED = 64;
-
-/** 视口窄于该宽度时侧栏在显示层强制折叠为 rail（不改写用户偏好与持久化宽度） */
+/** 视口窄于该宽度时侧栏在显示层默认折叠（不改写用户偏好与持久化宽度），可经标题栏按钮临时展开 */
 const NARROW_VIEWPORT = 900;
 
 const RIGHT_PANE_MIN = 320;
@@ -115,6 +112,8 @@ function writeStoredWidth(key: string, value: number): void {
 export function DesktopLayout(props: SharedViewProps) {
   /** 用户手动折叠偏好：窄视口的强制折叠只作用于显示层，不写入该状态 */
   const [userSidebarCollapsed, setUserSidebarCollapsed] = useState(false);
+  /** 折叠后侧栏不留任何入口，窄视口下需要能临时展开 */
+  const [narrowSidebarOpen, setNarrowSidebarOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTabKey>("general");
@@ -185,7 +184,12 @@ export function DesktopLayout(props: SharedViewProps) {
   }, []);
 
   const narrowViewport = viewportWidth < NARROW_VIEWPORT;
-  const sidebarCollapsed = narrowViewport || userSidebarCollapsed;
+  const sidebarCollapsed = narrowViewport ? !narrowSidebarOpen : userSidebarCollapsed;
+
+  const toggleSidebar = useCallback(() => {
+    if (narrowViewport) setNarrowSidebarOpen((open) => !open);
+    else setUserSidebarCollapsed((current) => !current);
+  }, [narrowViewport]);
 
   const handleOpenSettings = useCallback((tab: SettingsTabKey = "general") => {
     setSettingsTab(tab);
@@ -234,7 +238,7 @@ export function DesktopLayout(props: SharedViewProps) {
         (e.key === "[" || e.key === "BracketLeft" || e.code === "BracketLeft")
       ) {
         e.preventDefault();
-        setUserSidebarCollapsed((current) => !current);
+        toggleSidebar();
         return;
       }
 
@@ -257,7 +261,7 @@ export function DesktopLayout(props: SharedViewProps) {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [handleOpenSettings, props, settingsOpen, switchCenterView, toggleRightPane]);
+  }, [handleOpenSettings, props, settingsOpen, switchCenterView, toggleRightPane, toggleSidebar]);
 
   /* ── 拖拽回调 ─────────────────────────────────────── */
 
@@ -324,7 +328,7 @@ export function DesktopLayout(props: SharedViewProps) {
 
   /* ── 渲染 ─────────────────────────────────────────── */
 
-  const effectiveSidebarWidth = sidebarCollapsed ? SIDEBAR_COLLAPSED : sidebarWidth;
+  const effectiveSidebarWidth = sidebarCollapsed ? 0 : sidebarWidth;
   const effectiveRightPaneWidth = Math.min(rightPaneWidth, Math.max(280, viewportWidth - effectiveSidebarWidth - 320));
   const gridColumns = rightPaneOpen
     ? `${effectiveSidebarWidth}px minmax(0, 1fr) ${effectiveRightPaneWidth}px`
@@ -342,7 +346,7 @@ export function DesktopLayout(props: SharedViewProps) {
         onOpenSearch={() => setPaletteOpen(true)}
         onRenameConversation={props.onRename}
         onSwitchView={switchCenterView}
-        onToggleSidebar={() => setUserSidebarCollapsed((current) => !current)}
+        onToggleSidebar={toggleSidebar}
         onToggleRightPane={toggleRightPane}
         rightPaneOpen={rightPaneOpen}
         sidebarCollapsed={sidebarCollapsed}
@@ -355,37 +359,38 @@ export function DesktopLayout(props: SharedViewProps) {
         {...(sidebarCollapsed ? { "data-sidebar-collapsed": "" } : {})}
         {...(dragging ? { "data-dragging": "" } : {})}
       >
-        {/* 左列：导航与历史侧栏，列容器同时充当右缘分隔条的定位基准 */}
+        {/* 左列：导航与历史侧栏，列容器同时充当右缘分隔条的定位基准；折叠时列宽为 0，不渲染任何内容 */}
         <div className="desktop-shell__sidebar">
-          <DesktopSidebar
-            activeConversationId={props.controller.activeConversation?.id}
-            collapsed={sidebarCollapsed}
-            conversations={props.conversations}
-            copy={props.copy}
-            locale={props.controller.locale}
-            onClearData={props.onClearData}
-            onCompress={handleCompress}
-            onDeleteConversation={props.onDelete}
-            onLocale={props.onLocale}
-            onNewChat={props.onNewChat}
-            onOpenSettings={handleOpenSettings}
-            onRenameConversation={props.onRename}
-            onSelectConversation={props.controller.selectConversation}
-            onSelectRightTab={(tab) => { handleSelectRightTab(tab); setRightPaneOpen(tab !== "none"); }}
-            onSignOut={props.onSignOut}
-            onToggleCollapse={() => setUserSidebarCollapsed((current) => !current)}
-            onToggleTheme={handleToggleTheme}
-            resolvedTheme={resolved}
-            showToast={props.showToast}
-          />
-          {/* 侧栏右缘分隔条（折叠态禁用拖拽） */}
-          <DragHandle
-            disabled={sidebarCollapsed}
-            onDrag={handleSidebarDrag}
-            onDragEnd={handleSidebarDragEnd}
-            onDragStart={handleDragStart}
-            position="left"
-          />
+          {sidebarCollapsed ? null : (
+            <>
+              <DesktopSidebar
+                activeConversationId={props.controller.activeConversation?.id}
+                conversations={props.conversations}
+                copy={props.copy}
+                locale={props.controller.locale}
+                onClearData={props.onClearData}
+                onCompress={handleCompress}
+                onDeleteConversation={props.onDelete}
+                onLocale={props.onLocale}
+                onNewChat={props.onNewChat}
+                onOpenSettings={handleOpenSettings}
+                onRenameConversation={props.onRename}
+                onSelectConversation={props.controller.selectConversation}
+                onSelectRightTab={(tab) => { handleSelectRightTab(tab); setRightPaneOpen(tab !== "none"); }}
+                onSignOut={props.onSignOut}
+                onToggleTheme={handleToggleTheme}
+                resolvedTheme={resolved}
+                showToast={props.showToast}
+              />
+              {/* 侧栏右缘分隔条 */}
+              <DragHandle
+                onDrag={handleSidebarDrag}
+                onDragEnd={handleSidebarDragEnd}
+                onDragStart={handleDragStart}
+                position="left"
+              />
+            </>
+          )}
         </div>
 
         {/* 中列：对话/编辑器双视图 */}
@@ -470,12 +475,12 @@ export function DesktopLayout(props: SharedViewProps) {
 
       {pluginSettings.whaleWidget.enabled ? (
         <WhaleWidget
-          locale={props.controller.locale}
           entries={props.llmEntries}
           activeProvider={props.llmActiveProvider}
           phase={props.controller.phase}
-          settings={pluginSettings.whaleWidget}
-          onConfigureKey={() => handleOpenSettings("models")}
+          messages={props.controller.messages}
+          conversationTitle={props.controller.activeConversation?.title}
+          pendingPermissionId={props.controller.pendingPermission?.requestId}
         />
       ) : null}
 
