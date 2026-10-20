@@ -11,7 +11,7 @@ use crate::gateway::agent::pruner::{
     prune_agent_messages, DEFAULT_PRUNE_HEAD_CHARS, DEFAULT_PRUNE_TAIL_CHARS,
     DEFAULT_PRUNE_THRESHOLD_CHARS,
 };
-use crate::gateway::prompt::build_agent_system_prompt;
+use crate::gateway::prompt::{build_agent_system_prompt, build_time_note};
 use crate::gateway::providers::registry::get_provider_config;
 use crate::gateway::stream::{encode_client_event, encode_ping};
 use crate::tools::{
@@ -724,7 +724,7 @@ pub fn run_agent_chat_stream(
             schema.get("function").and_then(|function| function.get("name")).and_then(|name| name.as_str())
                 .is_some_and(|name| name.starts_with(crate::computer::TOOL_PREFIX))
         });
-        let system_prompt = build_agent_system_prompt(request.locale, request.current_time.as_deref(), root.as_deref(), desktop_control, web_search);
+        let system_prompt = build_agent_system_prompt(request.locale, root.as_deref(), desktop_control, web_search);
         let executor = HttpTurnExecutor {
             client: client.clone(),
             fallback_client,
@@ -749,7 +749,12 @@ pub fn run_agent_chat_stream(
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LoopEmit>();
         let sink: EventSink = Arc::new(move |emit| { let _ = tx.send(emit); });
 
-        let loop_messages = history_to_agent_messages(&request.messages);
+        let mut loop_messages = history_to_agent_messages(&request.messages);
+        if let Some(current_time) = request.current_time.as_deref() {
+            if let Some(AgentMessage::User { text, .. }) = loop_messages.iter_mut().rev().find(|m| matches!(m, AgentMessage::User { .. })) {
+                text.insert_str(0, &build_time_note(request.locale, current_time));
+            }
+        }
         let exec = executor;
         let root_for_task = root.clone();
         let mcp_for_loop = Arc::clone(&mcp_manager);

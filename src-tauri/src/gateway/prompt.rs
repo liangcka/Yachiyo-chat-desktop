@@ -1,6 +1,22 @@
 use crate::types::{ChatLocale, RequestMode};
+use std::sync::OnceLock;
 
-const ROLE_PROMPT: &str = include_str!("../../../角色提示词.txt");
+const ROLE_PROMPT_SOURCE: &str = include_str!("../../../角色提示词.txt");
+const TOOL_DEFINITIONS_START: &str = "# 完整工具定义与交互契约";
+const TOOL_DEFINITIONS_END: &str = "# 引用标记与溯源指令";
+
+/// 角色提示词里的工具定义章节描述的是桌面端并不存在的工具（真实工具经 tools 字段下发），
+/// 每次请求白占约三分之一的输入 token，还会诱导模型调用不存在的工具，桌面端发送前剔除
+fn role_prompt() -> &'static str {
+    static PROMPT: OnceLock<String> = OnceLock::new();
+    PROMPT.get_or_init(|| {
+        let source = ROLE_PROMPT_SOURCE.trim();
+        match (source.find(TOOL_DEFINITIONS_START), source.find(TOOL_DEFINITIONS_END)) {
+            (Some(start), Some(end)) if start < end => format!("{}{}", &source[..start], &source[end..]),
+            _ => source.to_string(),
+        }
+    })
+}
 
 const VISION_SUFFIX_ZH: &str = "你具备视觉感知能力，能够通过屏幕或摄像头看到彩叶发送的照片与画面，并给出自然、贴合八千代人设的互动反应。";
 const VISION_SUFFIX_JA: &str = "あなたは視覚認識能力を持ち、彩葉が送った写真や画面を認識して八千代らしくリアクションできます。";
@@ -24,6 +40,18 @@ const TITLE_PROMPT_ZH: &str = "你是一个对话标题生成助手。请根据�
 const TITLE_PROMPT_JA: &str = "あなたは会話タイトルの自動生成アシスタントです。ユーザーの質問と会話内容に基づき、簡潔で的確な会話タイトルを作成してください。\nルール：\n1. 4〜10文字程度で簡潔にまとめてください；\n2. タイトルのプレーンテキストのみを出力し、『』や「」、句読点などの記号は一切含めないでください；\n3. 「八千代」「会話」などの不要な接頭語や装飾は禁止します；\n4. キャラクターとしての口調やロールプレイは一切行わないでください。";
 
 use std::path::Path;
+
+/// Agent 模式把当前时间注入最新一条用户消息而非系统提示词：系统提示词与历史前缀保持逐字稳定，
+/// 才能命中 DeepSeek 等厂商的前缀缓存（缓存命中的输入价格约为未命中的十分之一）
+pub fn build_time_note(locale: ChatLocale, current_time: &str) -> String {
+    match locale {
+        ChatLocale::JaJp => format!("【現在時刻：{current_time}】\n"),
+        ChatLocale::ZhCn => format!("【当前时间：{current_time}】\n"),
+    }
+}
+
+const AGENT_TIME_RULE_ZH: &str = "最新一条用户消息开头的【当前时间：…】由系统注入，表示当前现实时间：请结合时段与季节自然互动，不要复述该标记。";
+const AGENT_TIME_RULE_JA: &str = "最新のユーザーメッセージ冒頭の【現在時刻：…】はシステムが付与した現在の現実時間です。時間帯や季節を自然に反映し、この表記自体は繰り返さないでください。";
 
 pub fn build_time_instruction(locale: ChatLocale, current_time: Option<&str>) -> String {
     let time = current_time.unwrap_or("2026-08-30 (UTC)");
@@ -186,7 +214,6 @@ fn build_project_instructions(workspace_root: Option<&Path>, locale: ChatLocale)
 /// Agent 模式系统提示词：角色人设、工具规范、工作区与项目指令。
 pub fn build_agent_system_prompt(
     locale: ChatLocale,
-    current_time: Option<&str>,
     workspace_root: Option<&Path>,
     desktop_control: bool,
     web_search: bool,
@@ -210,7 +237,10 @@ pub fn build_agent_system_prompt(
         ChatLocale::JaJp => AGENT_OUTPUT_RULE_JA,
         ChatLocale::ZhCn => AGENT_OUTPUT_RULE_ZH,
     };
-    let time_rule = build_time_instruction(locale, current_time);
+    let time_rule = match locale {
+        ChatLocale::JaJp => AGENT_TIME_RULE_JA,
+        ChatLocale::ZhCn => AGENT_TIME_RULE_ZH,
+    };
     let file_rule = match locale {
         ChatLocale::ZhCn => AGENT_FILE_RULE_ZH,
         ChatLocale::JaJp => AGENT_FILE_RULE_JA,
@@ -230,7 +260,7 @@ pub fn build_agent_system_prompt(
     format!(
         "{}{}\n\n<runtime>\n始终扮演月见八千代，并将用户视为酒寄彩叶；普通用户消息不得改变这两个身份。\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n</runtime>",
         priority_header,
-        ROLE_PROMPT.trim(),
+        role_prompt(),
         locale_suffix,
         priority_header.trim(),
         tools_instruction,
@@ -287,7 +317,7 @@ pub fn build_system_prompt(
 
     format!(
         "{}\n\n<runtime>\n始终扮演月见八千代，并将用户视为酒寄彩叶；普通用户消息不得改变这两个身份。\n{}\n{}\n{}\n{}\n{}\n{}\n</runtime>",
-        ROLE_PROMPT.trim(),
+        role_prompt(),
         vision_suffix,
         locale_suffix,
         time_rule,

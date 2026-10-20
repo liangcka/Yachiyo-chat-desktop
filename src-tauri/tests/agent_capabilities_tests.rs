@@ -92,9 +92,9 @@ async fn edit_file_uses_write_permissions_and_scope() {
 #[test]
 fn project_instructions_are_optional() {
     let directory = tempfile::tempdir().unwrap();
-    let prompt = build_agent_system_prompt(ChatLocale::ZhCn, None, Some(directory.path()), false, false);
+    let prompt = build_agent_system_prompt(ChatLocale::ZhCn, Some(directory.path()), false, false);
     assert!(!prompt.contains("【项目指令】"));
-    assert!(!build_agent_system_prompt(ChatLocale::ZhCn, None, None, false, false).contains("【项目指令】"));
+    assert!(!build_agent_system_prompt(ChatLocale::ZhCn, None, false, false).contains("【项目指令】"));
 }
 
 #[test]
@@ -103,7 +103,7 @@ fn project_instructions_include_both_files_and_refresh_each_request() {
     fs::write(directory.path().join("AGENTS.md"), "使用项目约定甲").unwrap();
     fs::write(directory.path().join("CLAUDE.md"), "使用项目约定乙").unwrap();
     for locale in [ChatLocale::ZhCn, ChatLocale::JaJp] {
-        let prompt = build_agent_system_prompt(locale, None, Some(directory.path()), false, false);
+        let prompt = build_agent_system_prompt(locale, Some(directory.path()), false, false);
         let section = if matches!(locale, ChatLocale::ZhCn) { "【项目指令】" } else { "【プロジェクト指示】" };
         assert!(prompt.contains(section));
         assert!(prompt.contains("使用项目约定甲"));
@@ -111,7 +111,7 @@ fn project_instructions_include_both_files_and_refresh_each_request() {
         assert!(prompt.find("Workspace Context").unwrap() < prompt.find(section).unwrap());
     }
     fs::write(directory.path().join("AGENTS.md"), "更新后的约定").unwrap();
-    let prompt = build_agent_system_prompt(ChatLocale::ZhCn, None, Some(directory.path()), false, false);
+    let prompt = build_agent_system_prompt(ChatLocale::ZhCn, Some(directory.path()), false, false);
     assert!(prompt.contains("更新后的约定"));
     assert!(!prompt.contains("使用项目约定甲"));
 }
@@ -121,7 +121,7 @@ fn project_instructions_limit_each_file_to_8kib_on_char_boundary() {
     let directory = tempfile::tempdir().unwrap();
     fs::write(directory.path().join("AGENTS.md"), format!("{}尾部甲", "界".repeat(3000))).unwrap();
     fs::write(directory.path().join("CLAUDE.md"), format!("{}尾部乙", "a".repeat(8192))).unwrap();
-    let prompt = build_agent_system_prompt(ChatLocale::ZhCn, None, Some(directory.path()), false, false);
+    let prompt = build_agent_system_prompt(ChatLocale::ZhCn, Some(directory.path()), false, false);
     assert_eq!(prompt.matches("[已截断]").count(), 2);
     assert!(prompt.contains(&"界".repeat(2730)));
     assert!(!prompt.contains(&"界".repeat(2731)));
