@@ -1,4 +1,5 @@
 import { apiFetch } from "../../services/api-origins";
+import { apiCredentials } from "../../services/app-platform";
 
 export interface DeepSeekBalance {
   readonly currency: string;
@@ -61,7 +62,7 @@ export async function fetchDeepSeekBalance(apiKey: string | undefined): Promise<
   try {
     response = await apiFetch("/api/deepseek/balance", {
       method: "POST",
-      credentials: "include",
+      credentials: apiCredentials(),
       headers: { "content-type": "application/json" },
       body: JSON.stringify(apiKey === undefined ? {} : { apiKey }),
     });
