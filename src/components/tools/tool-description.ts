@@ -28,6 +28,7 @@ function extractDomain(rawUrl: string): string {
  * - git_status → "查看 Git 状态" / "Git ステータスを確認"
  * - git_diff → "查看 Git 差异" / "Git 差分を確認"
  * - todo_write → "更新任务清单" / "タスク一覧を更新"
+ * - task → "子 Agent · <简称>" / "サブエージェント · <简称>"
  * - mcp__<服务>__<操作> → "<服务> · <操作>"
  */
 export function formatToolDescription(
@@ -119,6 +120,12 @@ export function formatToolDescription(
 
     case "todo_write":
       return isJa ? "タスク一覧を更新" : "更新任务清单";
+
+    case "task": {
+      const label = typeof args?.description === "string" ? args.description.trim() : "";
+      const prefix = isJa ? "サブエージェント" : "子 Agent";
+      return label ? `${prefix} · ${label}` : prefix;
+    }
 
     default:
       return toolName;

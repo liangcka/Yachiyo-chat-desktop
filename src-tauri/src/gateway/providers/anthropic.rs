@@ -230,7 +230,15 @@ pub fn build_anthropic_agent_body(
                         }));
                     }
                 }
-                mapped.push(json!({ "role": "user", "content": blocks }));
+                // 紧跟工具结果的用户消息（如 look 截图）并入同一条，保持 user/assistant 严格交替
+                match mapped.last_mut() {
+                    Some(last) if last["role"] == "user" && last["content"].is_array() => {
+                        if let Some(content) = last["content"].as_array_mut() {
+                            content.extend(blocks);
+                        }
+                    }
+                    _ => mapped.push(json!({ "role": "user", "content": blocks })),
+                }
             }
             // 本运行内的轮次原样回传内容块：思考块签名绑定原始前缀，重建会丢失推理延续
             AgentMessage::Assistant { native, .. } if !native.is_empty() => {

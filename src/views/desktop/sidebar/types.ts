@@ -1,3 +1,4 @@
+import type { RunActivity } from "../../../app/use-chat-controller";
 import type { Conversation, Locale } from "../../../domain/chat";
 import type { UiCopy } from "../../../i18n/messages";
 import type { SettingsTabKey } from "../../../components/settings/SettingsModal";
@@ -21,6 +22,7 @@ export interface DesktopSidebarProps {
   locale: Locale;
   onClearData?: () => Promise<void>;
   onCompress?: () => void;
+  onArchiveConversation?: (id: string, archived: boolean) => Promise<void>;
   onDeleteConversation: (id: string) => Promise<void>;
   onLocale?: (locale: Locale) => Promise<void>;
   onNewChat: () => Promise<void>;
@@ -33,5 +35,7 @@ export interface DesktopSidebarProps {
   onTogglePinConversation?: (id: string) => void;
   onToggleTheme?: () => void;
   resolvedTheme?: "light" | "dark";
+  /** 正在运行（含后台）的会话，侧栏据此显示运行中 / 等待确认标记 */
+  runningConversations?: ReadonlyMap<string, RunActivity>;
   showToast?: (message: string, tone?: "info" | "error") => void;
 }

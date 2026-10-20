@@ -5,7 +5,7 @@ import { DesktopUpdateNotice } from "./components/desktop/DesktopUpdateNotice";
 import { ConversationRepository } from "./data/conversation-repository";
 import { YachiyoDatabase } from "./data/db";
 import type { Conversation, Locale, StoredImage } from "./domain/chat";
-import { PROVIDER_METADATA, type ActiveLlmConfig, type ProviderId } from "./domain/llm";
+import { supportsImageInput, type ActiveLlmConfig, type ProviderId } from "./domain/llm";
 import {
   ImageProcessingError,
   processImage,
@@ -140,6 +140,10 @@ export function App({ services, autoAiTitle }: AppProps) {
   );
 
   const refreshHistoryRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const conversationsRef = useRef<Conversation[]>([]);
+  const backgroundRunToastRef = useRef<(conversationId: string, status: "complete" | "failed" | "stopped") => void>(
+    () => undefined,
+  );
 
   const controller = useChatController({
     repository: activeServices.repository,
@@ -152,6 +156,7 @@ export function App({ services, autoAiTitle }: AppProps) {
     onConversationUpdated: () => {
       void refreshHistoryRef.current();
     },
+    onBackgroundRunFinished: (conversationId, status) => backgroundRunToastRef.current(conversationId, status),
   });
   const setControllerOnline = controller.setOnline;
   const copy = copyFor(controller.locale);
@@ -283,6 +288,25 @@ export function App({ services, autoAiTitle }: AppProps) {
   useEffect(() => {
     refreshHistoryRef.current = refreshHistory;
   }, [refreshHistory]);
+
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+
+  // 后台会话跑完时提醒一次；用户主动停止的不打扰
+  useEffect(() => {
+    backgroundRunToastRef.current = (conversationId, status) => {
+      if (status === "stopped") return;
+      const ja = controller.locale === "ja-JP";
+      const title =
+        conversationsRef.current.find((conversation) => conversation.id === conversationId)?.title ?? copy.newChat;
+      if (status === "complete") {
+        showToast(ja ? `「${title}」の処理が完了しました` : `「${title}」已在后台完成`, "info");
+      } else {
+        showToast(ja ? `「${title}」の処理が失敗しました` : `「${title}」在后台运行失败`, "error");
+      }
+    };
+  }, [controller.locale, copy.newChat, showToast]);
 
   const refreshLlm = useCallback(async () => {
     try {
@@ -531,14 +555,27 @@ export function App({ services, autoAiTitle }: AppProps) {
     await refreshHistory();
   };
 
+  /** 当前会话被删除或归档后，切到最近的未归档会话，没有则新建 */
+  const leaveConversation = async (id: string) => {
+    if (controller.activeConversation?.id !== id) return;
+    const remaining = await activeServices.repository.listConversations();
+    const next = remaining.find((conversation) => conversation.id !== id && conversation.archivedAt === undefined);
+    if (next === undefined) await controller.newConversation();
+    else await controller.selectConversation(next.id);
+  };
+
   const handleDelete = async (id: string) => {
-    const deletingActive = controller.activeConversation?.id === id;
+    // 先停掉该会话的运行，避免流式写入落到已删除的会话上
+    await controller.stopConversation(id);
     await activeServices.repository.deleteConversation(id);
-    if (deletingActive) {
-      const remaining = await activeServices.repository.listConversations();
-      if (remaining[0] === undefined) await controller.newConversation();
-      else await controller.selectConversation(remaining[0].id);
-    }
+    await leaveConversation(id);
+    await refreshHistory();
+  };
+
+  const handleArchive = async (id: string, archived: boolean) => {
+    if (activeServices.repository.setConversationArchived === undefined) return;
+    await activeServices.repository.setConversationArchived(id, archived);
+    if (archived) await leaveConversation(id);
     await refreshHistory();
   };
 
@@ -571,11 +608,7 @@ export function App({ services, autoAiTitle }: AppProps) {
   };
 
   // 自定义端点或自定义指定的非内置模型图片能力交由上游判定，内置预设模型遵循白名单
-  const activeProviderSupportsImage =
-    activeLlmConfig === undefined ||
-    activeLlmConfig.baseUrl !== undefined ||
-    !PROVIDER_METADATA[activeLlmConfig.provider].models.includes(activeLlmConfig.model) ||
-    PROVIDER_METADATA[activeLlmConfig.provider].imageModels.includes(activeLlmConfig.model);
+  const activeProviderSupportsImage = supportsImageInput(activeLlmConfig);
 
   useEffect(() => {
     const handleGlobalPaste = (event: ClipboardEvent) => {
@@ -651,6 +684,7 @@ export function App({ services, autoAiTitle }: AppProps) {
     isOnline,
     llmActiveProvider,
     llmEntries,
+    onArchive: handleArchive,
     onClearData: handleClearData,
     onDelete: handleDelete,
     onImage: handleImage,

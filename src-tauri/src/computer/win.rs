@@ -2,6 +2,7 @@
 //! 坐标统一为物理像素（应用进程按显示器 DPI 感知运行，与 SetCursorPos/GetWindowRect 口径一致）。
 
 use super::input::{plan_text, Key, TypeUnit};
+use super::vision::{self, CaptureMapping};
 use super::{bmp, hold_input_guard, Action, AppMode, MouseButton, OVERLAY_WINDOW_TITLE};
 use std::ffi::c_void;
 use std::mem::size_of;
@@ -20,8 +21,9 @@ use windows_sys::Win32::System::Threading::{
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS,
-    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
-    MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEINPUT,
+    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
+    MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN,
+    MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_VIRTUALDESK, MOUSEINPUT,
     MOUSE_EVENT_FLAGS, VK_ESCAPE,
 };
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
@@ -97,6 +99,7 @@ pub fn perform(action: Action) -> Result<String, String> {
         Action::Type { text } => type_text(&text),
         Action::Shortcut { label, keys } => shortcut(&label, &keys),
         Action::Screenshot => screenshot(),
+        Action::Look { window } => look(window),
         Action::Snapshot => Ok(snapshot()),
         Action::Inspect { query } => inspect(query.as_deref()),
     }
@@ -258,6 +261,25 @@ fn mouse_input(flags: MOUSE_EVENT_FLAGS) -> INPUT {
     }
 }
 
+/// 绝对坐标移动：坐标按虚拟桌面归一化到 0..=65535
+fn mouse_move_absolute(x: i32, y: i32) -> INPUT {
+    let screen = virtual_screen();
+    let normalize = |value: i32, origin: i32, size: i32| ((value - origin) as i64 * 65535 / (size - 1).max(1) as i64) as i32;
+    INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dx: normalize(x, screen.left, screen.width),
+                dy: normalize(y, screen.top, screen.height),
+                mouseData: 0,
+                dwFlags: MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    }
+}
+
 struct VirtualScreen {
     left: i32,
     top: i32,
@@ -309,14 +331,25 @@ fn click(point: Option<(i32, i32)>, button: MouseButton, clicks: u32) -> Result<
         MouseButton::Right => (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, "右键"),
         MouseButton::Middle => (MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, "中键"),
     };
-    hold_input_guard(Duration::from_millis(400));
-    if point.is_some() && unsafe { SetCursorPos(x, y) } == 0 {
-        return Err(format!("无法把光标移动到 ({}, {})", x, y));
+    hold_input_guard(Duration::from_millis(400 + 120 * clicks as u64));
+    if point.is_some() {
+        if unsafe { SetCursorPos(x, y) } == 0 {
+            return Err(format!("无法把光标移动到 ({}, {})", x, y));
+        }
+        // 游戏多读原始输入，SetCursorPos 不产生原始输入事件，游戏内光标不会跟着动；再经 SendInput 补一次绝对移动
+        send(&[mouse_move_absolute(x, y)])?;
     }
     // 留出悬停时间，部分界面要先收到 mousemove 才会响应点击
     std::thread::sleep(Duration::from_millis(40));
-    let inputs: Vec<INPUT> = (0..clicks).flat_map(|_| [mouse_input(down), mouse_input(up)]).collect();
-    send(&inputs)?;
+    // 按下与抬起分开送达：同一批注入会落在同一帧里，按帧轮询输入状态的游戏两者都看不到
+    for index in 0..clicks {
+        send(&[mouse_input(down)])?;
+        std::thread::sleep(Duration::from_millis(50));
+        send(&[mouse_input(up)])?;
+        if index + 1 < clicks {
+            std::thread::sleep(Duration::from_millis(60));
+        }
+    }
     let times = match clicks {
         1 => "单击",
         2 => "双击",
@@ -485,9 +518,8 @@ fn snapshot() -> String {
     out
 }
 
-fn screenshot() -> Result<String, String> {
-    let screen = virtual_screen();
-    let (width, height) = (screen.width.max(1) as u32, screen.height.max(1) as u32);
+/// 截取屏幕区域，返回 GetDIBits 的 24 位 BGR 像素（自下而上，行宽按 4 字节对齐）
+fn capture_region(left: i32, top: i32, width: u32, height: u32) -> Result<Vec<u8>, String> {
     let stride = bmp::row_stride(width);
     let mut pixels = vec![0u8; stride * height as usize];
     unsafe {
@@ -498,7 +530,7 @@ fn screenshot() -> Result<String, String> {
         let mem_dc = CreateCompatibleDC(screen_dc);
         let bitmap = CreateCompatibleBitmap(screen_dc, width as i32, height as i32);
         let previous = SelectObject(mem_dc, bitmap);
-        let copied = BitBlt(mem_dc, 0, 0, width as i32, height as i32, screen_dc, screen.left, screen.top, SRCCOPY | CAPTUREBLT);
+        let copied = BitBlt(mem_dc, 0, 0, width as i32, height as i32, screen_dc, left, top, SRCCOPY | CAPTUREBLT);
         // GetDIBits 要求位图未被选入任何 DC
         SelectObject(mem_dc, previous);
         let mut info: BITMAPINFO = std::mem::zeroed();
@@ -523,6 +555,13 @@ fn screenshot() -> Result<String, String> {
             return Err("截取屏幕失败".to_string());
         }
     }
+    Ok(pixels)
+}
+
+fn screenshot() -> Result<String, String> {
+    let screen = virtual_screen();
+    let (width, height) = (screen.width.max(1) as u32, screen.height.max(1) as u32);
+    let pixels = capture_region(screen.left, screen.top, width, height)?;
     let data = bmp::encode_bmp(width, height, &pixels)?;
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -531,4 +570,37 @@ fn screenshot() -> Result<String, String> {
     let path = std::env::temp_dir().join(format!("yachiyo-screenshot-{}.bmp", stamp));
     std::fs::write(&path, data).map_err(|e| format!("保存截图失败: {}", e))?;
     Ok(format!("已截取整个桌面（{}x{}），保存到 {}", width, height, path.display()))
+}
+
+/// 截取画面交给模型查看：缩放到长边 1280 以内并记录换算关系，click 的 image_x/image_y 据此换回屏幕坐标
+fn look(window: bool) -> Result<String, String> {
+    let screen = virtual_screen();
+    let mut region = (screen.left, screen.top, screen.left + screen.width, screen.top + screen.height);
+    let mut label = "整个屏幕".to_string();
+    if window {
+        let hwnd = unsafe { GetForegroundWindow() };
+        let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        // 前台是八千代自身时截它没有意义，退回整个屏幕
+        if !hwnd.is_null() && !is_own_window(hwnd) && unsafe { GetWindowRect(hwnd, &mut rect) } != 0 {
+            let clipped = (rect.left.max(region.0), rect.top.max(region.1), rect.right.min(region.2), rect.bottom.min(region.3));
+            if clipped.2 - clipped.0 >= 16 && clipped.3 - clipped.1 >= 16 {
+                region = clipped;
+                label = format!("前台窗口「{}」", window_title(hwnd));
+            }
+        }
+    }
+    let (left, top, right, bottom) = region;
+    let (width, height) = ((right - left).max(1) as u32, (bottom - top).max(1) as u32);
+    let pixels = capture_region(left, top, width, height)?;
+    let (image_width, image_height) = vision::fit_size(width, height, vision::MAX_IMAGE_EDGE);
+    let rgb = vision::downscale_bgr_bottom_up(&pixels, width, height, bmp::row_stride(width), (image_width, image_height));
+    let png = vision::encode_png(&rgb, image_width, image_height)?;
+    vision::remember_capture(CaptureMapping { left, top, width, height, image_width, image_height });
+    Ok(vision::attach_image(
+        &vision::png_data_url(&png),
+        &format!(
+            "已截取{}，图片 {}x{} 像素，对应屏幕区域 ({}, {}) - ({}, {})。要点击图中位置时，把图上的像素坐标作为 click 的 image_x / image_y 传入，系统会换算成屏幕坐标。",
+            label, image_width, image_height, left, top, right - 1, bottom - 1
+        ),
+    ))
 }

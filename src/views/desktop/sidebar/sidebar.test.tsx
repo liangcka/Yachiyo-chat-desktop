@@ -128,9 +128,9 @@ describe("DesktopSidebar & Submodules", () => {
       />,
     );
 
-    // 点击重命名按钮进入编辑态
-    const renameBtn = screen.getByTitle("重命名");
-    await user.click(renameBtn);
+    // 从操作菜单进入编辑态
+    await user.click(screen.getByRole("button", { name: "对话操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "重命名" }));
 
     const input = screen.getByLabelText("重命名");
     expect(input).toBeInTheDocument();
@@ -161,12 +161,73 @@ describe("DesktopSidebar & Submodules", () => {
       />,
     );
 
-    // 点击置顶按钮
-    const pinBtns = screen.getAllByTitle("置顶会话");
-    expect(pinBtns.length).toBeGreaterThan(0);
-    await user.click(pinBtns[0]);
+    // 从操作菜单置顶
+    await user.click(screen.getAllByRole("button", { name: "对话操作" })[0]!);
+    await user.click(screen.getByRole("menuitem", { name: "置顶会话" }));
 
     expect(onTogglePin).toHaveBeenCalled();
+  });
+
+  it("archives from the item menu and lists archived conversations in a collapsed group", async () => {
+    const user = userEvent.setup();
+    const onArchive = vi.fn(async () => undefined);
+    const archivedConversation = { ...mockConversations[1]!, archivedAt: 100 };
+    render(
+      <DesktopSidebar
+        activeRightTab="none"
+        conversations={[mockConversations[0]!, archivedConversation]}
+        copy={copy}
+        locale="zh-CN"
+        onArchiveConversation={onArchive}
+        onDeleteConversation={vi.fn()}
+        onNewChat={vi.fn()}
+        onRenameConversation={vi.fn()}
+        onSelectConversation={vi.fn()}
+        onSelectRightTab={vi.fn()}
+        runningConversations={new Map([[mockConversations[0]!.id, "approval" as const]])}
+      />,
+    );
+
+    const history = screen.getByRole("region", { name: "对话" });
+    expect(within(history).queryByText(archivedConversation.title)).not.toBeInTheDocument();
+    expect(within(history).getByRole("status", { name: "等待确认" })).toBeInTheDocument();
+
+    await user.click(within(history).getByRole("button", { name: "对话操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "归档" }));
+    expect(onArchive).toHaveBeenCalledWith(mockConversations[0]!.id, true);
+
+    const archive = screen.getByRole("region", { name: "已归档" });
+    await user.click(within(archive).getByRole("button", { name: /已归档/ }));
+    expect(within(archive).getByText(archivedConversation.title)).toBeInTheDocument();
+    await user.click(within(archive).getByRole("button", { name: "对话操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "取消归档" }));
+    expect(onArchive).toHaveBeenCalledWith(archivedConversation.id, false);
+  });
+
+  it("asks for in-app confirmation before deleting", async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn(async () => undefined);
+    render(
+      <SidebarConversationItem
+        active={false}
+        conversation={mockConversations[0]!}
+        copy={copy}
+        onDelete={onDelete}
+        onRename={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "对话操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "删除" }));
+    const dialog = screen.getByRole("alertdialog", { name: "确定删除这段对话吗？" });
+    await user.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "对话操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "删除" }));
+    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "删除" }));
+    expect(onDelete).toHaveBeenCalledWith(mockConversations[0]!.id);
   });
 
   it("opens user popover from sidebar footer and triggers account, theme, locale, settings and signout", async () => {

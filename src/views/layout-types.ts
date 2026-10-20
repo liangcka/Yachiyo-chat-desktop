@@ -32,6 +32,7 @@ export interface SharedViewProps {
   onNewChat: () => Promise<void>;
   onRename: (id: string, title: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onArchive?: (id: string, archived: boolean) => Promise<void>;
   onClearData: () => Promise<void>;
   onLocale: (locale: Locale) => Promise<void>;
   onSignOut: () => Promise<void>;

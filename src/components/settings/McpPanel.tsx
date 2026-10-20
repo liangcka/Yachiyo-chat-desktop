@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
+import { ConfirmDialog } from "../ConfirmDialog";
 import type { Locale } from "../../domain/chat";
 import { useLocale } from "../../i18n/locale-context";
 import {
@@ -72,6 +73,7 @@ const zhCopy = {
   disabled: (id: string) => `服务「${id}」已禁用`,
   toggleFailed: (id: string) => `更新服务「${id}」状态失败`,
   confirmDelete: (name: string) => `确认删除 MCP 服务「${name}」吗？`,
+  confirmDeleteAction: "删除",
   deleted: (name: string) => `服务「${name}」已删除`,
   deleteFailed: (id: string) => `删除服务「${id}」失败`,
   connected: (count: number) => `连接成功！发现 ${count} 个工具`,
@@ -157,6 +159,7 @@ const jaCopy: McpCopy = {
   disabled: (id) => `サーバー「${id}」を無効にしました`,
   toggleFailed: (id) => `サーバー「${id}」の状態を更新できませんでした`,
   confirmDelete: (name) => `MCP サーバー「${name}」を削除しますか？`,
+  confirmDeleteAction: "削除",
   deleted: (name) => `サーバー「${name}」を削除しました`,
   deleteFailed: (id) => `サーバー「${id}」を削除できませんでした`,
   connected: (count) => `接続に成功しました。ツールが ${count} 個見つかりました`,
@@ -245,6 +248,7 @@ export const McpPanel: React.FC<McpPanelProps> = ({ showToast }) => {
   const locale = useLocale();
   const labels = MCP_COPY[locale];
   const [servers, setServers] = useState<McpServerConfig[]>([]);
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string }>();
   const [loading, setLoading] = useState<boolean>(true);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [expandedServerId, setExpandedServerId] = useState<string | null>(null);
@@ -320,10 +324,10 @@ export const McpPanel: React.FC<McpPanelProps> = ({ showToast }) => {
     }
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (!window.confirm(labels.confirmDelete(name || id))) {
-      return;
-    }
+  const handleDelete = (id: string, name: string) => setPendingDelete({ id, name });
+
+  const confirmDelete = async (id: string, name: string) => {
+    setPendingDelete(undefined);
     const ok = await deleteMcpServer(id);
     if (ok) {
       setServers((prev) => prev.filter((s) => s.id !== id));
@@ -1411,6 +1415,18 @@ export const McpPanel: React.FC<McpPanelProps> = ({ showToast }) => {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingDelete !== undefined}
+        title={pendingDelete !== undefined ? labels.confirmDelete(pendingDelete.name || pendingDelete.id) : ""}
+        confirmLabel={labels.confirmDeleteAction}
+        cancelLabel={labels.cancel}
+        danger
+        onCancel={() => setPendingDelete(undefined)}
+        onConfirm={() => {
+          if (pendingDelete !== undefined) void confirmDelete(pendingDelete.id, pendingDelete.name);
+        }}
+      />
     </div>
   );
 };

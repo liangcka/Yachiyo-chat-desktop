@@ -61,6 +61,9 @@ pub struct AgentRequestConfig {
     /// 旧 auto 仅控制工具选择，不构成跳过审批的授权。
     #[serde(rename = "executionMode", default)]
     pub execution_mode: AgentExecutionMode,
+    /// 当前模型能接收图片；为真时才下发 look 截图工具，否则截图会让上游直接报错
+    #[serde(default)]
+    pub vision: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

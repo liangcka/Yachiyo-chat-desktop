@@ -5,4 +5,5 @@ pub mod permission;
 pub mod pruner;
 pub mod runtime;
 pub mod stream_agg;
+pub mod subagent;
 

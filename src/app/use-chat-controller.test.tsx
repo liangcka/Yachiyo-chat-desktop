@@ -517,7 +517,7 @@ describe("useChatController", () => {
     expect(repository.setConversationLocale).toHaveBeenCalledWith(conversation.id, "ja-JP");
   });
 
-  it("cancels a send that is still persisting before switching conversations", async () => {
+  it("keeps a run going in the background when a new conversation is created", async () => {
     const firstWrite = deferred();
     let writeCount = 0;
     const nextConversation = { ...conversation, id: "conversation-2", title: "新的对话 2" };
@@ -528,41 +528,106 @@ describe("useChatController", () => {
         if (writeCount === 1) await firstWrite.promise;
       }),
     });
-    const stream = vi.fn<StreamChatFunction>(async () => ({ truncated: false }));
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta("后台完成");
+      return { truncated: false };
+    });
+    const onBackgroundRunFinished = vi.fn();
     const { result } = renderHook(() =>
       useChatController({
         id: ids("user-1", "assistant-1", "new-greeting"),
         repository,
         streamChat: stream,
+        onBackgroundRunFinished,
       }),
     );
     await waitFor(() => expect(result.current.phase).toBe("idle"));
 
     let sendPromise = Promise.resolve();
     act(() => {
-      sendPromise = result.current.send("不要串到下一段对话");
+      sendPromise = result.current.send("切走以后也要继续");
     });
     await waitFor(() => expect(result.current.phase).toBe("streaming"));
+    expect(result.current.runningConversations.get(conversation.id)).toBe("streaming");
 
-    let switchPromise = Promise.resolve();
-    act(() => {
-      switchPromise = result.current.newConversation();
+    await act(async () => {
+      await result.current.newConversation();
     });
-    expect(repository.createConversation).not.toHaveBeenCalled();
+    // 新会话立即可用，原会话的运行没有被停止
+    expect(result.current.activeConversation?.id).toBe(nextConversation.id);
+    expect(result.current.phase).toBe("idle");
+    expect(result.current.runningConversations.has(conversation.id)).toBe(true);
 
     firstWrite.resolve();
     await act(async () => {
-      await Promise.all([sendPromise, switchPromise]);
+      await sendPromise;
     });
 
-    expect(stream).not.toHaveBeenCalled();
-    expect(result.current.activeConversation?.id).toBe(nextConversation.id);
+    expect(stream.mock.calls.filter(([request]) => request.mode === undefined)).toHaveLength(1);
     expect(result.current.messages).toEqual([]);
-    expect(vi.mocked(repository.putMessage).mock.calls.map(([message]) => message)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ conversationId: conversation.id, id: "user-1" }),
-        expect.objectContaining({ conversationId: conversation.id, id: "assistant-1", status: "stopped" }),
-      ]),
+    expect(result.current.runningConversations.size).toBe(0);
+    expect(onBackgroundRunFinished).toHaveBeenCalledWith(conversation.id, "complete");
+    const writes = vi.mocked(repository.putMessage).mock.calls.map(([message]) => message);
+    expect(writes.filter((message) => message.conversationId === nextConversation.id)).toHaveLength(0);
+    expect(writes.at(-1)).toEqual(
+      expect.objectContaining({ conversationId: conversation.id, id: "assistant-1", status: "complete", text: "后台完成" }),
+    );
+  });
+
+  it("reattaches live progress when switching back to a running conversation", async () => {
+    const otherConversation = { ...conversation, id: "conversation-2", title: "另一段对话" };
+    const finish = deferred<StreamChatResult>();
+    let streamOptions: StreamChatOptions | undefined;
+    const repository = repositoryWith({
+      getConversation: vi.fn(async (id: string) => (id === otherConversation.id ? otherConversation : conversation)),
+      listMessages: vi.fn(async () => []),
+    });
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      streamOptions = options;
+      options.onDelta("第一段");
+      return finish.promise;
+    });
+    const { result } = renderHook(() =>
+      useChatController({ id: ids("user-1", "assistant-1"), repository, streamChat: stream }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    act(() => {
+      void result.current.send("跑个长任务");
+    });
+    await waitFor(() => expect(stream).toHaveBeenCalled());
+
+    await act(async () => {
+      await result.current.selectConversation(otherConversation.id);
+    });
+    expect(result.current.activeConversation?.id).toBe(otherConversation.id);
+    // 后台增量与权限请求不会串进当前会话
+    act(() => {
+      streamOptions?.onDelta("第二段");
+      streamOptions?.onPermissionRequest?.({ requestId: "req-1", toolName: "run_command", arguments: {} });
+    });
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.pendingPermission).toBeUndefined();
+    expect(result.current.runningConversations.get(conversation.id)).toBe("approval");
+
+    await act(async () => {
+      await result.current.selectConversation(conversation.id);
+    });
+    expect(result.current.phase).toBe("streaming");
+    expect(result.current.messages.at(-1)).toEqual(
+      expect.objectContaining({ id: "assistant-1", status: "streaming", text: "第一段第二段" }),
+    );
+    expect(result.current.pendingPermission).toEqual(expect.objectContaining({ requestId: "req-1" }));
+
+    await act(async () => {
+      streamOptions?.onPermissionResolved?.({ requestId: "req-1", approved: true });
+      streamOptions?.onDelta("第三段");
+      finish.resolve({ truncated: false });
+      await finish.promise;
+    });
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    expect(result.current.messages.at(-1)).toEqual(
+      expect.objectContaining({ id: "assistant-1", status: "complete", text: "第一段第二段第三段" }),
     );
   });
 
@@ -1268,7 +1333,7 @@ describe("useChatController", () => {
     expect(repository.updateConversationSummary).not.toHaveBeenCalled();
   });
 
-  it("terminates send without writing to new conversation if conversation is switched during compression", async () => {
+  it("finishes a send in the background when the conversation is switched during compression", async () => {
     const messages: ChatMessage[] = Array.from({ length: 20 }, (_, index) => ({
       conversationId: conversation.id,
       createdAt: 20 + index,
@@ -1309,17 +1374,23 @@ describe("useChatController", () => {
     });
     await waitFor(() => expect(result.current.phase).toBe("compressing"));
 
-    // User creates a new conversation while compression is in flight
+    // 压缩进行中用户新建会话：压缩与发送转入后台完成，消息只写回原会话
     await act(async () => {
       await result.current.newConversation();
+    });
+    expect(result.current.activeConversation?.id).toBe(nextConversation.id);
+    await act(async () => {
+      compressionDeferred.resolve({ truncated: false });
       await sendPromise.catch(() => undefined);
     });
 
     expect(result.current.activeConversation?.id).toBe(nextConversation.id);
     expect(result.current.messages).toEqual([]);
-    // Ensure the message wasn't saved into the new conversation
     const putCalls = vi.mocked(repository.putMessage).mock.calls.map(([msg]) => msg);
     expect(putCalls.filter((m) => m.conversationId === nextConversation.id)).toHaveLength(0);
+    expect(putCalls).toEqual(
+      expect.arrayContaining([expect.objectContaining({ conversationId: conversation.id, id: "user-new", text: "新发送的消息" })]),
+    );
   });
 
   it("accumulates thought deltas and records provider/model snapshot, usage and latencyMs", async () => {
