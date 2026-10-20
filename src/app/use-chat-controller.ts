@@ -1578,7 +1578,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           ...(loaded.hasMoreHistory ? { hasMoreHistory: true } : {}),
         });
       } catch {
-        emit({ errorCode: "CONVERSATION_LIMIT", type: "load-failed" });
+        emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
       }
     } finally {
       newConversationLockRef.current = false;

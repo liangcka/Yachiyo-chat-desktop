@@ -1,5 +1,6 @@
 use crate::crypto::keys::KeyStore;
 use crate::gateway::agent::checkpoint::CheckpointStore;
+use crate::gateway::providers::compat_vendor::CompatVendor;
 use crate::gateway::agent::loop_guard::{
     RepetitionDetector, ToolLoopDetector, ToolLoopVerdict, DONE_REASON_LOOP_DETECTED, REPETITION_LOOP_DETECTED,
     TOOL_LOOP_NUDGE,
@@ -460,7 +461,7 @@ impl TurnExecutor for HttpTurnExecutor {
             }
 
             let mut agg = crate::gateway::agent::stream_agg::ToolCallAggregator::new();
-            let mut native = NativeTurnCollector::for_protocol(protocol);
+            let mut native = NativeTurnCollector::for_protocol(protocol, CompatVendor::resolve(base_url.as_deref(), config.endpoint));
             let mut openai_parser = crate::gateway::stream::OpenAiDeltaParser::default();
             let mut full_text = String::new();
             let mut reasoning = String::new();
@@ -567,10 +568,15 @@ enum NativeTurnCollector {
     Anthropic(crate::gateway::providers::anthropic::AnthropicTurnCollector),
     Gemini(crate::gateway::providers::gemini::GeminiTurnCollector),
     Responses(crate::gateway::providers::openai_responses::ResponsesTurnCollector),
+    /// 方舟 Seed 2.1 起思考以加密块下发，流里单独一个 chunk 携带整串 encrypted_content
+    ArkEncrypted(Option<String>),
 }
 
 impl NativeTurnCollector {
-    fn for_protocol(protocol: WireProtocol) -> Self {
+    fn for_protocol(protocol: WireProtocol, vendor: Option<CompatVendor>) -> Self {
+        if protocol == WireProtocol::ChatCompletions && vendor == Some(CompatVendor::Ark) {
+            return Self::ArkEncrypted(None);
+        }
         match protocol {
             WireProtocol::Anthropic => Self::Anthropic(Default::default()),
             WireProtocol::Gemini => Self::Gemini(Default::default()),
@@ -585,6 +591,18 @@ impl NativeTurnCollector {
             Self::Anthropic(collector) => collector.push(data),
             Self::Gemini(collector) => collector.push(data),
             Self::Responses(collector) => collector.push(data),
+            Self::ArkEncrypted(encrypted) => {
+                let found = serde_json::from_str::<serde_json::Value>(data).ok().and_then(|chunk| {
+                    chunk
+                        .pointer("/choices/0/delta/encrypted_content")
+                        .and_then(|value| value.as_str())
+                        .filter(|text| !text.is_empty())
+                        .map(str::to_string)
+                });
+                if found.is_some() {
+                    *encrypted = found;
+                }
+            }
         }
     }
 
@@ -598,6 +616,10 @@ impl NativeTurnCollector {
             Self::Anthropic(collector) => Ok(collector.finish()),
             Self::Gemini(collector) => Ok((collector.finish(), agg.finish())),
             Self::Responses(collector) => Ok((collector.finish()?, agg.finish())),
+            Self::ArkEncrypted(encrypted) => Ok((
+                encrypted.map(|text| vec![serde_json::json!({ "encrypted_content": text })]).unwrap_or_default(),
+                agg.finish(),
+            )),
         }
     }
 }

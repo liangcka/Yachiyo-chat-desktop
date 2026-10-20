@@ -1309,3 +1309,42 @@ async fn test_idle_agent_stream_emits_heartbeats_without_dropping_events() {
     drop(tx);
     assert!(next_emit_or_heartbeat(&mut rx, &mut heartbeat).await.is_none());
 }
+
+#[test]
+fn test_ark_agent_body_replays_encrypted_thinking_within_the_run() {
+    let call = ToolInvocation { id: "call-1".to_string(), name: "read_file".to_string(), arguments: serde_json::json!({ "path": "a.rs" }) };
+    let messages = vec![
+        AgentMessage::User { text: "读 a.rs".to_string(), image_data_url: None },
+        AgentMessage::Assistant { text: String::new(), reasoning: "思考摘要".to_string(), tool_calls: vec![call.clone()], native: vec![serde_json::json!({ "encrypted_content": "密文-abc" })] },
+        AgentMessage::ToolResult { tool_call_id: "call-1".to_string(), name: "read_file".to_string(), content: "内容".to_string() },
+    ];
+    let ark = build_openai_agent_body(ProviderId::Openai, Some("https://ark.cn-beijing.volces.com/api/v3"), "doubao-seed-2-1-pro-260915", &messages, "系统提示", &[]);
+    assert_eq!(ark["messages"][2]["encrypted_content"], "密文-abc");
+    assert_eq!(ark["messages"][2]["reasoning_content"], "思考摘要");
+
+    // 其他厂商不带加密块；客户端重放的历史没有 native，也不带
+    let other = build_openai_agent_body(ProviderId::Openai, Some("https://api.moonshot.cn/v1"), "kimi-k3", &messages, "系统提示", &[]);
+    assert!(other["messages"][2].get("encrypted_content").is_none());
+    let replayed = vec![
+        AgentMessage::User { text: "x".to_string(), image_data_url: None },
+        AgentMessage::Assistant { text: String::new(), reasoning: String::new(), tool_calls: vec![call], native: Vec::new() },
+    ];
+    let body = build_openai_agent_body(ProviderId::Openai, Some("https://ark.cn-beijing.volces.com/api/v3"), "doubao-seed-2-1-pro-260915", &replayed, "系统提示", &[]);
+    assert!(body["messages"][2].get("encrypted_content").is_none());
+}
+
+#[test]
+fn test_hunyuan_and_qianfan_agent_bodies_replay_non_empty_reasoning() {
+    let call = ToolInvocation { id: "call-1".to_string(), name: "read_file".to_string(), arguments: serde_json::json!({}) };
+    let messages = vec![
+        AgentMessage::User { text: "读".to_string(), image_data_url: None },
+        AgentMessage::Assistant { text: String::new(), reasoning: "需要读取".to_string(), tool_calls: vec![call.clone()], native: Vec::new() },
+        AgentMessage::ToolResult { tool_call_id: "call-1".to_string(), name: "read_file".to_string(), content: "内容".to_string() },
+        AgentMessage::Assistant { text: String::new(), reasoning: String::new(), tool_calls: vec![call], native: Vec::new() },
+    ];
+    for (url, model) in [("https://tokenhub.tencentmaas.com/v1", "hy3"), ("https://qianfan.baidubce.com/v2", "ernie-5.1")] {
+        let body = build_openai_agent_body(ProviderId::Openai, Some(url), model, &messages, "系统提示", &[]);
+        assert_eq!(body["messages"][2]["reasoning_content"], "需要读取", "{model}");
+        assert!(body["messages"][4].get("reasoning_content").is_none(), "{model}");
+    }
+}

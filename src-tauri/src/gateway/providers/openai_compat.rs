@@ -156,6 +156,16 @@ pub fn build_openai_agent_body(
         }
         _ => {}
     };
+    // 方舟 Seed 2.1 起思考为加密块，随 assistant 消息原样回传（同时带 reasoning_content 时以加密块为准）；
+    // 加密块与产出它的模型绑定，只在同一运行内存在
+    let ark = vendor == Some(CompatVendor::Ark);
+    let encrypted_field = |message: &mut serde_json::Value, native: &[serde_json::Value]| {
+        if let Some(text) = native.iter().find_map(|item| item.get("encrypted_content")) {
+            if ark {
+                message["encrypted_content"] = text.clone();
+            }
+        }
+    };
     let mut out = vec![json!({ "role": "system", "content": system_prompt })];
     for msg in messages {
         match msg {
@@ -172,11 +182,12 @@ pub fn build_openai_agent_body(
                     out.push(json!({ "role": "user", "content": text }));
                 }
             }
-            AgentMessage::Assistant { text, reasoning, tool_calls, .. } => {
+            AgentMessage::Assistant { text, reasoning, tool_calls, native } => {
                 if tool_calls.is_empty() {
                     if !text.is_empty() {
                         let mut message = json!({ "role": "assistant", "content": text });
                         reasoning_field(&mut message, reasoning);
+                        encrypted_field(&mut message, native);
                         out.push(message);
                     }
                     continue;
@@ -197,6 +208,7 @@ pub fn build_openai_agent_body(
                     "tool_calls": calls
                 });
                 reasoning_field(&mut message, reasoning);
+                encrypted_field(&mut message, native);
                 out.push(message);
             }
             AgentMessage::ToolResult { tool_call_id, content, .. } => {

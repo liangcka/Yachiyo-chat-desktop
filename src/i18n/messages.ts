@@ -53,7 +53,6 @@ export interface UiCopy {
   readonly imageTooLarge: string;
   readonly storageFull: string;
   readonly exitHint: string;
-  readonly conversationLimit: string;
   readonly truncated: string;
   readonly loopStopped: string;
   readonly llmSettings: string;
@@ -223,7 +222,6 @@ const chinese = Object.freeze({
   imageTooLarge: "图片太大，请换一张试试。",
   storageFull: "本地空间不足，请先清理历史记录。",
   exitHint: "再按一次返回键退出",
-  conversationLimit: "本地最多保留 30 段对话，请先删除一段。",
   truncated: "回复太长，已截断显示。",
   loopStopped: "检测到重复循环，已自动停止。",
   llmSettings: "LLM 设置",
@@ -393,7 +391,6 @@ const japanese = Object.freeze({
   imageTooLarge: "画像が大きすぎます。別の画像を試してください。",
   storageFull: "端末の空き容量が足りません。履歴を整理してください。",
   exitHint: "もう一度戻ると終了します",
-  conversationLimit: "会話は端末に30件まで保存できます。先に1件削除してください。",
   truncated: "返答が長すぎたため、途中まで表示しています。",
   loopStopped: "同じ処理の繰り返しを検知したため、自動で停止しました。",
   llmSettings: "LLM 設定",

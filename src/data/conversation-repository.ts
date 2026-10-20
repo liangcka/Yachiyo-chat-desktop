@@ -2,15 +2,6 @@ import Dexie from "dexie";
 import type { ChatMessage, Conversation, Locale, StoredImage } from "../domain/chat";
 import type { YachiyoDatabase } from "./db";
 
-const MAX_CONVERSATIONS = 30;
-
-export class ConversationLimitError extends Error {
-  constructor() {
-    super(`Only ${MAX_CONVERSATIONS} local conversations are supported.`);
-    this.name = "ConversationLimitError";
-  }
-}
-
 function defaultTitle(locale: Locale): string {
   return locale === "ja-JP" ? "新しい会話" : "新的对话";
 }
@@ -38,10 +29,6 @@ export class ConversationRepository {
 
   async createConversation(locale: Locale, now = Date.now()): Promise<Conversation> {
     return this.db.transaction("rw", this.db.conversations, async () => {
-      if ((await this.db.conversations.count()) >= MAX_CONVERSATIONS) {
-        throw new ConversationLimitError();
-      }
-
       const conversation: Conversation = {
         id: crypto.randomUUID(),
         title: defaultTitle(locale),

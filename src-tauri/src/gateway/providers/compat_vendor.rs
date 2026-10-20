@@ -255,6 +255,10 @@ pub fn reasoning_passback(vendor: Option<CompatVendor>, model: &str) -> Option<R
         Some(CompatVendor::Mimo) if model.starts_with("mimo-") => Some(ReasoningPassback::EveryAssistant),
         // Qwen3.x 工具轮次省略 reasoning_content 会降低准确率但不报错；Qwen3.8 默认保留式思考会读取回传的原文
         Some(CompatVendor::Dashscope) if model.starts_with("qwen3.") => Some(ReasoningPassback::NonEmpty),
+        // 方舟、混元、千帆：多轮工具调用回填同一轮的 reasoning_content 以延续推理，缺失不报错，只影响效果
+        Some(CompatVendor::Ark) if is_ark_hybrid(model) => Some(ReasoningPassback::NonEmpty),
+        Some(CompatVendor::Hunyuan) if model.starts_with("hy") => Some(ReasoningPassback::NonEmpty),
+        Some(CompatVendor::Qianfan) => Some(ReasoningPassback::NonEmpty),
         // GLM 保留式思考要求按原顺序回传未修改的 reasoning_content，但不得为没有思维链的历史轮次补写空串
         Some(CompatVendor::Zhipu) if glm_preserves_thinking(model) => Some(ReasoningPassback::NonEmpty),
         // MiniMax 要求工具多轮原样带回思考字段以延续交错思考；缺失不报错，但推理链会中断

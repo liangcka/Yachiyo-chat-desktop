@@ -566,7 +566,7 @@ describe("App flows", () => {
     expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
   });
 
-  it("does not offer an AI retry when the conversation limit is reached", async () => {
+  it("does not offer an AI retry when a new conversation cannot be created", async () => {
     const user = userEvent.setup();
     const services = fakeServices();
     render(<App services={services} />);
@@ -577,12 +577,12 @@ describe("App flows", () => {
     await screen.findAllByText("现有对话内容");
 
     vi.spyOn(services.repository, "createConversation").mockRejectedValue(
-      new Error("conversation limit reached"),
+      new Error("storage unavailable"),
     );
 
     await user.click(screen.getByTitle("新建对话 (Ctrl+N)"));
 
-    expect((await screen.findAllByText("本地最多保留 30 段对话，请先删除一段。")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("本地空间不足，请先清理历史记录。")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
   });
 

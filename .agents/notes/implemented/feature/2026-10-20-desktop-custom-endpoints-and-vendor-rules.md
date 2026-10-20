@@ -31,20 +31,18 @@ Status: implemented
 | ---- | ---- | ---- | ---- |
 | Kimi | K2.6 `thinking.disabled`；K3 `reasoning_effort: low` | K3 `reasoning_effort: low` | 每条 assistant 消息都带 `reasoning_content`，缺失补空串 |
 | 百炼 | 混合思考型号 `enable_thinking: false` | Qwen3.8 `reasoning_effort: low` | 非空时回传 |
-| 火山方舟、BytePlus | 已确认的混合思考 Seed 型号 `thinking.disabled`（不带强度字段） | Seed 2.1 Pro/Turbo、Evolving `reasoning_effort: low` | 不回传（见下） |
+| 火山方舟、BytePlus | 已确认的混合思考 Seed 型号 `thinking.disabled`（不带强度字段） | Seed 2.1 Pro/Turbo、Evolving `reasoning_effort: low` | `reasoning_content` 非空时回传，并带上本运行内收集的 `encrypted_content` 加密块 |
 | MiniMax | M3 `reasoning_split` 加 `thinking.disabled`；M3.1 Flash `reasoning_effort: low` | 同左（M3 不关思考） | M3/M2 重建为 `reasoning_details` 数组，M3.1 Flash 回传 `reasoning_content` |
 | 小米 MiMo | `thinking.disabled` | 不改动 | 每条 assistant 消息都带 `reasoning_content`（工具轮缺失会 400） |
-| 腾讯 TokenHub | hy3、hy4 `thinking.disabled` | hy3 `reasoning_effort: low` | 不回传（官方未要求） |
-| 百度千帆 | `ernie-5.0-thinking-preview` 的 `enable_thinking: false` | 不改动 | 不回传（官方未要求） |
+| 腾讯 TokenHub | hy3、hy4 `thinking.disabled` | hy3 `reasoning_effort: low` | 非空时回传 |
+| 百度千帆 | `ernie-5.0-thinking-preview` 的 `enable_thinking: false` | 不改动 | 非空时回传 |
 | 智谱 BigModel、Z.ai | GLM-5.2/5.3 `reasoning_effort: low`（5.3 强制思考，不能 disabled） | 同左 | GLM-4.7 起 Agent 请求 `thinking: enabled, clear_thinking: false`，非空时回传 |
 
 型号匹配刻意保守：仅思考的 preview 或早期快照（如 `qwen3.8-max-preview`）传 `enable_thinking: false` 会 400，TokenHub 同时托管强制思考的 GLM-5.3、方舟同时托管强制思考的第三方模型，规则只对各家自有的已确认型号生效。方舟在 `thinking.type` 为 `disabled` 时只允许 `reasoning_effort: minimal`，因此关闭思考时不再带强度字段。
 
-**刻意没有做的**：
+**回传属于“尽力而为”**：方舟、混元、千帆的官方文档都说明不回传不会报错，只影响多轮工具调用的推理连续性与缓存命中，请求侧字段的位置部分只能由“整条 assistant 消息原样回传”推断，没有拿到官方示例。方舟的 `encrypted_content` 取自流里单独下发的整串加密块，只在同一运行内回传（加密块与产出它的模型绑定），客户端重放的历史不带。若上游因这些字段返回 400，应去掉对应回传规则。
 
-- **方舟 `encrypted_content` 回传**：Seed 2.1 默认返回加密思考块，官方说明不回传不会报错，但会影响多轮工具调用的推理连续性与缓存命中。请求侧字段的位置只能从“整条 assistant 消息原样回传”推断，没有拿到官方示例，实现错误会触发 `Invalid signature` 而让原本可用的 Agent 失败，收益不抵风险。
-- **混元、千帆的 `reasoning_content` 回传**：官方文档只演示读取，没有要求回传，千帆对未知字段是否严格拒绝也没有核实；没有必要性证据又存在触发 400 的风险，因此不发。
-- **MiMo Agent 关闭思考**：官方 FAQ 建议工具调用时关闭思考以免输出不稳定，但思考加工具的回传语义同样有官方说明，这里保留思考并按要求回传，避免牺牲 Agent 的推理质量；如果实际使用中工具参数出现混入 `reasoning_content` 的情况，再改为 Agent 请求关闭思考。
+**MiMo Agent 保留思考**：官方 FAQ 建议工具调用时关闭思考以免输出不稳定，但思考加工具的回传语义同样有官方说明，这里保留思考并按要求回传；如果实际使用中工具参数出现混入 `reasoning_content` 的情况，再改为 Agent 请求关闭思考。
 
 ### 流解析
 
