@@ -38,6 +38,7 @@ export interface SharedViewProps {
   onLlmSave: (provider: ProviderId, apiKey: string, model: string) => Promise<void>;
   onLlmClear: (provider: ProviderId) => Promise<void>;
   onLlmActivate: (provider: ProviderId) => Promise<void>;
+  onLlmSetEnabled: (provider: ProviderId, enabled: boolean) => Promise<void>;
   onSkillToggle: (id: string, next: boolean) => Promise<void>;
   onWebSearchSettingsChange: (partial: Partial<WebSearchSettings>) => void;
   showToast: (message: string, tone?: "info" | "error") => void;

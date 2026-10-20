@@ -34,6 +34,7 @@ export interface LlmProviderEntry {
   apiKey: string;
   model: string;
   baseUrl?: string;
+  disabled?: boolean;
 }
 
 export interface LlmSettingsPanelProps {
@@ -45,6 +46,7 @@ export interface LlmSettingsPanelProps {
   onSave: (provider: ProviderId, apiKey: string, model: string, baseUrl?: string) => Promise<void>;
   onClear: (provider: ProviderId) => Promise<void>;
   onActivate: (provider: ProviderId) => Promise<void>;
+  onSetEnabled: (provider: ProviderId, enabled: boolean) => Promise<void>;
 }
 
 const zhCopy = {
@@ -73,8 +75,9 @@ const zhCopy = {
   editLabel: (name: string) => `编辑 ${name}`,
   deleteTitle: "清空或删除此模型",
   deleteLabel: (name: string) => `删除 ${name}`,
-  activeTitle: "当前已启用",
-  activateTitle: "点击设为当前使用模型",
+  enabledTitle: "已启用，可在聊天区切换使用",
+  enableTitle: "点击启用",
+  currentTag: "当前使用",
   toggleLabel: (name: string) => `切换启用 ${name}`,
   closeAddBackdrop: "关闭添加模型遮罩",
   closeAdd: "关闭添加模型弹窗",
@@ -131,9 +134,10 @@ const jaCopy: PanelCopy = {
   editLabel: (name) => `${name} を編集`,
   deleteTitle: "このモデルを削除",
   deleteLabel: (name) => `${name} を削除`,
-  activeTitle: "使用中",
-  activateTitle: "クリックして使用中のモデルにする",
-  toggleLabel: (name) => `${name} の使用を切り替え`,
+  enabledTitle: "有効（チャット画面で切り替えて使用できます）",
+  enableTitle: "クリックして有効化",
+  currentTag: "使用中",
+  toggleLabel: (name) => `${name} の有効化を切り替え`,
   closeAddBackdrop: "モデル追加の背景を閉じる",
   closeAdd: "モデル追加ダイアログを閉じる",
   customModel: "カスタムモデル",
@@ -182,6 +186,7 @@ export function LlmSettingsPanel({
   onSave,
   onClear,
   onActivate,
+  onSetEnabled,
 }: LlmSettingsPanelProps) {
   const t = PANEL_COPY[useLocale()];
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -327,12 +332,8 @@ export function LlmSettingsPanel({
     setModalMode(null);
   };
 
-  const handleToggleActivate = (providerId: ProviderId) => {
-    if (activeProvider === providerId) {
-      /* 已是当前激活，无需重复操作 */
-      return;
-    }
-    void runAction(() => onActivate(providerId), copy.llmSaved);
+  const handleToggleEnabled = (providerId: ProviderId, enabled: boolean) => {
+    void runAction(() => onSetEnabled(providerId, enabled), copy.llmSaved);
   };
 
   const handleClearEntry = (providerId: ProviderId) => {
@@ -354,6 +355,7 @@ export function LlmSettingsPanel({
     providerId: ProviderId;
     baseUrl?: string;
     isActive: boolean;
+    isEnabled: boolean;
   }> = entries.map((entry) => ({
     id: `row-${entry.provider}`,
     modelName: entry.model || getProviderMeta(entry.provider).defaultModel,
@@ -361,6 +363,7 @@ export function LlmSettingsPanel({
     providerId: entry.provider,
     ...(entry.baseUrl !== undefined ? { baseUrl: entry.baseUrl } : {}),
     isActive: activeProvider === entry.provider,
+    isEnabled: entry.disabled !== true,
   }));
 
   const currentMeta = getProviderMeta(selectedProvider);
@@ -532,6 +535,9 @@ export function LlmSettingsPanel({
                           {t.customEndpoint}
                         </span>
                       )}
+                      {row.isActive && (
+                        <span className="model-tag-pill model-tag-pill--active model-mgmt-endpoint-pill">{t.currentTag}</span>
+                      )}
                     </div>
                   </td>
                   <td className="model-mgmt-cell model-mgmt-cell--vendor">
@@ -562,10 +568,11 @@ export function LlmSettingsPanel({
                       <button
                         type="button"
                         role="switch"
-                        aria-checked={row.isActive}
-                        className={`settings-toggle-switch ${row.isActive ? "settings-toggle-switch--active" : ""}`}
-                        onClick={() => handleToggleActivate(row.providerId)}
-                        title={row.isActive ? t.activeTitle : t.activateTitle}
+                        aria-checked={row.isEnabled}
+                        disabled={busy}
+                        className={`settings-toggle-switch ${row.isEnabled ? "settings-toggle-switch--active" : ""}`}
+                        onClick={() => handleToggleEnabled(row.providerId, !row.isEnabled)}
+                        title={row.isEnabled ? t.enabledTitle : t.enableTitle}
                         aria-label={t.toggleLabel(row.modelName)}
                       >
                         <span className="settings-toggle-knob" />

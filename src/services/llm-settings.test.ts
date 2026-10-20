@@ -161,6 +161,28 @@ describe("LlmSettingsService", () => {
     expect(await service.list()).toHaveLength(1);
   });
 
+  it("keeps several providers enabled and only moves the active pointer when needed", async () => {
+    await service.saveProvider("openai", VALID_KEY, "gpt-5.6-luna");
+    await service.saveProvider("claude", VALID_KEY, "claude-sonnet-5");
+
+    await service.setEnabled("claude", false);
+    expect((await service.get("claude"))?.disabled).toBe(true);
+    expect(await service.getActiveProvider()).toBe("openai");
+
+    await service.setEnabled("claude", true);
+    expect((await service.get("claude"))?.disabled).toBeUndefined();
+    expect(await service.getActiveProvider()).toBe("openai");
+
+    await service.setEnabled("openai", false);
+    expect(await service.getActiveProvider()).toBe("claude");
+
+    await service.setEnabled("claude", false);
+    expect(await service.getActiveProvider()).toBeUndefined();
+
+    await service.setEnabled("openai", true);
+    expect(await service.getActiveProvider()).toBe("openai");
+  });
+
   it("clearAll wipes every provider and the active pointer", async () => {
     await service.saveProvider("openai", VALID_KEY, "gpt-5.6-luna");
     await service.saveProvider("glm", VALID_KEY, "glm-4.7-flash");

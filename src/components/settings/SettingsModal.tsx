@@ -840,6 +840,7 @@ export function SettingsModal({
                 onClear={shared.onLlmClear}
                 onClose={onClose}
                 onSave={shared.onLlmSave}
+                onSetEnabled={shared.onLlmSetEnabled}
                 open={true}
               />
             </div>

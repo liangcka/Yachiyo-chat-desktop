@@ -17,6 +17,7 @@ function mount(overrides: Partial<Parameters<typeof LlmSettingsPanel>[0]> = {}) 
     onSave: vi.fn(async () => undefined),
     onClear: vi.fn(async () => undefined),
     onActivate: vi.fn(async () => undefined),
+    onSetEnabled: vi.fn(async () => undefined),
     ...overrides,
   };
   return render(<LlmSettingsPanel {...props} />);
@@ -240,19 +241,31 @@ describe("LlmSettingsPanel", () => {
     expect(screen.getByText("配置 DeepSeek")).toBeInTheDocument();
   });
 
-  it("toggles activate model via switch in table", async () => {
+  it("enables several models at once via the table switches", async () => {
     const user = userEvent.setup();
+    const onSetEnabled = vi.fn(async () => undefined);
     const onActivate = vi.fn(async () => undefined);
     mount({
       activeProvider: "openai",
-      entries: [{ provider: "deepseek", apiKey: VALID_KEY, model: "deepseek-v4-flash" }],
+      entries: [
+        { provider: "openai", apiKey: VALID_KEY, model: "gpt-5" },
+        { provider: "deepseek", apiKey: VALID_KEY, model: "deepseek-v4-flash", disabled: true },
+      ],
+      onSetEnabled,
       onActivate,
     });
 
-    const toggleBtn = screen.getByLabelText("切换启用 deepseek-v4-flash");
-    await user.click(toggleBtn);
+    expect(screen.getByLabelText("切换启用 gpt-5")).toHaveAttribute("aria-checked", "true");
+    const deepseekSwitch = screen.getByLabelText("切换启用 deepseek-v4-flash");
+    expect(deepseekSwitch).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("当前使用")).toBeInTheDocument();
 
-    expect(onActivate).toHaveBeenCalledWith("deepseek");
+    await user.click(deepseekSwitch);
+    expect(onSetEnabled).toHaveBeenCalledWith("deepseek", true);
+    expect(onActivate).not.toHaveBeenCalled();
+
+    await user.click(screen.getByLabelText("切换启用 gpt-5"));
+    expect(onSetEnabled).toHaveBeenCalledWith("openai", false);
   });
 
   it("calls onClear when deleting a configured model from table", async () => {

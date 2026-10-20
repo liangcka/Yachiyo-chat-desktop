@@ -84,6 +84,44 @@ export class LlmSettingsService {
     };
   }
 
+  /**
+   * 切换某厂商的启用状态，多家可同时启用。
+   * 停用当前使用的厂商时，自动切到最近更新的另一家已启用厂商（没有则清空激活指针）；
+   * 启用时若尚无激活厂商，则直接设为当前使用。
+   */
+  async setEnabled(provider: ProviderId, enabled: boolean): Promise<void> {
+    await this.db.transaction("rw", this.db.llmSettings, this.db.settings, async () => {
+      const record = await this.db.llmSettings.get(provider);
+      if (record === undefined) return;
+      await this.db.llmSettings.put({
+        provider,
+        apiKey: record.apiKey,
+        model: record.model,
+        updatedAt: record.updatedAt,
+        ...(record.baseUrl !== undefined ? { baseUrl: record.baseUrl } : {}),
+        ...(enabled ? {} : { disabled: true }),
+      });
+
+      const activeValue = (await this.db.settings.get(ACTIVE_PROVIDER_KEY))?.value;
+      const active = isProviderId(activeValue) ? activeValue : undefined;
+      if (enabled) {
+        if (active === undefined) {
+          await this.db.settings.put({ key: ACTIVE_PROVIDER_KEY, value: provider });
+        }
+        return;
+      }
+      if (active !== provider) return;
+      const fallback = (await this.db.llmSettings.toArray())
+        .filter((item) => item.provider !== provider && item.disabled !== true)
+        .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+      if (fallback === undefined) {
+        await this.db.settings.delete(ACTIVE_PROVIDER_KEY);
+      } else {
+        await this.db.settings.put({ key: ACTIVE_PROVIDER_KEY, value: fallback.provider });
+      }
+    });
+  }
+
   /** 清除所有厂商配置与激活指针（供“清除本地数据”调用） */
   async clearAll(): Promise<void> {
     await this.db.transaction("rw", this.db.llmSettings, this.db.settings, async () => {

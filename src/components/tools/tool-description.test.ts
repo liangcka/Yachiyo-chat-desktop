@@ -41,6 +41,11 @@ describe("formatToolDescription", () => {
       expect(formatToolDescription("web_fetch", {}, "zh-CN")).toBe("抓取网页");
     });
 
+    it("正确映射 web_search 并展示关键词", () => {
+      expect(formatToolDescription("web_search", { query: "Tauri 2 发布" }, "zh-CN")).toBe("联网搜索「Tauri 2 发布」");
+      expect(formatToolDescription("web_search", {}, "zh-CN")).toBe("联网搜索");
+    });
+
     it("正确映射 git_status 和 git_diff", () => {
       expect(formatToolDescription("git_status", {}, "zh-CN")).toBe("查看 Git 状态");
       expect(formatToolDescription("git_diff", {}, "zh-CN")).toBe("查看 Git 差异");

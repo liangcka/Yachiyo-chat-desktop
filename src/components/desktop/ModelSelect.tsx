@@ -6,7 +6,7 @@ import { useLocale } from "../../i18n/locale-context";
 export interface ModelSelectProps {
   activeProvider?: ProviderId;
   activeModel?: string;
-  entries: readonly { provider: ProviderId; apiKey: string; model: string }[];
+  entries: readonly { provider: ProviderId; apiKey: string; model: string; disabled?: boolean }[];
   onSelect: (provider: ProviderId) => void;
   onOpenSettings: () => void;
   disabled?: boolean;
@@ -43,6 +43,7 @@ export function ModelSelect({
     };
   }, [open]);
 
+  const enabledEntries = entries.filter((e) => e.disabled !== true);
   const activeEntry = entries.find((e) => e.provider === activeProvider);
   const activeMeta = activeProvider ? PROVIDER_METADATA[activeProvider] : undefined;
   const currentModel = activeEntry?.model || activeModel || activeMeta?.defaultModel;
@@ -83,12 +84,12 @@ export function ModelSelect({
           </div>
 
           <div className="dsh-model-select__list">
-            {entries.length === 0 ? (
+            {enabledEntries.length === 0 ? (
               <div className="dsh-model-select__empty">
                 <span>{ja ? "API キーが未設定です" : "尚未配置 API Key"}</span>
               </div>
             ) : (
-              entries.map((entry) => {
+              enabledEntries.map((entry) => {
                 const meta = PROVIDER_METADATA[entry.provider];
                 const isSelected = entry.provider === activeProvider;
                 return (

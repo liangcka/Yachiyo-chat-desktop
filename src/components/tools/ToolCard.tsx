@@ -36,6 +36,7 @@ export function ToolCard({ toolName, args, output, isError, isRunning, isWaiting
       case "grep":
         return <Search size={14} className="tool-card__icon" aria-hidden="true" />;
       case "web_fetch":
+      case "web_search":
         return <Globe size={14} className="tool-card__icon" aria-hidden="true" />;
       default:
         return <Play size={14} className="tool-card__icon" aria-hidden="true" />;
