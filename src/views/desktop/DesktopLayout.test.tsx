@@ -111,9 +111,8 @@ describe("DesktopLayout", () => {
     expect(screen.getByRole("main", { name: "核心对话工作台" })).toBeInTheDocument();
     expect(screen.getAllByText("第一次对话").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("第二次探索")).toBeInTheDocument();
-    // 验证手风琴时间分组渲染
-    expect(screen.getByText("今天")).toBeInTheDocument();
-    expect(screen.getByText("更早")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "项目" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "对话" })).toBeInTheDocument();
   });
 
   it("calls onNewChat when clicking new chat button", async () => {
@@ -238,8 +237,7 @@ describe("DesktopLayout", () => {
     expect(props.onWebSearchSettingsChange).toHaveBeenCalledTimes(1);
   });
 
-  it("加载会话时显示加载状态并禁用发送入口", async () => {
-    const user = userEvent.setup();
+  it("加载会话时显示加载状态并禁用发送入口", () => {
     const props = createMockProps();
     props.controller.phase = "loading";
     props.composerValue = "待发送草稿";
@@ -248,8 +246,6 @@ describe("DesktopLayout", () => {
     expect(screen.getByPlaceholderText("正在加载对话…")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: copy.inputHint })).toBeDisabled();
     expect(screen.getByRole("button", { name: copy.send })).toBeDisabled();
-    await user.click(screen.getByText("看看工作区"));
-    expect(props.onSend).not.toHaveBeenCalled();
   });
 
   it("为桌面输入框提供日语标签，默认不显示快捷键提示", () => {
@@ -310,25 +306,13 @@ describe("DesktopLayout", () => {
     expect(screen.getByRole("complementary", { name: "桌面导航与历史会话" })).toBeInTheDocument();
   });
 
-  it("renders 4 Hero welcome cards in blank conversation and sends prompt on card click", async () => {
-    const user = userEvent.setup();
+  it("空白对话只显示输入框与上方的项目选择", () => {
     const props = createMockProps();
     render(<DesktopLayout {...props} />);
 
-    expect(screen.getByRole("region", { name: "欢迎体验" })).toBeInTheDocument();
-    expect(screen.getByText("看看工作区")).toBeInTheDocument();
-    expect(screen.getByText("聊聊今天")).toBeInTheDocument();
-    expect(screen.getByText("探索新知")).toBeInTheDocument();
-    expect(screen.getByText("读懂图片")).toBeInTheDocument();
-
-    const workspaceCard = screen.getByText("看看工作区").closest("button");
-    expect(workspaceCard).not.toBeNull();
-    if (workspaceCard) {
-      await user.click(workspaceCard);
-      expect(props.onSend).toHaveBeenCalledWith(
-        expect.stringContaining("八千代，请帮我查看当前工作区根目录下有哪些文件和文件夹"),
-      );
-    }
+    expect(screen.queryByRole("region", { name: "欢迎体验" })).not.toBeInTheDocument();
+    const main = screen.getByRole("main", { name: "核心对话工作台" });
+    expect(within(main).getByTitle(/当前项目：无项目/)).toBeInTheDocument();
   });
 
   it("从侧栏项目菜单打开工作区，不进入设置", async () => {
@@ -337,12 +321,10 @@ describe("DesktopLayout", () => {
     const props = createMockProps();
     render(<DesktopLayout {...props} />);
 
-    const sidebar = screen.getByRole("complementary", { name: "桌面导航与历史会话" });
-    const contextChip = within(sidebar).getByTitle(/当前项目：Yachiyo-chat-desktop/i);
-    expect(contextChip).toBeInTheDocument();
+    const projects = screen.getByRole("region", { name: "项目" });
+    expect(within(projects).getByText("Yachiyo-chat-desktop").closest("button")).toHaveAttribute("aria-current", "true");
 
-    await user.click(contextChip);
-    const gearBtn = screen.getByRole("button", { name: "打开文件与终端" });
+    const gearBtn = within(projects).getByRole("button", { name: "打开文件与终端" });
     await user.click(gearBtn);
     expect(screen.queryByRole("dialog", { name: "设置中心" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "工作区" })).toHaveAttribute("aria-selected", "true");

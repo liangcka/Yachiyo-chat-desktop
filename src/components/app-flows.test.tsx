@@ -181,11 +181,11 @@ describe("App flows", () => {
     const services = fakeServices({ authenticated: false });
     render(<App services={services} />);
 
-    expect(await screen.findByPlaceholderText("什么都可以告诉我")).toBeVisible();
+    expect(await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作")).toBeVisible();
 
     await user.click(screen.getByLabelText("用户资料与菜单"));
     await user.click(screen.getByTitle("切换语言"));
-    await waitFor(() => expect(screen.getByPlaceholderText("何でも話してね")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByPlaceholderText("何でも聞いてね。@ でファイル参照、/ でアクション")).toBeInTheDocument());
     expect(services.repository.locale).toBe("ja-JP");
     expect(document.documentElement.lang).toBe("ja-JP");
   });
@@ -194,7 +194,7 @@ describe("App flows", () => {
     const user = userEvent.setup();
     const services = fakeServices();
     render(<App services={services} />);
-    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+    const composer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
 
     await user.type(composer, "今天有点累");
     await user.click(screen.getByRole("button", { name: "发送" }));
@@ -227,7 +227,7 @@ describe("App flows", () => {
     const view = render(<App services={services} />);
 
     try {
-      const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+      const composer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
 
       // 默认关闭：请求不携带 webSearch，也不渲染来源
       await user.type(composer, "今天上海天气");
@@ -244,7 +244,7 @@ describe("App flows", () => {
       await user.click(screen.getByRole("button", { name: "关闭设置" }));
 
       // 开启后：请求携带 webSearch: true，回复下方渲染参考来源链接
-      const activeComposer = await screen.findByPlaceholderText("什么都可以告诉我");
+      const activeComposer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
       await user.type(activeComposer, "明天呢");
       await user.click(screen.getByRole("button", { name: "发送" }));
       await waitFor(() => expect(stream).toHaveBeenCalledTimes(2));
@@ -298,7 +298,7 @@ describe("App flows", () => {
     const view = render(<App services={fakeServices({ llmSettings, stream })} />);
 
     try {
-      const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+      const composer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
       await user.type(composer, "这次不要固定回复");
       await user.click(screen.getByRole("button", { name: "发送" }));
 
@@ -329,7 +329,7 @@ describe("App flows", () => {
     const view = render(<App services={services} />);
 
     try {
-      const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+      const composer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
       await user.type(composer, "无需访问码直接对话");
       await user.click(screen.getByRole("button", { name: "发送" }));
 
@@ -359,7 +359,7 @@ describe("App flows", () => {
       });
     });
     render(<App services={fakeServices({ stream })} />);
-    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+    const composer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
     await user.type(composer, "等等");
     await user.click(screen.getByRole("button", { name: "发送" }));
     expect(await screen.findByText("先别勉强自己")).toBeVisible();
@@ -397,7 +397,7 @@ describe("App flows", () => {
       events.push("session-signed-out");
     });
     render(<App services={services} />);
-    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+    const composer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
     await user.type(composer, "写到一半");
     await user.click(screen.getByRole("button", { name: "发送" }));
     expect(await screen.findByText("还在慢慢写")).toBeVisible();
@@ -448,7 +448,7 @@ describe("App flows", () => {
     });
     const services = fakeServices({ stream });
     render(<App services={services} />);
-    const textarea = await screen.findByPlaceholderText("什么都可以告诉我");
+    const textarea = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
 
     const file = new File(["png"], "clipboard.png", { type: "image/png" });
     fireEvent.paste(textarea, {
@@ -474,7 +474,7 @@ describe("App flows", () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const services = fakeServices();
     render(<App services={services} />);
-    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+    const composer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
 
     await user.type(composer, "第一段有效内容");
     await user.click(screen.getByRole("button", { name: "发送" }));
@@ -513,12 +513,12 @@ describe("App flows", () => {
       .mockRejectedValueOnce(new ChatClientError("DAILY_QUOTA_EXCEEDED"))
       .mockRejectedValueOnce(new ChatClientError("SESSION_REQUIRED"));
     render(<App services={fakeServices({ repository, stream })} />);
-    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+    const composer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
     await user.type(composer, "第一条");
     await user.click(screen.getByRole("button", { name: "发送" }));
     expect(await screen.findByText("今天的对话次数已用完，请明天再来。")).toBeVisible();
 
-    const activeComposer = await screen.findByPlaceholderText("什么都可以告诉我");
+    const activeComposer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
     await user.clear(activeComposer);
     await user.type(activeComposer, "第二条");
     await user.click(screen.getByRole("button", { name: "发送" }));
@@ -531,7 +531,7 @@ describe("App flows", () => {
     const user = userEvent.setup();
     const services = fakeServices();
     render(<App services={services} />);
-    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+    const composer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
     vi.spyOn(services.repository, "putMessage").mockRejectedValue(new Error("storage unavailable"));
 
     await user.type(composer, "请记住这句话");
@@ -545,7 +545,7 @@ describe("App flows", () => {
     const user = userEvent.setup();
     const stream = vi.fn<StreamChatFunction>().mockRejectedValue(new ChatClientError("PROVIDER_ERROR"));
     render(<App services={fakeServices({ stream })} />);
-    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+    const composer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
 
     await user.type(composer, "再试着回答一次");
     await user.click(screen.getByRole("button", { name: "发送" }));
@@ -557,7 +557,7 @@ describe("App flows", () => {
     const user = userEvent.setup();
     const stream = vi.fn<StreamChatFunction>().mockRejectedValue(new ChatClientError("INVALID_REQUEST"));
     render(<App services={fakeServices({ stream })} />);
-    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+    const composer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
 
     await user.type(composer, "无法处理的请求");
     await user.click(screen.getByRole("button", { name: "发送" }));
@@ -570,7 +570,7 @@ describe("App flows", () => {
     const user = userEvent.setup();
     const services = fakeServices();
     render(<App services={services} />);
-    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+    const composer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
 
     await user.type(composer, "现有对话内容");
     await user.click(screen.getByRole("button", { name: "发送" }));
@@ -590,7 +590,7 @@ describe("App flows", () => {
     const user = userEvent.setup();
     const services = fakeServices();
     render(<App services={services} />);
-    await screen.findByPlaceholderText("什么都可以告诉我");
+    await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
 
     // 初始状态下只有 1 个空白对话，连续点击 3 次新建对话
     const newChatBtn = screen.getByTitle("新建对话 (Ctrl+N)");
@@ -602,7 +602,7 @@ describe("App flows", () => {
     expect(services.repository.conversations).toHaveLength(1);
 
     // 发送消息使当前会话成为有效对话
-    const composer = screen.getByPlaceholderText("什么都可以告诉我");
+    const composer = screen.getByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
     await user.type(composer, "第一段有效对话");
     await user.click(screen.getByRole("button", { name: "发送" }));
     await screen.findAllByText("第一段有效对话");
@@ -636,7 +636,7 @@ describe("App flows", () => {
         online = true;
         window.dispatchEvent(new Event("online"));
       });
-      await waitFor(() => expect(screen.getByPlaceholderText("什么都可以告诉我")).toBeEnabled());
+      await waitFor(() => expect(screen.getByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作")).toBeEnabled());
     } finally {
       Object.defineProperty(navigator, "onLine", {
         configurable: true,
@@ -652,7 +652,7 @@ describe("App flows", () => {
       return { truncated: false };
     });
     render(<App services={fakeServices({ stream })} />);
-    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+    const composer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
 
     await user.type(composer, "这是一条要撤回的消息");
     await user.click(screen.getByRole("button", { name: "发送" }));
@@ -671,7 +671,7 @@ describe("App flows", () => {
       expect(screen.queryByRole("article", { name: "八千代的回复" })).not.toBeInTheDocument();
     });
 
-    const activeComposer = await screen.findByPlaceholderText("什么都可以告诉我");
+    const activeComposer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
     expect(activeComposer).toHaveValue("这是一条要撤回的消息");
     expect((await screen.findAllByText("已撤回最新一条消息")).length).toBeGreaterThan(0);
 
@@ -704,7 +704,7 @@ describe("App flows", () => {
     await waitFor(() => {
       expect(screen.queryByRole("article", { name: "我的消息" })).not.toBeInTheDocument();
     });
-    const finalComposer = await screen.findByPlaceholderText("什么都可以告诉我");
+    const finalComposer = await screen.findByPlaceholderText("想问什么都可以，@ 引用文件，/ 执行动作");
     expect(finalComposer).toHaveValue("第二条消息");
   });
 });

@@ -50,10 +50,22 @@ export function SidebarFooter({
         userSettings={userSettings}
       />
 
-      {/* 底部常驻用户卡片条 */}
+      {/* 底部单行：设置入口在左，头像打开用户菜单 */}
       <div
         className={`desktop-sidebar__user-bar ${popoverOpen ? "desktop-sidebar__user-bar--active" : ""}`}
       >
+        {onOpenSettings ? (
+          <button
+            type="button"
+            className="desktop-sidebar__settings-btn"
+            onClick={() => onOpenSettings("general")}
+            aria-label={locale === "ja-JP" ? "設定を開く" : "打开设置"}
+            title={`${locale === "ja-JP" ? "設定" : "设置"} (Ctrl+,)`}
+          >
+            <Settings size={15} aria-hidden="true" />
+            <span>{locale === "ja-JP" ? "設定" : "设置"}</span>
+          </button>
+        ) : <span className="desktop-sidebar__user-bar-spacer" />}
         <button
           type="button"
           className="desktop-sidebar__user-bar-main"
@@ -72,30 +84,11 @@ export function SidebarFooter({
               <img src={userSettings.avatar} alt={username} />
             ) : (
               <div className="desktop-sidebar__user-bar-avatar-placeholder">
-                <User size={16} />
+                <User size={14} />
               </div>
             )}
           </div>
-          <span className="desktop-sidebar__user-bar-name" title={username}>
-            {username}
-          </span>
-          <span
-            className={`desktop-sidebar__user-bar-badge desktop-sidebar__user-bar-badge--${currentBadge.toLowerCase()}`}
-          >
-            {currentBadge}
-          </span>
         </button>
-        {onOpenSettings ? (
-          <button
-            type="button"
-            className="desktop-sidebar__settings-btn"
-            onClick={() => onOpenSettings("general")}
-            aria-label={locale === "ja-JP" ? "設定を開く" : "打开设置"}
-            title={locale === "ja-JP" ? "設定" : "设置"}
-          >
-            <Settings size={17} aria-hidden="true" />
-          </button>
-        ) : null}
       </div>
     </div>
   );

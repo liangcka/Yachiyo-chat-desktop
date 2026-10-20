@@ -6,8 +6,8 @@ import { copyFor } from "../../../i18n/messages";
 import { DesktopSidebar } from "./DesktopSidebar";
 import { SidebarConversationItem } from "./SidebarConversationItem";
 import { SidebarRail } from "./SidebarRail";
-import { SidebarSearch } from "./SidebarSearch";
-import { groupConversationsByDate } from "./use-conversation-groups";
+import { projectManager } from "../../../services/project-manager";
+import { formatRelativeTime, orderConversations } from "./use-conversation-groups";
 
 describe("DesktopSidebar & Submodules", () => {
   const copy = copyFor("zh-CN");
@@ -37,27 +37,24 @@ describe("DesktopSidebar & Submodules", () => {
     },
   ];
 
-  it("groups conversations accurately by date", () => {
-    const groups = groupConversationsByDate(mockConversations, "zh-CN");
-    expect(groups.length).toBe(3);
-    expect(groups[0].key).toBe("today");
-    expect(groups[0].label).toBe("今天");
-    expect(groups[0].items[0].id).toBe("conv-today-1");
-
-    expect(groups[1].key).toBe("yesterday");
-    expect(groups[1].label).toBe("昨天");
-
-    expect(groups[2].key).toBe("older");
-    expect(groups[2].label).toBe("更早");
+  it("formats compact relative times", () => {
+    const base = Date.UTC(2026, 9, 20, 12);
+    expect(formatRelativeTime(base - 10_000, "zh-CN", base)).toBe("刚刚");
+    expect(formatRelativeTime(base - 5 * 60_000, "zh-CN", base)).toBe("5m");
+    expect(formatRelativeTime(base - 3 * 3_600_000, "zh-CN", base)).toBe("3h");
+    expect(formatRelativeTime(base - 2 * 86_400_000, "zh-CN", base)).toBe("2天");
+    expect(formatRelativeTime(base - 2 * 86_400_000, "ja-JP", base)).toBe("2日");
+    const old = base - 40 * 86_400_000;
+    const date = new Date(old);
+    expect(formatRelativeTime(old, "zh-CN", base)).toBe(`${date.getMonth() + 1}/${date.getDate()}`);
   });
 
-  it("filters conversations via SidebarSearch and clears query", async () => {
-    const user = userEvent.setup();
-    const onSelect = vi.fn();
-    const onRename = vi.fn();
-    const onDelete = vi.fn();
-    const onNewChat = vi.fn();
+  it("places pinned conversations first and keeps the rest in order", () => {
+    const ordered = orderConversations(mockConversations, new Set(["conv-older-1"]));
+    expect(ordered.map((c) => c.id)).toEqual(["conv-older-1", "conv-today-1", "conv-yesterday-1"]);
+  });
 
+  it("renders a flat conversation list with relative times", () => {
     render(
       <DesktopSidebar
         activeConversationId="conv-today-1"
@@ -65,31 +62,54 @@ describe("DesktopSidebar & Submodules", () => {
         conversations={mockConversations}
         copy={copy}
         locale="zh-CN"
-        onDeleteConversation={onDelete}
-        onNewChat={onNewChat}
-        onRenameConversation={onRename}
-        onSelectConversation={onSelect}
+        onDeleteConversation={vi.fn()}
+        onNewChat={vi.fn()}
+        onRenameConversation={vi.fn()}
+        onSelectConversation={vi.fn()}
         onSelectRightTab={vi.fn()}
       />,
     );
 
-    expect(screen.getByText("关于 TypeScript 重构的讨论")).toBeInTheDocument();
-    expect(screen.getByText("昨天关于 UI 动效的研究")).toBeInTheDocument();
-    expect(screen.getByText("更早以前的架构笔记")).toBeInTheDocument();
+    const history = screen.getByRole("region", { name: "对话" });
+    const items = within(history).getAllByRole("listitem");
+    expect(items).toHaveLength(3);
+    expect(within(items[0]).getByText("关于 TypeScript 重构的讨论")).toBeInTheDocument();
+    expect(within(items[1]).getByText("1天")).toBeInTheDocument();
+    expect(within(items[2]).getByText("15天")).toBeInTheDocument();
+  });
 
-    const searchInput = screen.getByPlaceholderText("搜索历史对话...");
-    await user.type(searchInput, "TypeScript");
+  it("lists recent projects and switches project with a new chat", async () => {
+    const user = userEvent.setup();
+    const onNewChat = vi.fn(async () => undefined);
+    const onSelectRightTab = vi.fn();
+    await projectManager.switchProject("D:\\work\\beta");
+    await projectManager.switchProject("D:\\work\\alpha");
 
-    // 仅保留匹配项
-    expect(screen.getByText("关于 TypeScript 重构的讨论")).toBeInTheDocument();
-    expect(screen.queryByText("昨天关于 UI 动效的研究")).not.toBeInTheDocument();
-    expect(screen.queryByText("更早以前的架构笔记")).not.toBeInTheDocument();
+    render(
+      <DesktopSidebar
+        activeRightTab="none"
+        conversations={mockConversations}
+        copy={copy}
+        locale="zh-CN"
+        onDeleteConversation={vi.fn()}
+        onNewChat={onNewChat}
+        onRenameConversation={vi.fn()}
+        onSelectConversation={vi.fn()}
+        onSelectRightTab={onSelectRightTab}
+      />,
+    );
 
-    // 点击清空按钮
-    const clearBtn = screen.getByRole("button", { name: "清空" });
-    await user.click(clearBtn);
+    const projects = screen.getByRole("region", { name: "项目" });
+    expect(within(projects).getByText("alpha").closest("button")).toHaveAttribute("aria-current", "true");
 
-    expect(screen.getByText("昨天关于 UI 动效的研究")).toBeInTheDocument();
+    await user.click(within(projects).getByRole("button", { name: "打开文件与终端" }));
+    expect(onSelectRightTab).toHaveBeenCalledWith("workspace");
+
+    await user.click(within(projects).getByText("beta"));
+    expect(projectManager.getState().activeProject).toBe("D:\\work\\beta");
+    expect(onNewChat).toHaveBeenCalledTimes(1);
+
+    await projectManager.clear();
   });
 
   it("supports inline rename and cancellation in SidebarConversationItem", async () => {
@@ -122,71 +142,6 @@ describe("DesktopSidebar & Submodules", () => {
     await user.type(input, "新的重命名标题{Enter}");
 
     expect(onRename).toHaveBeenCalledWith("conv-today-1", "新的重命名标题");
-  });
-
-  it("renders empty state when search matches nothing", async () => {
-    const user = userEvent.setup();
-    render(
-      <DesktopSidebar
-        activeRightTab="none"
-        conversations={mockConversations}
-        copy={copy}
-        locale="zh-CN"
-        onDeleteConversation={vi.fn()}
-        onNewChat={vi.fn()}
-        onRenameConversation={vi.fn()}
-        onSelectConversation={vi.fn()}
-        onSelectRightTab={vi.fn()}
-      />,
-    );
-
-    const searchInput = screen.getByPlaceholderText("搜索历史对话...");
-    await user.type(searchInput, "完全不存在的内容xyz");
-
-    expect(screen.getByText("未找到匹配的会话")).toBeInTheDocument();
-  });
-
-  it("toggles accordion section collapse", async () => {
-    const user = userEvent.setup();
-    render(
-      <DesktopSidebar
-        activeRightTab="none"
-        conversations={mockConversations}
-        copy={copy}
-        locale="zh-CN"
-        onDeleteConversation={vi.fn()}
-        onNewChat={vi.fn()}
-        onRenameConversation={vi.fn()}
-        onSelectConversation={vi.fn()}
-        onSelectRightTab={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText("关于 TypeScript 重构的讨论")).toBeInTheDocument();
-
-    const todayHeader = screen.getByTitle("折叠 今天");
-    await user.click(todayHeader);
-
-    // 折叠后不显示该组项目
-    expect(screen.queryByText("关于 TypeScript 重构的讨论")).not.toBeInTheDocument();
-
-    // 再次点击展开
-    const expandToday = screen.getByTitle("展开 今天");
-    await user.click(expandToday);
-    expect(screen.getByText("关于 TypeScript 重构的讨论")).toBeInTheDocument();
-  });
-
-  it("handles SidebarSearch escape key and Japanese locale placeholder", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    const { rerender } = render(<SidebarSearch value="keyword" onChange={onChange} locale="zh-CN" />);
-
-    const input = screen.getByPlaceholderText("搜索历史对话...");
-    await user.type(input, "{Escape}");
-    expect(onChange).toHaveBeenCalledWith("");
-
-    rerender(<SidebarSearch value="" onChange={onChange} locale="ja-JP" />);
-    expect(screen.getByPlaceholderText("会話を検索...")).toBeInTheDocument();
   });
 
   it("supports pinning conversations and rendering pinned section", async () => {

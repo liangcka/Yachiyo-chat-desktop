@@ -31,7 +31,7 @@ const consoleErrors: string[] = [];
 
 async function enterApp(page: Page): Promise<void> {
   await page.goto("/");
-  await expect(page.getByPlaceholder("什么都可以告诉我")).toBeVisible();
+  await expect(page.getByPlaceholder("想问什么都可以，@ 引用文件，/ 执行动作")).toBeVisible();
 }
 
 /** 只读探测：返回当前库里的会话 id 列表与消息总数，用于失败时的现场证据 */
@@ -177,7 +177,7 @@ test("long conversation stays virtualized, windowed, and free of long tasks whil
   expect(userCount + assistantCount).toBeLessThan(HISTORY_WINDOW_SIZE);
 
   // 发送消息触发完整交互链路（send → stream → persist → 折叠），期间统计 long task
-  await page.getByPlaceholder("什么都可以告诉我").fill("今天有点累");
+  await page.getByPlaceholder("想问什么都可以，@ 引用文件，/ 执行动作").fill("今天有点累");
   await page.getByRole("button", { name: "发送" }).click();
   await expect(page.getByRole("article", { name: "八千代的回复" }).last()).toContainText(
     "笑着递上热乎乎的松饼",

@@ -336,6 +336,7 @@ export function DesktopLayout(props: SharedViewProps) {
         conversationTitle={props.controller.activeConversation?.title}
         copy={props.copy}
         onNewChat={props.onNewChat}
+        onOpenSearch={() => setPaletteOpen(true)}
         onRenameConversation={props.onRename}
         onSwitchView={switchCenterView}
         onToggleSidebar={() => setUserSidebarCollapsed((current) => !current)}

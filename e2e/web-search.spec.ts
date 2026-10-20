@@ -19,7 +19,7 @@ async function closeSkillsPanel(page: Page): Promise<void> {
 
 /** 发送一条消息并等待 mock 回复完整流出 */
 async function sendAndAwaitMockReply(page: Page, text: string): Promise<void> {
-  await page.getByPlaceholder("什么都可以告诉我").fill(text);
+  await page.getByPlaceholder("想问什么都可以，@ 引用文件，/ 执行动作").fill(text);
   await page.getByRole("button", { name: "发送" }).click();
   await expect(page.getByRole("article", { name: "八千代的回复" }).last()).toContainText(
     "笑着递上热乎乎的松饼",

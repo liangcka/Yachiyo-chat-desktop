@@ -11,7 +11,7 @@ test("工具入口集中在输入区，弹层在窄窗口内可操作", async ({
   await expect(page.locator(".desktop-chat-header .desktop-header-pill")).toHaveCount(0);
   await expect(page.getByText("Enter 发送 · Shift+Enter 换行")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "发送", exact: true })).toBeDisabled();
-  const input = page.getByRole("textbox", { name: "什么都可以告诉我" });
+  const input = page.getByRole("textbox", { name: "想问什么都可以，@ 引用文件，/ 执行动作" });
   await input.fill("检查输入状态");
   await expect(page.getByRole("button", { name: "发送", exact: true })).toBeEnabled();
 
@@ -47,7 +47,7 @@ test("正文与工具按事件顺序展示，重载后保留顺序并默认折�
       + event("done", { truncated: false }),
   }));
   await enterApp(page);
-  await page.getByRole("textbox", { name: "什么都可以告诉我" }).fill("检查工具顺序");
+  await page.getByRole("textbox", { name: "想问什么都可以，@ 引用文件，/ 执行动作" }).fill("检查工具顺序");
   await page.getByRole("button", { name: "发送", exact: true }).click();
   const reply = page.getByRole("article", { name: "八千代的回复" }).last();
   await expect(reply).toContainText("最终结果");
@@ -87,7 +87,7 @@ test("命令面板可键盘搜索，编辑消息保留版本且重载后可切�
   await expect(page.getByRole("dialog", { name: "设置中心" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "联网搜索" })).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("Escape");
-  const input = page.getByRole("textbox", { name: "什么都可以告诉我" });
+  const input = page.getByRole("textbox", { name: "想问什么都可以，@ 引用文件，/ 执行动作" });
   await input.fill("旧问题"); await input.press("Enter");
   await expect(page.getByRole("article", { name: "八千代的回复" }).last()).toContainText("已收到问题");
   const user = page.getByRole("article", { name: "我的消息" }).last();
@@ -116,7 +116,7 @@ test("文件附件可在发送前移除，发送内容保留文件名和正文",
   await enterApp(page);
   await page.locator('input[type="file"]').setInputFiles({ name: "说明.md", mimeType: "text/plain", buffer: Buffer.from("项目使用 React") });
   await expect(page.getByRole("button", { name: "说明.md" })).toBeVisible();
-  await page.getByRole("textbox", { name: "什么都可以告诉我" }).fill("请读附件");
+  await page.getByRole("textbox", { name: "想问什么都可以，@ 引用文件，/ 执行动作" }).fill("请读附件");
   await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect(page.getByText("已读取附件", { exact: true })).toBeVisible();
   expect(sentText).toContain("【附件 说明.md】");
@@ -135,7 +135,7 @@ test("生成中可以直接发送补充要求，并保留上一轮中断记录",
     await route.fulfill({ contentType: "text/event-stream", body: 'event: delta\ndata: {"text":"按补充要求回答"}\n\nevent: done\ndata: {"truncated":false}\n\n' }).catch(() => undefined);
   });
   await enterApp(page);
-  const input = page.getByRole("textbox", { name: "什么都可以告诉我" });
+  const input = page.getByRole("textbox", { name: "想问什么都可以，@ 引用文件，/ 执行动作" });
   await input.fill("开始任务");
   await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect(page.getByRole("button", { name: "停止", exact: true })).toBeVisible();

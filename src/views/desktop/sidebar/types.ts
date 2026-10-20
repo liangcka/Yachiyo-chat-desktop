@@ -13,14 +13,6 @@ export type DesktopRightTab =
   | "settings"
   | "none";
 
-export type TimeGroupKey = "pinned" | "today" | "yesterday" | "previous7Days" | "older";
-
-export interface ConversationGroup {
-  key: TimeGroupKey;
-  label: string;
-  items: Conversation[];
-}
-
 export interface DesktopSidebarProps {
   activeConversationId?: string;
   activeRightTab?: DesktopRightTab;
