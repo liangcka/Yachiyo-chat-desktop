@@ -21,6 +21,14 @@ pub struct BuiltRequest {
     pub provider_id: ProviderId,
 }
 
+/// 请求自带的 Key 优先；否则取系统加密存储里的 Key，并要求请求的端点与保存时绑定的端点一致
+pub fn resolve_api_key(request: &ClientChatRequest, provider_id: ProviderId, key_store: &KeyStore) -> Option<String> {
+    request
+        .api_key
+        .clone()
+        .or_else(|| key_store.get_key_for_endpoint(provider_id.slug(), request.base_url.as_deref()))
+}
+
 /// 自定义端点只对 OpenAI 兼容厂商开放（Claude/Gemini 为原生协议），与 Web 端 /api/chat 的校验一致
 pub fn validated_base_url(request: &ClientChatRequest) -> Result<Option<&str>, String> {
     let Some(base_url) = request.base_url.as_deref() else {
@@ -133,17 +141,7 @@ pub fn handle_chat_stream(
             .clone()
             .unwrap_or_else(|| config.default_model.to_string());
 
-        let api_key = request.api_key.clone().or_else(|| {
-            let provider_name = match provider_id {
-                ProviderId::Stepfun => "stepfun",
-                ProviderId::Deepseek => "deepseek",
-                ProviderId::Glm => "glm",
-                ProviderId::Openai => "openai",
-                ProviderId::Claude => "claude",
-                ProviderId::Gemini => "gemini",
-            };
-            key_store.get_key(provider_name)
-        });
+        let api_key = resolve_api_key(&request, provider_id, &key_store);
 
         let api_key = match api_key {
             Some(k) if !k.is_empty() => k,

@@ -74,6 +74,20 @@ pub enum ProviderId {
     Gemini,
 }
 
+impl ProviderId {
+    /// 与序列化名一致的小写标识，同时是系统加密存储里 Key 的索引
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::Stepfun => "stepfun",
+            Self::Deepseek => "deepseek",
+            Self::Glm => "glm",
+            Self::Openai => "openai",
+            Self::Claude => "claude",
+            Self::Gemini => "gemini",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RequestMode {

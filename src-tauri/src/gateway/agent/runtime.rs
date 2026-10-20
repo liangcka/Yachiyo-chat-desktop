@@ -633,17 +633,7 @@ pub fn run_agent_chat_stream(
         let config = get_provider_config(provider_id);
         let model = request.model.clone().unwrap_or_else(|| config.default_model.to_string());
 
-        let api_key = request.api_key.clone().or_else(|| {
-            let provider_name = match provider_id {
-                ProviderId::Stepfun => "stepfun",
-                ProviderId::Deepseek => "deepseek",
-                ProviderId::Glm => "glm",
-                ProviderId::Openai => "openai",
-                ProviderId::Claude => "claude",
-                ProviderId::Gemini => "gemini",
-            };
-            key_store.get_key(provider_name)
-        });
+        let api_key = crate::gateway::resolve_api_key(&request, provider_id, &key_store);
         let api_key = match api_key {
             Some(k) if !k.is_empty() => k,
             _ => {

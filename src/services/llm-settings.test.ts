@@ -216,6 +216,52 @@ describe("LlmSettingsService on desktop", () => {
     expect(await service.get("claude")).toMatchObject({ model: "claude-opus-5-5" });
   });
 
+  it("binds the key to the endpoint it is saved with", async () => {
+    await service.saveProvider("openai", VALID_KEY, "kimi-k3", { baseUrl: "https://api.moonshot.cn/v1" });
+
+    expect(apiFetch).toHaveBeenCalledWith(
+      "/api/keys",
+      expect.objectContaining({
+        body: JSON.stringify({ provider: "openai", key: VALID_KEY, baseUrl: "https://api.moonshot.cn/v1" }),
+      }),
+    );
+  });
+
+  it("refuses to reuse the stored key for a different endpoint", async () => {
+    await service.saveProvider("openai", VALID_KEY, "kimi-k3", { baseUrl: "https://api.moonshot.cn/v1" });
+    vi.mocked(apiFetch).mockClear();
+
+    await expect(
+      service.saveProvider("openai", KEYSTORE_MANAGED_API_KEY, "kimi-k3", { baseUrl: "https://evil.example/v1" }),
+    ).rejects.toThrow();
+    await expect(service.saveProvider("openai", KEYSTORE_MANAGED_API_KEY, "gpt-6-luna")).rejects.toThrow();
+    expect(apiFetch).not.toHaveBeenCalled();
+    expect(await service.get("openai")).toMatchObject({ baseUrl: "https://api.moonshot.cn/v1", model: "kimi-k3" });
+
+    // 端点不变时仍可沿用已存 Key（只改模型）
+    await service.saveProvider("openai", KEYSTORE_MANAGED_API_KEY, "kimi-k2.6", { baseUrl: "https://api.moonshot.cn/v1" });
+    expect(await service.get("openai")).toMatchObject({ model: "kimi-k2.6" });
+  });
+
+  it("carries the saved endpoint when migrating legacy plaintext keys", async () => {
+    await db.llmSettings.put({
+      provider: "openai",
+      apiKey: VALID_KEY,
+      model: "kimi-k3",
+      updatedAt: 1,
+      baseUrl: "https://api.moonshot.cn/v1",
+    });
+
+    await service.migrateKeysToKeystore();
+
+    expect(apiFetch).toHaveBeenCalledWith(
+      "/api/keys",
+      expect.objectContaining({
+        body: JSON.stringify({ provider: "openai", key: VALID_KEY, baseUrl: "https://api.moonshot.cn/v1" }),
+      }),
+    );
+  });
+
   it("does not persist the config when the keystore rejects the key", async () => {
     vi.mocked(apiFetch).mockResolvedValue(new Response("{}", { status: 500 }));
 

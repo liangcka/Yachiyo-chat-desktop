@@ -101,7 +101,7 @@ export class LlmSettingsService {
     const records = await this.db.llmSettings.toArray();
     for (const record of records) {
       if (record.apiKey === KEYSTORE_MANAGED_API_KEY || !isValidApiKey(record.apiKey)) continue;
-      const stored = await storeKeyInKeystore(record.provider, record.apiKey.trim()).then(
+      const stored = await storeKeyInKeystore(record.provider, record.apiKey.trim(), record.baseUrl).then(
         () => true,
         () => false,
       );
@@ -115,7 +115,8 @@ export class LlmSettingsService {
    * 保存某厂商配置并（可选）将其设为激活。
    * 若当前没有任何激活厂商且未显式指定 activate，则自动激活以便用户立即生效。
    * 带 baseUrl（自定义 OpenAI 兼容端点）时跳过模型白名单，模型名交由上游校验。
-   * 桌面端 Key 先写入系统加密存储，成功后 IndexedDB 只记录占位符；传入占位符表示沿用已保存的 Key。
+   * 桌面端 Key 连同端点一起写入系统加密存储，成功后 IndexedDB 只记录占位符；
+   * 传入占位符表示沿用已保存的 Key，此时端点必须与保存时一致。
    */
   async saveProvider(
     provider: ProviderId,
@@ -130,7 +131,10 @@ export class LlmSettingsService {
     let trimmedKey = apiKey.trim();
     if (isDesktopApp()) {
       if (trimmedKey !== KEYSTORE_MANAGED_API_KEY) {
-        await storeKeyInKeystore(provider, trimmedKey);
+        await storeKeyInKeystore(provider, trimmedKey, baseUrl);
+      } else if ((await this.db.llmSettings.get(provider))?.baseUrl !== baseUrl) {
+        // 网关只把已存 Key 发往保存时绑定的端点，换端点必须重新提交 Key
+        throw new Error("API key must be re-entered when the endpoint changes");
       }
       trimmedKey = KEYSTORE_MANAGED_API_KEY;
     }
@@ -163,11 +167,11 @@ export function modelsFor(provider: ProviderId): readonly string[] {
   return PROVIDER_METADATA[provider].models;
 }
 
-async function storeKeyInKeystore(provider: ProviderId, key: string): Promise<void> {
+async function storeKeyInKeystore(provider: ProviderId, key: string, baseUrl?: string): Promise<void> {
   const response = await apiFetch("/api/keys", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ provider, key }),
+    body: JSON.stringify({ provider, key, ...(baseUrl !== undefined ? { baseUrl } : {}) }),
   });
   if (!response.ok) {
     throw new Error(`Failed to store API key (${response.status})`);

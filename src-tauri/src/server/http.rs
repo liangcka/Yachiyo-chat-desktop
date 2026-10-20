@@ -90,6 +90,9 @@ pub struct SessionResponse {
 pub struct SaveKeyRequest {
     pub provider: String,
     pub key: String,
+    /// Key 所属的自定义端点；省略表示厂商原生端点。网关只会把 Key 发往保存时绑定的端点
+    #[serde(rename = "baseUrl", default)]
+    pub base_url: Option<String>,
 }
 
 /// 生成进程级随机网关 token：随桌面进程启动一次，经 IPC 交给 webview。
@@ -158,7 +161,12 @@ async fn handle_save_key(
     State(state): State<AppState>,
     Json(payload): Json<SaveKeyRequest>,
 ) -> impl IntoResponse {
-    match state.key_store.set_key(&payload.provider, &payload.key) {
+    if let Some(base_url) = payload.base_url.as_deref() {
+        if !crate::gateway::providers::openai_compat::is_valid_base_url(base_url) {
+            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "invalid baseUrl" })));
+        }
+    }
+    match state.key_store.set_key_for_endpoint(&payload.provider, &payload.key, payload.base_url.as_deref()) {
         Ok(_) => (StatusCode::OK, Json(serde_json::json!({ "success": true }))),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,

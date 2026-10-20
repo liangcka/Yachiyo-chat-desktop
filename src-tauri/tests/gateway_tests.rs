@@ -529,3 +529,67 @@ fn test_openai_delta_parser_splits_inline_thinking_and_details_snapshots() {
     let plain = parser.parse(&chunk(serde_json::json!({ "content": "<b>你好</b>" }))).unwrap();
     assert_eq!(plain.content.as_deref(), Some("<b>你好</b>"));
 }
+
+#[test]
+fn test_stored_key_is_only_released_to_the_endpoint_it_was_saved_for() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = KeyStore::at_path(dir.path().join("keys.enc"));
+
+    // 原生端点保存的 Key 不能被带自定义端点的请求取走
+    store.set_key("openai", "sk-native-key-1234567890").unwrap();
+    assert_eq!(store.get_key_for_endpoint("openai", None).as_deref(), Some("sk-native-key-1234567890"));
+    assert_eq!(store.get_key_for_endpoint("openai", Some("https://evil.example/v1")), None);
+
+    // 绑定自定义端点后，只有同一端点（忽略尾部斜杠与空白）能取到，原生端点和其他端点都取不到
+    store.set_key_for_endpoint("openai", "sk-moonshot-key-1234567890", Some("https://api.moonshot.cn/v1")).unwrap();
+    assert_eq!(store.get_key_for_endpoint("openai", Some("https://api.moonshot.cn/v1")).as_deref(), Some("sk-moonshot-key-1234567890"));
+    assert_eq!(store.get_key_for_endpoint("openai", Some(" https://api.moonshot.cn/v1/ ")).as_deref(), Some("sk-moonshot-key-1234567890"));
+    assert_eq!(store.get_key_for_endpoint("openai", None), None);
+    assert_eq!(store.get_key_for_endpoint("openai", Some("https://evil.example/v1")), None);
+
+    // 重新以原生端点保存会清掉绑定；删除 Key 同时清掉绑定
+    store.set_key("openai", "sk-native-again-1234567890").unwrap();
+    assert_eq!(store.get_key_for_endpoint("openai", Some("https://api.moonshot.cn/v1")), None);
+    assert_eq!(store.get_key_for_endpoint("openai", None).as_deref(), Some("sk-native-again-1234567890"));
+    store.set_key_for_endpoint("openai", "sk-moonshot-key-1234567890", Some("https://api.moonshot.cn/v1")).unwrap();
+    store.delete_key("openai").unwrap();
+    store.set_key("openai", "sk-after-delete-1234567890").unwrap();
+    assert_eq!(store.get_key_for_endpoint("openai", None).as_deref(), Some("sk-after-delete-1234567890"));
+}
+
+#[test]
+fn test_endpoint_binding_survives_reopening_and_old_files_count_as_native() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("keys.enc");
+    let store = KeyStore::at_path(path.clone());
+    store.set_key_for_endpoint("glm", "sk-zai-key-1234567890", Some("https://api.z.ai/api/paas/v4")).unwrap();
+    store.set_key("deepseek", "sk-deepseek-key-1234567890").unwrap();
+
+    let reopened = KeyStore::at_path(path);
+    assert_eq!(reopened.get_key_for_endpoint("glm", Some("https://api.z.ai/api/paas/v4")).as_deref(), Some("sk-zai-key-1234567890"));
+    assert_eq!(reopened.get_key_for_endpoint("glm", None), None);
+    // 没有绑定记录的 Key（旧版本写入）视为原生端点
+    assert_eq!(reopened.get_key_for_endpoint("deepseek", None).as_deref(), Some("sk-deepseek-key-1234567890"));
+    assert_eq!(reopened.get_key_for_endpoint("deepseek", Some("https://evil.example/v1")), None);
+}
+
+#[test]
+fn test_resolve_api_key_never_sends_the_stored_key_to_another_endpoint() {
+    use yachiyo_desktop_lib::gateway::resolve_api_key;
+    use yachiyo_desktop_lib::types::ProviderId;
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = KeyStore::at_path(dir.path().join("keys.enc"));
+    store.set_key("openai", "sk-native-key-1234567890").unwrap();
+
+    let stored_only = plain_request("openai", "");
+    assert_eq!(resolve_api_key(&stored_only, ProviderId::Openai, &store).as_deref(), Some("sk-native-key-1234567890"));
+
+    let redirected = custom_request("openai", "", "https://evil.example/v1");
+    assert_eq!(resolve_api_key(&redirected, ProviderId::Openai, &store), None);
+
+    // 请求自带的 Key 是调用方已知的，不受绑定限制
+    let mut explicit = custom_request("openai", "", "https://api.moonshot.cn/v1");
+    explicit.api_key = Some("sk-explicit-key-1234567890".to_string());
+    assert_eq!(resolve_api_key(&explicit, ProviderId::Openai, &store).as_deref(), Some("sk-explicit-key-1234567890"));
+}
