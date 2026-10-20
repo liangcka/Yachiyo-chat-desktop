@@ -418,3 +418,26 @@ describe("extractOpenAIJudgeText", () => {
     expect(extractOpenAIJudgeText(response)).toBe("YES");
   });
 });
+
+describe("createThinkTagSplitter chunk boundaries", () => {
+  const samples = [
+    "<think>用户在打招呼，回一句即可。</think>\n\n你好呀！",
+    "  \n<think>先想想</think>答案",
+    "</think>\n只有残留的闭合标签",
+    "<b>不是思考</b><think>也不是</think>",
+    "<thin不完整的标签也要原样输出",
+    "普通回答，没有任何标签",
+  ];
+
+  it("gives the same result however the stream is cut", () => {
+    for (const sample of samples) {
+      const whole = createThinkTagSplitter()(sample);
+      for (let index = 0; index <= sample.length; index += 1) {
+        const split = createThinkTagSplitter();
+        const head = split(sample.slice(0, index));
+        const tail = split(sample.slice(index));
+        expect({ content: head.content + tail.content, thought: head.thought + tail.thought }, `${sample} @${index}`).toEqual(whole);
+      }
+    }
+  });
+});

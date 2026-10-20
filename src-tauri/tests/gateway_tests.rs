@@ -609,3 +609,28 @@ fn test_resolve_api_key_never_sends_the_stored_key_to_another_endpoint() {
     explicit.api_key = Some("sk-explicit-key-1234567890".to_string());
     assert_eq!(resolve_api_key(&explicit, ProviderId::Openai, &store).as_deref(), Some("sk-explicit-key-1234567890"));
 }
+
+#[test]
+fn test_think_tag_splitter_is_independent_of_chunk_boundaries() {
+    use yachiyo_desktop_lib::gateway::stream::ThinkTagSplitter;
+
+    let samples = [
+        "<think>用户在打招呼，回一句即可。</think>\n\n你好呀！",
+        "  \n<think>先想想</think>答案",
+        "</think>\n只有残留的闭合标签",
+        "<b>不是思考</b><think>也不是</think>",
+        "<thin不完整的标签也要原样输出",
+        "普通回答，没有任何标签",
+    ];
+    for sample in samples {
+        let mut whole = ThinkTagSplitter::default();
+        let (whole_content, whole_thought) = whole.push(sample);
+        for (index, _) in sample.char_indices().chain(std::iter::once((sample.len(), ' '))) {
+            let (head, tail) = sample.split_at(index);
+            let mut split = ThinkTagSplitter::default();
+            let (c1, t1) = split.push(head);
+            let (c2, t2) = split.push(tail);
+            assert_eq!((format!("{c1}{c2}"), format!("{t1}{t2}")), (whole_content.clone(), whole_thought.clone()), "sample {sample:?} split at {index}");
+        }
+    }
+}
