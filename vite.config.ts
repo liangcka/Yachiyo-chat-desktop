@@ -75,8 +75,9 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/api\//],
-        // Monaco 编辑器核心与 80+ 语言包按需动态加载，从 SW 预缓存排除以避免首屏膨胀：
-        globIgnores: ["**/*worker*.js", "**/editor.api*.js", "**/monaco/**"],
+        // Monaco 编辑器核心与 80+ 语言包按需动态加载，从 SW 预缓存排除以避免首屏膨胀；
+        // 余额小鲸鱼脚本约 1MB，仅在插件启用时加载，同样排除
+        globIgnores: ["**/*worker*.js", "**/editor.api*.js", "**/monaco/**", "**/whale-widget*.js"],
         runtimeCaching: [
           {
             urlPattern: /\/assets\/monaco\/.*\.js$/,

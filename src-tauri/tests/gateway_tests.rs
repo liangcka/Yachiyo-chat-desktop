@@ -211,16 +211,29 @@ fn test_plain_request_still_parses_without_agent_fields() {
 fn test_agent_system_prompt() {
     use yachiyo_desktop_lib::gateway::prompt::build_agent_system_prompt;
 
-    let zh = build_agent_system_prompt(ChatLocale::ZhCn, Some("2026-09-02"), None);
+    let zh = build_agent_system_prompt(ChatLocale::ZhCn, Some("2026-09-02"), None, false);
     assert!(zh.contains("月见八千代"));
     assert!(zh.contains("工具"));
     assert!(zh.contains("彩叶"));
     assert!(!zh.contains("```tool_call"));
     assert!(!zh.contains("输出最多200个Unicode字符"));
 
-    let ja = build_agent_system_prompt(ChatLocale::JaJp, None, None);
+    let ja = build_agent_system_prompt(ChatLocale::JaJp, None, None, false);
     assert!(ja.contains("八千代"));
     assert!(!ja.contains("```tool_call"));
+}
+
+#[test]
+fn test_agent_system_prompt_mentions_desktop_control_only_when_available() {
+    use yachiyo_desktop_lib::gateway::prompt::build_agent_system_prompt;
+
+    for locale in [ChatLocale::ZhCn, ChatLocale::JaJp] {
+        let without = build_agent_system_prompt(locale, None, None, false);
+        let with = build_agent_system_prompt(locale, None, None, true);
+        assert!(!without.contains("mcp__windows_mcp__"));
+        assert!(with.contains("mcp__windows_mcp__inspect"));
+        assert!(with.contains("query"));
+    }
 }
 
 #[test]
@@ -229,7 +242,7 @@ fn test_agent_system_prompt_with_workspace() {
     use yachiyo_desktop_lib::gateway::prompt::build_agent_system_prompt;
 
     let ws = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let zh = build_agent_system_prompt(ChatLocale::ZhCn, Some("2026-09-02"), Some(ws));
+    let zh = build_agent_system_prompt(ChatLocale::ZhCn, Some("2026-09-02"), Some(ws), false);
     assert!(zh.contains("当前项目工作区"));
     assert!(zh.contains("项目感知与主动探索准则"));
     assert!(zh.contains("亲自探查先行"));
@@ -337,13 +350,13 @@ async fn test_local_gateway_token_gate_and_cors_allowlist() {
 fn test_agent_system_prompt_evidence_verification_rule() {
     use yachiyo_desktop_lib::gateway::prompt::build_agent_system_prompt;
 
-    let zh = build_agent_system_prompt(ChatLocale::ZhCn, Some("2026-09-02"), None);
+    let zh = build_agent_system_prompt(ChatLocale::ZhCn, Some("2026-09-02"), None, false);
     assert!(zh.contains("证据闭环与存疑交叉验证铁律"));
     assert!(zh.contains("严禁依赖 Win32_VideoController.AdapterRAM"));
     assert!(zh.contains("HardwareInformation.qwMemorySize"));
     assert!(zh.contains("nvidia-smi"));
 
-    let ja = build_agent_system_prompt(ChatLocale::JaJp, None, None);
+    let ja = build_agent_system_prompt(ChatLocale::JaJp, None, None, false);
     assert!(ja.contains("エビデンス閉ループと疑問点の交差検証原則"));
     assert!(ja.contains("HardwareInformation.qwMemorySize"));
 }

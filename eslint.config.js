@@ -18,6 +18,8 @@ export default tseslint.config(
       "node_modules",
       "playwright-report",
       "public",
+      // 原样内置的上游第三方脚本（余额小鲸鱼），不按本仓库规范改写
+      "src/features/whale-widget/upstream",
       "src-tauri/target*/**",
       "src-tauri/target*",
       "test-results",

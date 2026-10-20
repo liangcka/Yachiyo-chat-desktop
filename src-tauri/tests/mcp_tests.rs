@@ -226,3 +226,23 @@ async fn test_builtin_desktop_control_never_spawns_transport() {
         assert!(executed.unwrap_err().contains("仅支持 Windows"));
     }
 }
+
+#[test]
+fn test_computer_control_toggle_restores_missing_builtin_and_is_not_exported() {
+    let dir = tempdir().expect("tempdir");
+    let manager = McpManager::new(Some(dir.path().join("mcp_servers.json")), reqwest::Client::new());
+    // 自定义路径不预置内置条目，相当于用户曾在 MCP 面板删除过它
+    assert!(!manager.computer_control_enabled());
+
+    manager.set_computer_control_enabled(true).unwrap();
+    assert!(manager.computer_control_enabled());
+    assert_eq!(manager.get_server("windows_mcp").unwrap().name, McpManager::default_windows_mcp_config().name);
+
+    manager.set_computer_control_enabled(false).unwrap();
+    assert!(!manager.computer_control_enabled());
+    let reloaded = McpManager::new(Some(dir.path().join("mcp_servers.json")), reqwest::Client::new());
+    assert!(!reloaded.computer_control_enabled());
+
+    let exported = manager.export_claude_config().unwrap();
+    assert!(!exported.contains("windows_mcp"));
+}

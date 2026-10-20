@@ -47,7 +47,7 @@
         "img-src": "'self' data: blob: https://cdn.jsdelivr.net",
         "font-src": "'self' data:",
         "worker-src": "'self' blob:",
-        "connect-src": "'self' ipc: http://ipc.localhost http://127.0.0.1:* https://data.jsdelivr.com",
+        "connect-src": "'self' ipc: http://ipc.localhost http://127.0.0.1:* https://data.jsdelivr.com https://cdn.jsdelivr.net",
         "object-src": "'none'",
         "base-uri": "'self'",
         "frame-src": "'none'",

@@ -170,6 +170,18 @@ impl McpManager {
         Ok(())
     }
 
+    /// 电脑控制插件是否启用；条目被删除过时视为关闭
+    pub fn computer_control_enabled(&self) -> bool {
+        self.get_server(computer::BUILTIN_SERVER_ID).is_some_and(|server| server.enabled)
+    }
+
+    /// 电脑控制插件开关：条目缺失时按内置默认配置补回
+    pub fn set_computer_control_enabled(&self, enabled: bool) -> Result<(), String> {
+        let mut config = self.get_server(computer::BUILTIN_SERVER_ID).unwrap_or_else(Self::default_windows_mcp_config);
+        config.enabled = enabled;
+        self.save_server(config)
+    }
+
     /// 测试连接指定服务并返回其工具列表
     pub async fn test_server_connection(
         &self,
@@ -240,7 +252,8 @@ impl McpManager {
         let servers = self.servers.read().map_err(|e| e.to_string())?;
         let mut map = HashMap::new();
 
-        for s in servers.iter() {
+        // 内置电脑控制在进程内执行，其 transport 只为保持格式兼容，导出给其他客户端没有意义
+        for s in servers.iter().filter(|s| s.id != computer::BUILTIN_SERVER_ID) {
             let entry = match &s.transport {
                 McpTransportConfig::Stdio { command, args, env } => ClaudeDesktopServerEntry {
                     command: Some(command.clone()),

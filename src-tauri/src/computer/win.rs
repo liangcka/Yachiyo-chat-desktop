@@ -6,7 +6,8 @@ use super::{bmp, hold_input_guard, Action, AppMode, MouseButton, OVERLAY_WINDOW_
 use std::ffi::c_void;
 use std::mem::size_of;
 use std::ptr::{null, null_mut};
-use std::time::Duration;
+use std::collections::HashSet;
+use std::time::{Duration, Instant};
 use windows_sys::core::BOOL;
 use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM, POINT, RECT};
 use windows_sys::Win32::Graphics::Gdi::{
@@ -34,6 +35,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 const MAX_LISTED_WINDOWS: usize = 40;
+/// 启动应用后等待新窗口出现的上限；多数应用 1—3 秒内出窗，慢的启动器也足够
+const LAUNCH_WAIT: Duration = Duration::from_secs(10);
+const LAUNCH_POLL: Duration = Duration::from_millis(200);
+/// 新窗口出现后再等一小会儿，让它完成首帧绘制与控件树构建，inspect 才读得到元素
+const LAUNCH_SETTLE: Duration = Duration::from_millis(400);
 
 /// 需要替换为空白的标准系统光标（箭头、文本、手形、等待、缩放等），覆盖鼠标可能显示的全部形态
 const SYSTEM_CURSORS: [SYSTEM_CURSOR_ID; 13] = [
@@ -92,12 +98,12 @@ pub fn perform(action: Action) -> Result<String, String> {
         Action::Shortcut { label, keys } => shortcut(&label, &keys),
         Action::Screenshot => screenshot(),
         Action::Snapshot => Ok(snapshot()),
-        Action::Inspect => inspect(),
+        Action::Inspect { query } => inspect(query.as_deref()),
     }
 }
 
 /// 枚举前台窗口的可点击元素；前台是八千代自身时拒绝
-fn inspect() -> Result<String, String> {
+fn inspect(query: Option<&str>) -> Result<String, String> {
     let hwnd = unsafe { GetForegroundWindow() };
     if hwnd.is_null() {
         return Err("当前没有前台窗口，请先用 app 启动或切换到目标应用".to_string());
@@ -105,7 +111,7 @@ fn inspect() -> Result<String, String> {
     if is_own_window(hwnd) {
         return Err("当前前台窗口是月见八千代自身，请先用 app（launch 或 focus）切换到目标应用再 inspect".to_string());
     }
-    super::uia::inspect(hwnd as isize, &window_title(hwnd))
+    super::uia::inspect(hwnd as isize, &window_title(hwnd), query)
 }
 
 fn wide(s: &str) -> Vec<u16> {
@@ -381,6 +387,7 @@ fn app(name: &str, mode: AppMode) -> Result<String, String> {
                 focus_window(&info)?;
                 return Ok(format!("「{}」已在运行，已切换到前台", info.title));
             }
+            let before: HashSet<isize> = list_windows().iter().map(|w| w.hwnd as isize).collect();
             let file = wide(name);
             let verb = wide("open");
             let result = unsafe {
@@ -393,7 +400,18 @@ fn app(name: &str, mode: AppMode) -> Result<String, String> {
                     name, code
                 ));
             }
-            Ok(format!("已启动「{}」", name))
+            match wait_for_new_window(&before) {
+                Some(info) => {
+                    // 新窗口通常已在前台；被前台锁挡住时再切一次，切不过去也不算启动失败
+                    let _ = focus_window(&info);
+                    Ok(format!("已启动「{}」，窗口「{}」（{}）已出现，当前前台：「{}」", name, info.title, info.exe, window_title(unsafe { GetForegroundWindow() })))
+                }
+                None => Ok(format!(
+                    "已发出启动「{}」的请求，但 {} 秒内没有出现新窗口（可能启动较慢或只驻留在托盘），请用 snapshot 确认",
+                    name,
+                    LAUNCH_WAIT.as_secs()
+                )),
+            }
         }
         AppMode::Focus => {
             let info = find_window(name).ok_or_else(|| format!("未找到与「{}」匹配的窗口，请先用 snapshot 查看", name))?;
@@ -409,6 +427,20 @@ fn app(name: &str, mode: AppMode) -> Result<String, String> {
             Ok(format!("已请求关闭「{}」（{}）", info.title, info.exe))
         }
     }
+}
+
+/// 轮询直到出现启动前不存在的顶层窗口（八千代自身除外），以实际出窗代替固定等待
+fn wait_for_new_window(before: &HashSet<isize>) -> Option<WindowInfo> {
+    let own = unsafe { GetCurrentProcessId() };
+    let deadline = Instant::now() + LAUNCH_WAIT;
+    while Instant::now() < deadline {
+        std::thread::sleep(LAUNCH_POLL);
+        if let Some(info) = list_windows().into_iter().find(|w| w.pid != own && !before.contains(&(w.hwnd as isize))) {
+            std::thread::sleep(LAUNCH_SETTLE);
+            return Some(info);
+        }
+    }
+    None
 }
 
 fn snapshot() -> String {

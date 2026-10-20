@@ -1,13 +1,8 @@
 import { useEffect, useState } from "react";
-import { DEFAULT_WHALE_ASSET_VERSION, isWhaleAssetVersion } from "../features/whale-widget/assets";
 
 export interface WhaleWidgetSettings {
-  /** 是否在工作台显示余额小鲸鱼 */
+  /** 是否在工作台显示余额小鲸鱼；挂件自身的外观、音效与提示设置由其菜单管理 */
   enabled: boolean;
-  /** DeepSeek 回复结束后是否冒泡提示本轮余额变化 */
-  turnCostBubble: boolean;
-  /** 鲸鱼娘素材所用的上游 npm 包版本，由「检查更新」推进 */
-  assetVersion: string;
 }
 
 export interface PluginSettings {
@@ -19,27 +14,16 @@ const CHANGE_EVENT = "yachiyo-plugin-settings-changed";
 
 /** 插件一律默认关闭，由用户在设置的「插件」页主动开启 */
 export const DEFAULT_PLUGIN_SETTINGS: PluginSettings = {
-  whaleWidget: { enabled: false, turnCostBubble: true, assetVersion: DEFAULT_WHALE_ASSET_VERSION },
+  whaleWidget: { enabled: false },
 };
-
-function readBoolean(value: unknown, fallback: boolean): boolean {
-  return typeof value === "boolean" ? value : fallback;
-}
 
 function readStorage(): PluginSettings {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_PLUGIN_SETTINGS;
-    const parsed = JSON.parse(raw) as { whaleWidget?: Partial<Record<keyof WhaleWidgetSettings, unknown>> };
-    const whale = parsed.whaleWidget ?? {};
-    const defaults = DEFAULT_PLUGIN_SETTINGS.whaleWidget;
-    return {
-      whaleWidget: {
-        enabled: readBoolean(whale.enabled, defaults.enabled),
-        turnCostBubble: readBoolean(whale.turnCostBubble, defaults.turnCostBubble),
-        assetVersion: isWhaleAssetVersion(whale.assetVersion) ? whale.assetVersion : defaults.assetVersion,
-      },
-    };
+    const parsed = JSON.parse(raw) as { whaleWidget?: { enabled?: unknown } };
+    const enabled = parsed.whaleWidget?.enabled;
+    return { whaleWidget: { enabled: typeof enabled === "boolean" ? enabled : DEFAULT_PLUGIN_SETTINGS.whaleWidget.enabled } };
   } catch {
     return DEFAULT_PLUGIN_SETTINGS;
   }

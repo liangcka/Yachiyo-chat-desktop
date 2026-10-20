@@ -7,4 +7,3 @@ export * from "./SidebarProjects";
 export * from "./SidebarHistoryList";
 export * from "./SidebarConversationItem";
 export * from "./SidebarFooter";
-export * from "./SidebarRail";

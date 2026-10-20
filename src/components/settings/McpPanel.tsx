@@ -80,6 +80,7 @@ const zhCopy = {
   connectError: (error: string) => `连接出错: ${error}`,
   idRequired: "服务 ID 不能为空",
   idInvalid: "服务 ID 仅支持英文字母、数字、下划线与连字符",
+  idReserved: "该 ID 由内置电脑控制使用，请在「插件」页开关电脑控制",
   commandRequired: "请输入执行命令（例如 npx, uvx 等）",
   urlRequired: "请输入远程 SSE / HTTP 服务端点 URL",
   testPassed: (count: number) => `连接测试成功！发现 ${count} 个工具`,
@@ -164,6 +165,7 @@ const jaCopy: McpCopy = {
   connectError: (error) => `接続中にエラーが発生しました: ${error}`,
   idRequired: "サーバー ID を入力してください",
   idInvalid: "サーバー ID には英数字、アンダースコア、ハイフンのみ使用できます",
+  idReserved: "この ID は内蔵のパソコン操作で使用しています。「プラグイン」でオン／オフを切り替えてください",
   commandRequired: "実行コマンドを入力してください（例: npx, uvx）",
   urlRequired: "リモートの SSE / HTTP エンドポイント URL を入力してください",
   testPassed: (count) => `接続テストに成功しました。ツールが ${count} 個見つかりました`,
@@ -234,6 +236,11 @@ const jaCopy: McpCopy = {
 
 const MCP_COPY: Readonly<Record<Locale, McpCopy>> = { "zh-CN": zhCopy, "ja-JP": jaCopy };
 
+/** 内置电脑控制在「插件」页启停，MCP 面板只管理用户自行添加的服务 */
+function isUserServer(server: McpServerConfig): boolean {
+  return server.id !== BUILTIN_DESKTOP_CONTROL_ID;
+}
+
 export const McpPanel: React.FC<McpPanelProps> = ({ showToast }) => {
   const locale = useLocale();
   const labels = MCP_COPY[locale];
@@ -271,7 +278,7 @@ export const McpPanel: React.FC<McpPanelProps> = ({ showToast }) => {
     setLoading(true);
     try {
       const list = await listMcpServers();
-      setServers(list);
+      setServers(list.filter(isUserServer));
     } catch (e) {
       notify(labels.loadFailed(String(e)), "error");
     } finally {
@@ -285,7 +292,7 @@ export const McpPanel: React.FC<McpPanelProps> = ({ showToast }) => {
       try {
         const list = await listMcpServers();
         if (cancelled) return;
-        setServers(list);
+        setServers(list.filter(isUserServer));
       } catch (e) {
         if (cancelled) return;
         notify(labels.loadFailed(String(e)), "error");
@@ -435,6 +442,10 @@ export const McpPanel: React.FC<McpPanelProps> = ({ showToast }) => {
     }
     if (!/^[a-zA-Z0-9_-]+$/.test(trimmedId)) {
       notify(labels.idInvalid, "error");
+      return null;
+    }
+    if (trimmedId === BUILTIN_DESKTOP_CONTROL_ID) {
+      notify(labels.idReserved, "error");
       return null;
     }
 
@@ -867,13 +878,9 @@ export const McpPanel: React.FC<McpPanelProps> = ({ showToast }) => {
                             marginTop: "2px",
                           }}
                         >
-                          {s.id === BUILTIN_DESKTOP_CONTROL_ID
-                            ? locale === "ja-JP"
-                              ? "内蔵（アプリ内でネイティブ実行、追加インストール不要）"
-                              : "内置（应用内原生执行，无需额外安装）"
-                            : s.transport.type === "stdio"
-                              ? `${s.transport.command} ${s.transport.args.join(" ")}`
-                              : s.transport.url}
+                          {s.transport.type === "stdio"
+                            ? `${s.transport.command} ${s.transport.args.join(" ")}`
+                            : s.transport.url}
                         </div>
 
                         {testErr && (

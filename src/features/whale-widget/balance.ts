@@ -10,15 +10,6 @@ export interface DeepSeekBalance {
   readonly available: boolean;
 }
 
-/** 按日累计的余额观测账本：余额下降计为消费，上升（充值、赠金）只移动基准 */
-export interface BalanceLedger {
-  /** 本地日期 YYYY-MM-DD，跨天后清零 */
-  readonly date: string;
-  readonly currency: string;
-  readonly lastBalance: number;
-  readonly todaySpent: number;
-}
-
 export class BalanceRequestError extends Error {
   constructor(readonly code: string) {
     super(code);
@@ -29,11 +20,6 @@ export class BalanceRequestError extends Error {
 function toAmount(value: unknown): number | null {
   const amount = typeof value === "string" ? Number(value) : value;
   return typeof amount === "number" && Number.isFinite(amount) ? amount : null;
-}
-
-/** 金额保留 6 位小数，避免浮点减法把 0.0288 记成 0.028800000000003876 */
-function roundAmount(value: number): number {
-  return Math.round(value * 1e6) / 1e6;
 }
 
 /**
@@ -91,29 +77,4 @@ export async function fetchDeepSeekBalance(apiKey: string | undefined): Promise<
   const balance = pickDeepSeekBalance(body);
   if (balance === null) throw new BalanceRequestError("PROVIDER_ERROR");
   return balance;
-}
-
-export function localDateKey(now: Date): string {
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${now.getFullYear()}-${month}-${day}`;
-}
-
-/**
- * 记一次余额观测，返回新账本与这次观测计入的消费额。
- * 跨天或换币种时重新起账：币种切换造成的数值跳变不是消费，旧币种的累计也不能换个单位继续显示。
- */
-export function observeBalance(
-  ledger: BalanceLedger | null,
-  balance: Pick<DeepSeekBalance, "currency" | "total">,
-  date: string,
-): { ledger: BalanceLedger; spent: number } {
-  if (ledger === null || ledger.date !== date || ledger.currency !== balance.currency) {
-    return { ledger: { date, currency: balance.currency, lastBalance: balance.total, todaySpent: 0 }, spent: 0 };
-  }
-  const spent = Math.max(0, roundAmount(ledger.lastBalance - balance.total));
-  return {
-    ledger: { ...ledger, lastBalance: balance.total, todaySpent: roundAmount(ledger.todaySpent + spent) },
-    spent,
-  };
 }
