@@ -361,17 +361,53 @@
 }
 
 .markdown-strong {
-  font-weight: 680;
-  color: var(--yx-alias-label-primary, #ffffff);
-}
-
-[data-theme="light"] .markdown-strong {
-  color: #0f172a;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .markdown-em {
   font-style: italic;
   opacity: 0.92;
+}
+
+/* 标题按正文字号的倍数缩放，紧贴其后的内容，与上文拉开距离 */
+.markdown-heading {
+  margin: 0.5rem 0 0;
+  color: var(--text-primary);
+  font-size: 1em;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: -0.005em;
+}
+
+.markdown-heading:first-child {
+  margin-top: 0;
+}
+
+.markdown-heading + .markdown-spacer {
+  display: none;
+}
+
+.markdown-heading--1 {
+  font-size: 1.36em;
+  letter-spacing: -0.015em;
+}
+
+.markdown-heading--2 {
+  font-size: 1.18em;
+  letter-spacing: -0.01em;
+}
+
+.markdown-heading--3 {
+  font-size: 1.06em;
+}
+
+.markdown-hr {
+  width: 100%;
+  height: 1px;
+  margin: 0.5rem 0;
+  border: 0;
+  background: var(--border-l1);
 }
 
 /* 行内代码与动作描写服从正文层级。 */
@@ -390,66 +426,46 @@
   font-style: italic;
 }
 
-/* 代码块容器 */
+/* 代码块：沿用中性灰阶，语言标签与复制按钮浮在代码上方同一底色内 */
 .markdown-code-block {
-  margin: 0.5rem 0;
-  border-radius: 10px;
+  margin: 0.25rem 0;
+  border: 1px solid var(--border-l1);
+  border-radius: 12px;
   overflow: hidden;
-  background: rgba(10, 18, 38, 0.85);
-  border: 1px solid rgba(75, 139, 245, 0.18);
-  
-}
-
-[data-theme="light"] .markdown-code-block {
-  background: #f8fafc;
-  border-color: rgba(37, 99, 235, 0.15);
-  
+  background: var(--yx-alias-markdown-code-block, var(--space-2));
 }
 
 .markdown-code-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.35rem 0.85rem;
-  background: rgba(255, 255, 255, 0.04);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-[data-theme="light"] .markdown-code-header {
-  background: rgba(0, 0, 0, 0.03);
-  border-bottom-color: rgba(0, 0, 0, 0.06);
+  padding: 0.4rem 0.5rem 0 0.9rem;
 }
 
 .markdown-code-lang {
   font-family: var(--ds-font-family-code, monospace);
   font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--yx-alias-label-tertiary);
+  color: var(--text-dim);
   text-transform: lowercase;
-  letter-spacing: 0.04em;
 }
 
 .markdown-code-copy-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 7px;
-  border: 1px solid transparent;
-  border-radius: 5px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 999px;
   background: transparent;
-  color: var(--yx-alias-label-secondary);
+  color: var(--text-dim);
   font-size: 0.74rem;
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+  transition: background-color 120ms ease, color 120ms ease;
 }
 
 .markdown-code-copy-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--yx-alias-label-primary);
-}
-
-[data-theme="light"] .markdown-code-copy-btn:hover {
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--interactive-hover);
+  color: var(--text-primary);
 }
 
 .markdown-code-copy-icon--success {
@@ -458,17 +474,60 @@
 
 .markdown-code-pre {
   margin: 0;
-  padding: 0.8rem 1rem;
+  padding: 0.45rem 0.9rem 0.85rem;
   overflow-x: auto;
   font-family: var(--ds-font-family-code, monospace);
-  font-size: 0.88rem;
+  font-size: 0.86rem;
   line-height: 1.6;
-  color: #e2e8f0;
+  color: var(--text-primary);
   scrollbar-width: thin;
 }
 
-[data-theme="light"] .markdown-code-pre {
-  color: #1e293b;
+/* 表格：宽表横向滚动，表头与行之间只用细分隔线 */
+.markdown-table-wrap {
+  margin: 0.25rem 0;
+  overflow-x: auto;
+  border: 1px solid var(--border-l1);
+  border-radius: 10px;
+  scrollbar-width: thin;
+}
+
+.markdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.93em;
+  line-height: 1.55;
+}
+
+.markdown-table th,
+.markdown-table td {
+  padding: 0.45rem 0.8rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-table th {
+  border-bottom: 1px solid var(--border-l2);
+  background: var(--interactive-hover);
+  color: var(--text-primary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.markdown-table td {
+  border-top: 1px solid var(--border-l1);
+}
+
+.markdown-table tbody tr:first-child td {
+  border-top: 0;
+}
+
+.markdown-table [data-align="center"] {
+  text-align: center;
+}
+
+.markdown-table [data-align="right"] {
+  text-align: right;
 }
 
 /* 列表与有序列表 */
@@ -476,8 +535,8 @@
 .markdown-ol {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  margin: 0.25rem 0;
+  gap: 0.3rem;
+  margin: 0.1rem 0;
   padding: 0;
   list-style: none;
 }
@@ -486,44 +545,41 @@
 .markdown-ol-li {
   display: flex;
   align-items: baseline;
-  gap: 0.5rem;
+  gap: 0.6rem;
 }
 
 .markdown-li__bullet {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--accent-brand, #3b82f6);
+  background: var(--text-dim);
   flex-shrink: 0;
-  margin-top: 0.55em;
+  margin-left: 0.3rem;
+  transform: translateY(-0.2em);
 }
 
 .markdown-ol-li__num {
-  font-family: var(--ds-font-family-code, monospace);
-  font-size: 0.85em;
-  font-weight: 600;
-  color: var(--accent-brand, #3b82f6);
+  min-width: 1.1em;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
   flex-shrink: 0;
 }
 
 .markdown-li__content {
   flex: 1;
+  min-width: 0;
 }
 
 /* 引用块 */
 .markdown-blockquote {
-  margin: 0.4rem 0;
-  padding: 0.4rem 0.85rem;
-  border-left: 3px solid rgba(147, 197, 253, 0.6);
-  background: rgba(75, 139, 245, 0.06);
-  border-radius: 0 8px 8px 0;
-  color: var(--yx-alias-label-secondary);
-  font-style: italic;
-}
-
-[data-theme="light"] .markdown-blockquote {
-  border-left-color: #3b82f6;
-  background: rgba(59, 130, 246, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0.1rem 0;
+  padding: 0.05rem 0 0.05rem 0.9rem;
+  border-left: 3px solid var(--border-l2);
+  color: var(--text-muted);
 }
 
 /* 图片嵌入气泡内：圆角相对气泡圆角内切一档 */

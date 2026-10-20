@@ -107,12 +107,31 @@ function renderInlineFormatting(line: string, isAssistant = false, emoteTitle = 
   return parts;
 }
 
+const HEADING_PATTERN = /^(#{1,6})\s+(.*)$/u;
+const RULE_PATTERN = /^(?:-{3,}|\*{3,}|_{3,})$/u;
+const TABLE_DIVIDER_PATTERN = /^\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?$/u;
+
+type CellAlign = "left" | "center" | "right" | undefined;
+
+function splitTableRow(row: string): string[] {
+  return row.trim().replace(/^\|/u, "").replace(/\|$/u, "").split("|").map((cell) => cell.trim());
+}
+
+function readCellAlign(divider: string): CellAlign {
+  const left = divider.startsWith(":");
+  const right = divider.endsWith(":");
+  if (left && right) return "center";
+  if (right) return "right";
+  return left ? "left" : undefined;
+}
+
 /**
  * 轻量 Markdown 内容渲染器：
  * - 支持代码块 (```lang ... ```)
+ * - 支持标题 (# ~ ######)、分隔线 (---) 与 GFM 表格
  * - 支持无序列表 (- item, * item)
  * - 支持有序列表 (1. item)
- * - 支持引用块 (> text)
+ * - 支持引用块 (> text)，连续引用行合并为一块
  * - 支持行内加粗、斜体、代码与八千代动作标签
  */
 export const MarkdownContent = memo(function MarkdownContent({
@@ -130,9 +149,13 @@ export const MarkdownContent = memo(function MarkdownContent({
 
   const parseTextSection = (sectionText: string, keyPrefix: string): React.ReactNode[] => {
     const lines = sectionText.split("\n");
+    // 代码块前后的空行由容器间距承担，段内连续空行只保留一个间隙
+    while (lines.length > 0 && !lines[0].trim()) lines.shift();
+    while (lines.length > 0 && !lines[lines.length - 1].trim()) lines.pop();
     const renderedNodes: React.ReactNode[] = [];
     let currentList: React.ReactNode[] = [];
     let isOrderedList = false;
+    let previousBlank = false;
 
     const flushList = () => {
       if (currentList.length > 0) {
@@ -154,8 +177,11 @@ export const MarkdownContent = memo(function MarkdownContent({
       }
     };
 
-    lines.forEach((line, lineIdx) => {
+    for (let lineIdx = 0; lineIdx < lines.length; lineIdx += 1) {
+      const line = lines[lineIdx];
       const trimmed = line.trim();
+      const followsBlank = previousBlank;
+      previousBlank = !trimmed;
 
       // 无序列表项 (- 或 *)
       const unorderedMatch = /^[-*]\s+(.*)$/.exec(line.trimStart());
@@ -170,7 +196,7 @@ export const MarkdownContent = memo(function MarkdownContent({
             </div>
           </li>,
         );
-        return;
+        continue;
       }
 
       // 有序列表项 (1. , 2. )
@@ -186,7 +212,7 @@ export const MarkdownContent = memo(function MarkdownContent({
             </div>
           </li>,
         );
-        return;
+        continue;
       }
 
       // 遇到非列表行，清空积累的列表
@@ -194,19 +220,86 @@ export const MarkdownContent = memo(function MarkdownContent({
 
       if (!trimmed) {
         // 空行，提供段落间隙
-        renderedNodes.push(<div key={`sp-${lineIdx}`} className="markdown-spacer" />);
-        return;
+        if (!followsBlank) renderedNodes.push(<div key={`sp-${lineIdx}`} className="markdown-spacer" />);
+        continue;
       }
 
-      // 引用块 (> text)
-      if (trimmed.startsWith(">")) {
-        const quoteText = trimmed.replace(/^>\s*/, "");
+      const headingMatch = HEADING_PATTERN.exec(trimmed);
+      if (headingMatch) {
+        const level = headingMatch[1].length;
+        renderedNodes.push(React.createElement(
+          `h${level}`,
+          { key: `h-${keyPrefix}-${lineIdx}`, className: `markdown-heading markdown-heading--${level}` },
+          renderInlineFormatting(headingMatch[2], isAssistant, emoteTitle),
+        ));
+        continue;
+      }
+
+      if (RULE_PATTERN.test(trimmed)) {
+        renderedNodes.push(<hr key={`hr-${keyPrefix}-${lineIdx}`} className="markdown-hr" />);
+        continue;
+      }
+
+      // 表格：表头行后紧跟 |---|:---:| 分隔行才成立，流式输出中途不会误判
+      const dividerLine = lines[lineIdx + 1]?.trim() ?? "";
+      if (trimmed.includes("|") && dividerLine.includes("|") && TABLE_DIVIDER_PATTERN.test(dividerLine)) {
+        const header = splitTableRow(trimmed);
+        const aligns = splitTableRow(dividerLine).map(readCellAlign);
+        const rows: string[][] = [];
+        let rowIdx = lineIdx + 2;
+        while (rowIdx < lines.length && lines[rowIdx].includes("|") && lines[rowIdx].trim()) {
+          rows.push(splitTableRow(lines[rowIdx]));
+          rowIdx += 1;
+        }
         renderedNodes.push(
-          <blockquote key={`bq-${lineIdx}`} className="markdown-blockquote">
-            {renderInlineFormatting(quoteText, isAssistant, emoteTitle)}
+          <div key={`tb-${keyPrefix}-${lineIdx}`} className="markdown-table-wrap">
+            <table className="markdown-table">
+              <thead>
+                <tr>
+                  {header.map((cell, cellIdx) => (
+                    <th key={cellIdx} data-align={aligns[cellIdx]}>
+                      {renderInlineFormatting(cell, isAssistant, emoteTitle)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, idx) => (
+                  <tr key={idx}>
+                    {header.map((_, cellIdx) => (
+                      <td key={cellIdx} data-align={aligns[cellIdx]}>
+                        {renderInlineFormatting(row[cellIdx] ?? "", isAssistant, emoteTitle)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>,
+        );
+        lineIdx = rowIdx - 1;
+        continue;
+      }
+
+      // 引用块 (> text)，连续引用行合并为一块
+      if (trimmed.startsWith(">")) {
+        const quoteLines: string[] = [];
+        let quoteIdx = lineIdx;
+        while (quoteIdx < lines.length && lines[quoteIdx].trim().startsWith(">")) {
+          quoteLines.push(lines[quoteIdx].trim().replace(/^>\s?/, ""));
+          quoteIdx += 1;
+        }
+        renderedNodes.push(
+          <blockquote key={`bq-${keyPrefix}-${lineIdx}`} className="markdown-blockquote">
+            {quoteLines.map((quoteLine, idx) => (
+              <p key={idx} className="markdown-p">
+                {renderInlineFormatting(quoteLine, isAssistant, emoteTitle)}
+              </p>
+            ))}
           </blockquote>,
         );
-        return;
+        lineIdx = quoteIdx - 1;
+        continue;
       }
 
       // 普通段落行
@@ -215,7 +308,7 @@ export const MarkdownContent = memo(function MarkdownContent({
           {renderInlineFormatting(line, isAssistant, emoteTitle)}
         </p>,
       );
-    });
+    }
 
     flushList();
     return renderedNodes;
