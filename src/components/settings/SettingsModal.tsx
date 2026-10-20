@@ -7,6 +7,7 @@ import {
   HelpCircle,
   Keyboard,
   Palette,
+  Puzzle,
   Sliders,
   Sparkles,
   Trash2,
@@ -21,6 +22,7 @@ import { LlmSettingsPanel } from "../LlmSettingsPanel";
 import { SkillsPanel } from "../SkillsPanel";
 import { UserMemoryPanel } from "../UserMemoryPanel";
 import { McpPanel } from "./McpPanel";
+import { PluginsPanel } from "./PluginsPanel";
 import { SKILLS } from "../../skills";
 import { PROVIDER_METADATA } from "../../domain/llm";
 import {
@@ -31,6 +33,7 @@ import { AvatarCropModal } from "./AvatarCropModal";
 import { isDesktopApp } from "../../services/app-platform";
 import { openExternalUrl } from "../../services/desktop-bridge";
 import { checkForUpdate, type UpdateCheckResult } from "../../services/update-check";
+import { useAppUpdateInstaller } from "../../services/app-updater";
 import type { SharedViewProps } from "../../views/layout-types";
 
 export type SettingsTabKey =
@@ -41,6 +44,7 @@ export type SettingsTabKey =
   | "custom"
   | "browser"
   | "mcp"
+  | "plugins"
   | "shortcuts"
   | "user";
 
@@ -83,6 +87,7 @@ const zhCopy = {
   navCustom: "自定义",
   navBrowser: "联网搜索",
   navMcp: "MCP 服务",
+  navPlugins: "插件",
   shortcutsLink: "快捷键速查",
   feedbackLink: "问题反馈",
   userSettingsLabel: "用户设置",
@@ -146,7 +151,11 @@ const zhCopy = {
   updateLatest: (version: string) => `当前版本 v${version}，已是最新。`,
   updateAvailable: (latest: string, current: string) => `发现新版本 v${latest}（当前 v${current}）。`,
   updateFailed: "检查失败，请确认网络连接后重试。",
-  updateDownload: "前往下载",
+  updateDownload: "立即更新",
+  updateDownloading: (percent: number | undefined) => (percent === undefined ? "正在下载更新…" : `正在下载更新 ${percent}%`),
+  updateInstalling: "正在安装，完成后自动重启…",
+  updateInstallFailed: "更新失败，可前往下载页手动安装。",
+  updateOpenRelease: "前往下载",
   shortcutsTitle: "键盘快捷键速查",
   shortcutsDesc: "全键盘操作映射，帮助您快速掌控桌面端交互。",
   globalGroup: "全局操作",
@@ -213,6 +222,7 @@ const jaCopy: SettingsCopy = {
   navCustom: "カスタマイズ",
   navBrowser: "ウェブ検索",
   navMcp: "MCP サーバー",
+  navPlugins: "プラグイン",
   shortcutsLink: "ショートカット一覧",
   feedbackLink: "フィードバック",
   userSettingsLabel: "ユーザー設定",
@@ -276,7 +286,11 @@ const jaCopy: SettingsCopy = {
   updateLatest: (version) => `現在のバージョン v${version} は最新です。`,
   updateAvailable: (latest, current) => `新しいバージョン v${latest} があります（現在 v${current}）。`,
   updateFailed: "確認できませんでした。ネットワーク接続を確認してから再試行してください。",
-  updateDownload: "ダウンロード",
+  updateDownload: "今すぐ更新",
+  updateDownloading: (percent: number | undefined) => (percent === undefined ? "更新をダウンロード中…" : `更新をダウンロード中 ${percent}%`),
+  updateInstalling: "インストール中です。完了後に自動で再起動します…",
+  updateInstallFailed: "更新に失敗しました。ダウンロードページから手動でインストールできます。",
+  updateOpenRelease: "ダウンロード",
   shortcutsTitle: "キーボードショートカット",
   shortcutsDesc: "キーボードだけでデスクトップ版を操作するためのショートカット一覧です。",
   globalGroup: "全体操作",
@@ -330,6 +344,23 @@ export function SettingsModal({
   const t = SETTINGS_COPY[shared.controller.locale];
   const desktop = isDesktopApp();
   const [updateCheck, setUpdateCheck] = useState<"idle" | "checking" | "failed" | UpdateCheckResult>("idle");
+
+  const availableUpdate = typeof updateCheck === "object" ? updateCheck.available : undefined;
+  const installer = useAppUpdateInstaller(availableUpdate?.url);
+  const installing = installer.state.kind === "downloading" || installer.state.kind === "installing";
+  const updateStatusText = installer.state.kind === "downloading"
+    ? t.updateDownloading(installer.state.percent)
+    : installer.state.kind === "installing"
+      ? t.updateInstalling
+      : installer.state.kind === "failed"
+        ? t.updateInstallFailed
+        : updateCheck === "idle" || updateCheck === "checking"
+          ? t.updateIdle
+          : updateCheck === "failed"
+            ? t.updateFailed
+            : updateCheck.available !== undefined
+              ? t.updateAvailable(updateCheck.available.version, updateCheck.currentVersion)
+              : t.updateLatest(updateCheck.currentVersion);
 
   const handleCheckUpdate = async () => {
     setUpdateCheck("checking");
@@ -574,6 +605,18 @@ export function SettingsModal({
               >
                 <Server size={16} className="settings-modal__nav-icon" />
                 <span className="settings-modal__nav-item-text">{t.navMcp}</span>
+              </button>
+
+              <button
+                type="button"
+                role="tab"
+                aria-label={t.navPlugins}
+                aria-selected={activeTab === "plugins"}
+                className={`settings-modal__nav-item ${activeTab === "plugins" ? "settings-modal__nav-item--active" : ""}`}
+                onClick={() => setActiveTab("plugins")}
+              >
+                <Puzzle size={16} className="settings-modal__nav-icon" />
+                <span className="settings-modal__nav-item-text">{t.navPlugins}</span>
               </button>
             </div>
 
@@ -878,6 +921,15 @@ export function SettingsModal({
             <McpPanel showToast={shared.showToast} />
           ) : null}
 
+          {/* TAB: 插件 */}
+          {activeTab === "plugins" ? (
+            <PluginsPanel
+              locale={shared.controller.locale}
+              hasDeepSeekKey={shared.llmEntries.some((entry) => entry.provider === "deepseek" && entry.baseUrl === undefined)}
+              onConfigureKey={() => setActiveTab("models")}
+            />
+          ) : null}
+
           {/* TAB: 存储与维护 (App) */}
           {activeTab === "app" ? (
             <div className="settings-panel-view">
@@ -893,25 +945,24 @@ export function SettingsModal({
                     <div className="settings-item-card__lead">
                       <strong className="settings-item-card__name">{t.updateName}</strong>
                       <span className="settings-item-card__desc" aria-live="polite">
-                        {updateCheck === "idle" || updateCheck === "checking"
-                          ? t.updateIdle
-                          : updateCheck === "failed"
-                            ? t.updateFailed
-                            : updateCheck.available !== undefined
-                              ? t.updateAvailable(updateCheck.available.version, updateCheck.currentVersion)
-                              : t.updateLatest(updateCheck.currentVersion)}
+                        {updateStatusText}
                       </span>
                     </div>
                     <div className="settings-item-card__action">
-                      {typeof updateCheck === "object" && updateCheck.available !== undefined ? (
+                      {availableUpdate !== undefined && installer.state.kind === "failed" ? (
+                        <button
+                          type="button"
+                          className="settings-btn"
+                          onClick={() => void openExternalUrl(availableUpdate.url)}
+                        >
+                          {t.updateOpenRelease}
+                        </button>
+                      ) : availableUpdate !== undefined ? (
                         <button
                           type="button"
                           className="settings-btn settings-btn--primary"
-                          onClick={() => {
-                            if (typeof updateCheck === "object" && updateCheck.available !== undefined) {
-                              void openExternalUrl(updateCheck.available.url);
-                            }
-                          }}
+                          disabled={installing}
+                          onClick={() => void installer.start()}
                         >
                           {t.updateDownload}
                         </button>

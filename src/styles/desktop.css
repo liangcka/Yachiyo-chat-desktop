@@ -7206,3 +7206,33 @@
     animation: none;
   }
 }
+
+/* 设置 · 插件页 */
+.plugins-panel__card {
+  align-items: center;
+}
+
+.plugins-panel__thumb {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: var(--interactive-hover);
+}
+
+.plugins-panel__link {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-brand);
+  font: inherit;
+  cursor: pointer;
+}
+
+.plugins-panel__check {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-muted);
+}

@@ -382,6 +382,9 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
+        // 应用内更新：安装包签名由发布流程生成，公钥写在 tauri.conf.json
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         // 记住主窗口位置与尺寸；全屏控制遮罩窗口每次按需显示，不参与记忆
         .plugin(
             tauri_plugin_window_state::Builder::default()

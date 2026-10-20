@@ -41,6 +41,8 @@
     "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.0",
     "@tanstack/react-virtual": "^3.14.10",
+    "@tauri-apps/plugin-process": "~2.3.0",
+    "@tauri-apps/plugin-updater": "~2.12.0",
     "dexie": "^4.4.4",
     "diff": "^9.0.0",
     "lucide-react": "^1.24.0",

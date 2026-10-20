@@ -44,16 +44,27 @@
         "default-src": "'self'",
         "script-src": "'self'",
         "style-src": "'self' 'unsafe-inline'",
-        "img-src": "'self' data: blob:",
+        "img-src": "'self' data: blob: https://cdn.jsdelivr.net",
         "font-src": "'self' data:",
         "worker-src": "'self' blob:",
-        "connect-src": "'self' ipc: http://ipc.localhost http://127.0.0.1:*",
+        "connect-src": "'self' ipc: http://ipc.localhost http://127.0.0.1:* https://data.jsdelivr.com",
         "object-src": "'none'",
         "base-uri": "'self'",
         "frame-src": "'none'",
         "form-action": "'none'"
       },
       "dangerousDisableAssetCspModification": ["style-src"]
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdBRkIzNjEwMUQ0Rjc2ODcKUldTSGRrOGRFRGI3ZW5DWFNncld0aUNRT3luSXRwQnIzMHdGN3lZeCt2UlJoSnArUzVmanVvYWUK",
+      "endpoints": [
+        "https://github.com/liangcka/Yachiyo-chat-desktop/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "bundle": {

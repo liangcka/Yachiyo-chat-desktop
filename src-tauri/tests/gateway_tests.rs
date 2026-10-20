@@ -634,3 +634,50 @@ fn test_think_tag_splitter_is_independent_of_chunk_boundaries() {
         }
     }
 }
+
+#[tokio::test]
+async fn test_deepseek_balance_requires_a_native_endpoint_key() {
+    use std::sync::Arc;
+    use yachiyo_desktop_lib::mcp::McpManager;
+    use yachiyo_desktop_lib::server::http::{
+        generate_gateway_token, start_local_server, GATEWAY_TOKEN_HEADER,
+    };
+    use yachiyo_desktop_lib::tools::WorkspaceManager;
+
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let key_store = Arc::new(KeyStore::at_path(temp_dir.path().join("keys.dat")));
+    // 绑定到自定义端点的 DeepSeek Key 不得被余额代理发往官方接口
+    key_store
+        .set_key_for_endpoint("deepseek", "sk-custom-endpoint-key-000000", Some("https://relay.example.com/v1"))
+        .expect("store key");
+    let mcp_manager = Arc::new(McpManager::new(
+        Some(temp_dir.path().join("mcp_servers.json")),
+        reqwest::Client::new(),
+    ));
+    let token = generate_gateway_token();
+    let (port, _server) = start_local_server(
+        key_store,
+        Arc::new(WorkspaceManager::new(None)),
+        mcp_manager,
+        token.clone(),
+        39888,
+    )
+    .await
+    .expect("local gateway should start");
+
+    let client = reqwest::Client::new();
+    let url = format!("http://127.0.0.1:{port}/api/deepseek/balance");
+
+    let unsigned = client.post(&url).send().await.expect("unsigned request");
+    assert_eq!(unsigned.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let signed = client
+        .post(&url)
+        .header(GATEWAY_TOKEN_HEADER, token.as_str())
+        .send()
+        .await
+        .expect("signed request");
+    assert_eq!(signed.status(), reqwest::StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = signed.json().await.expect("problem json");
+    assert_eq!(body, serde_json::json!({ "error": { "code": "API_KEY_MISSING" } }));
+}

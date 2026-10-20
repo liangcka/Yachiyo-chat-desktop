@@ -53,7 +53,9 @@ npm run build
 1. 同步修改三处版本号：`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`。
 2. 提交后打标签并推送：`git tag v0.2.0 && git push origin v0.2.0`。
 3. `Release` 工作流会在 Windows 上构建 `.exe`（NSIS）与 `.msi` 安装包，并创建草稿 Release；核对说明后手动发布。
-4. 应用启动时会读取 GitHub 最新正式版，版本号高于本机时提示用户前往下载。草稿与预发布不会触发提示。
+4. 应用启动时会读取 GitHub 最新正式版，版本号高于本机时提示更新。草稿与预发布不会触发提示。
+   - 仓库 Secrets 配置了 `TAURI_SIGNING_PRIVATE_KEY` 与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 时，工作流会额外生成更新签名与 `latest.json`，用户点「立即更新」即可在应用内下载、校验并安装；未配置时退回打开下载页。
+   - 私钥须与 `src-tauri/tauri.conf.json` 中 `plugins.updater.pubkey` 成对；更换密钥对时用 `npx tauri signer generate -w <路径>` 生成，并同时更新公钥与两个 Secrets。
 5. 安装包暂未签名。如需消除 SmartScreen 提示，需要购买代码签名证书，并按 Tauri 文档在 `bundle.windows` 中配置签名。
 
 ### 5. Git 提交规范

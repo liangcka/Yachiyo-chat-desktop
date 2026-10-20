@@ -166,6 +166,10 @@ export interface UiCopy {
   readonly desktopKeyRequired: string;
   readonly desktopUpdateAvailable: (version: string) => string;
   readonly desktopUpdateAction: string;
+  readonly desktopUpdateDownloading: (percent: number | undefined) => string;
+  readonly desktopUpdateInstalling: string;
+  readonly desktopUpdateFailed: string;
+  readonly desktopUpdateOpenRelease: string;
   readonly serverCredentialsCleared: string;
 }
 
@@ -334,7 +338,11 @@ const chinese = Object.freeze({
   themeSystem: "跟随系统",
   desktopKeyRequired: "还没有可用的模型，请在「设置 → 模型」中填写 API Key 并启用。",
   desktopUpdateAvailable: (version) => `发现新版本 v${version}`,
-  desktopUpdateAction: "前往下载",
+  desktopUpdateAction: "立即更新",
+  desktopUpdateDownloading: (percent) => (percent === undefined ? "正在下载更新…" : `正在下载更新 ${percent}%`),
+  desktopUpdateInstalling: "正在安装，完成后自动重启…",
+  desktopUpdateFailed: "更新失败，可前往下载页手动安装",
+  desktopUpdateOpenRelease: "前往下载",
   serverCredentialsCleared: "服务端凭据已清除",
 } satisfies UiCopy);
 
@@ -504,7 +512,11 @@ const japanese = Object.freeze({
   themeSystem: "システム設定",
   desktopKeyRequired: "利用できるモデルがありません。「設定 → モデル」で API キーを入力して有効にしてください。",
   desktopUpdateAvailable: (version) => `新しいバージョン v${version} があります`,
-  desktopUpdateAction: "ダウンロード",
+  desktopUpdateAction: "今すぐ更新",
+  desktopUpdateDownloading: (percent) => (percent === undefined ? "更新をダウンロード中…" : `更新をダウンロード中 ${percent}%`),
+  desktopUpdateInstalling: "インストール中です。完了後に自動で再起動します…",
+  desktopUpdateFailed: "更新に失敗しました。ダウンロードページから手動でインストールできます",
+  desktopUpdateOpenRelease: "ダウンロード",
   serverCredentialsCleared: "サーバー側の認証情報を削除しました",
 } satisfies UiCopy);
 
