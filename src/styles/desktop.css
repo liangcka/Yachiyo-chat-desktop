@@ -202,27 +202,6 @@
   box-sizing: border-box;
 }
 
-.desktop-topbar__rename-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 4px;
-  background: var(--interactive-hover);
-  color: var(--text-muted);
-  cursor: pointer;
-  transition:
-    background var(--ds-transition-duration-fast) var(--ds-ease-in-out),
-    color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
-}
-
-.desktop-topbar__rename-btn:hover {
-  background: var(--interactive-active);
-  color: var(--text-primary);
-}
-
 /* 顶栏右侧视图切换小图标按钮 */
 .desktop-topbar__view-toggle-btn {
   display: inline-flex;

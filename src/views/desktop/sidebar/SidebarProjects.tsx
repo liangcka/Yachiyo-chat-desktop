@@ -28,15 +28,18 @@ export function SidebarProjects({ locale, onNewChat, onOpenWorkspace }: SidebarP
     <section className="desktop-sidebar__section" aria-label={ja ? "プロジェクト" : "项目"}>
       <div className="desktop-sidebar__section-header">
         <span className="desktop-sidebar__section-label">{ja ? "プロジェクト" : "项目"}</span>
-        <button
-          type="button"
-          className="desktop-sidebar__section-action"
-          onClick={() => void projectManager.pickAndOpenProject(openLabel)}
-          title={openLabel}
-          aria-label={openLabel}
-        >
-          <FolderPlus size={14} />
-        </button>
+        {/* 空列表时下方占位按钮已是同一入口，标题栏不再重复 */}
+        {recentProjects.length > 0 ? (
+          <button
+            type="button"
+            className="desktop-sidebar__section-action"
+            onClick={() => void projectManager.pickAndOpenProject(openLabel)}
+            title={openLabel}
+            aria-label={openLabel}
+          >
+            <FolderPlus size={14} />
+          </button>
+        ) : null}
       </div>
       {recentProjects.length === 0 ? (
         <button

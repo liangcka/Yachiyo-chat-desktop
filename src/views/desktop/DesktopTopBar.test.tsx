@@ -130,6 +130,37 @@ describe("DesktopTopBar", () => {
     await user.type(input, "新对话标题{Enter}");
 
     expect(onRename).toHaveBeenCalledWith("conv-test-1", "新对话标题");
+    expect(onRename).toHaveBeenCalledTimes(1);
+  });
+
+  it("saves the title on blur and discards it on Escape", async () => {
+    const user = userEvent.setup();
+    const onRename = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <DesktopTopBar
+        activeConversationId="conv-test-1"
+        activeView="chat"
+        conversationTitle="当前对话标题"
+        copy={copy}
+        onNewChat={vi.fn()}
+        onRenameConversation={onRename}
+        onSwitchView={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByTitle("重命名会话"));
+    await user.clear(screen.getByLabelText("重命名当前会话"));
+    await user.type(screen.getByLabelText("重命名当前会话"), "取消的标题{Escape}");
+    expect(screen.queryByLabelText("重命名当前会话")).not.toBeInTheDocument();
+    expect(onRename).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTitle("重命名会话"));
+    await user.clear(screen.getByLabelText("重命名当前会话"));
+    await user.type(screen.getByLabelText("重命名当前会话"), "失焦保存的标题");
+    await user.click(document.body);
+    expect(onRename).toHaveBeenCalledWith("conv-test-1", "失焦保存的标题");
+    expect(onRename).toHaveBeenCalledTimes(1);
   });
 
   it("renders window controls in desktop mode and triggers bridge functions", async () => {

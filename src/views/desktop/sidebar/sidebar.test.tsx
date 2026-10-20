@@ -107,8 +107,29 @@ describe("DesktopSidebar & Submodules", () => {
     await user.click(within(projects).getByText("beta"));
     expect(projectManager.getState().activeProject).toBe("D:\\work\\beta");
     expect(onNewChat).toHaveBeenCalledTimes(1);
+    expect(within(projects).getAllByRole("button", { name: "打开文件夹" })).toHaveLength(1);
 
     await projectManager.clear();
+  });
+
+  it("shows a single open-folder entry when there are no recent projects", async () => {
+    await projectManager.clear();
+    render(
+      <DesktopSidebar
+        activeRightTab="none"
+        conversations={mockConversations}
+        copy={copy}
+        locale="zh-CN"
+        onDeleteConversation={vi.fn()}
+        onNewChat={vi.fn()}
+        onRenameConversation={vi.fn()}
+        onSelectConversation={vi.fn()}
+        onSelectRightTab={vi.fn()}
+      />,
+    );
+
+    const projects = screen.getByRole("region", { name: "项目" });
+    expect(within(projects).getAllByRole("button", { name: "打开文件夹" })).toHaveLength(1);
   });
 
   it("supports inline rename and cancellation in SidebarConversationItem", async () => {
@@ -141,6 +162,43 @@ describe("DesktopSidebar & Submodules", () => {
     await user.type(input, "新的重命名标题{Enter}");
 
     expect(onRename).toHaveBeenCalledWith("conv-today-1", "新的重命名标题");
+    expect(onRename).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: copy.confirm })).not.toBeInTheDocument();
+  });
+
+  it("saves the rename on blur and discards it on Escape", async () => {
+    const user = userEvent.setup();
+    const onRename = vi.fn(async () => undefined);
+
+    render(
+      <>
+        <SidebarConversationItem
+          active={false}
+          conversation={mockConversations[0]}
+          copy={copy}
+          onDelete={vi.fn()}
+          onRename={onRename}
+          onSelect={vi.fn()}
+        />
+        <button type="button">外部</button>
+      </>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "对话操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "重命名" }));
+    await user.clear(screen.getByLabelText("重命名"));
+    await user.type(screen.getByLabelText("重命名"), "取消的标题{Escape}");
+    expect(screen.queryByLabelText("重命名")).not.toBeInTheDocument();
+    expect(onRename).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "对话操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "重命名" }));
+    await user.clear(screen.getByLabelText("重命名"));
+    await user.type(screen.getByLabelText("重命名"), "失焦保存的标题");
+    await user.click(screen.getByRole("button", { name: "外部" }));
+    expect(onRename).toHaveBeenCalledWith("conv-today-1", "失焦保存的标题");
+    expect(onRename).toHaveBeenCalledTimes(1);
+    expect(screen.queryByLabelText("重命名")).not.toBeInTheDocument();
   });
 
   it("supports pinning conversations and rendering pinned section", async () => {
