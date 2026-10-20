@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import type { ChatMessage, Locale } from "../../domain/chat";
+import type { ChatMessage } from "../../domain/chat";
 import { hideControlOverlay, onEmergencyStopControl, showControlOverlay } from "../../services/desktop-bridge";
 import { deriveControlSession, type ComputerControlSession } from "./control-tools";
 
@@ -8,32 +8,31 @@ export interface ComputerControlSessionSource {
   readonly streaming?: unknown;
   readonly phase: string;
   readonly pendingPermission?: unknown;
-  readonly locale: Locale;
   readonly stop: () => Promise<unknown> | void;
 }
 
 /**
  * 主窗口侧的电脑控制会话：按消息流推导是否正在控制电脑，驱动系统级遮罩，
- * 并响应遮罩的紧急接管与主窗口内的 Esc；返回当前会话供界面展示
+ * 并响应后端的全局 Esc 取消与主窗口内的 Esc；返回当前会话供界面展示
  */
 export function useComputerControlSession(source: ComputerControlSessionSource): ComputerControlSession | null {
   const running = source.streaming !== undefined || source.phase === "streaming";
   const awaitingPermission = source.pendingPermission !== undefined && source.pendingPermission !== null;
   const session = useMemo(
-    () => deriveControlSession({ messages: source.messages, running, awaitingPermission, locale: source.locale }),
-    [source.messages, running, awaitingPermission, source.locale],
+    () => deriveControlSession({ messages: source.messages, running, awaitingPermission }),
+    [source.messages, running, awaitingPermission],
   );
-  const toolName = session?.toolName;
-  const detail = session?.detail;
+  const active = session !== null;
+  const paused = session?.paused ?? false;
 
-  // 流式期间消息每次增量都会变化，只在动作本身变化时同步遮罩，后端对相同状态再做一次去重
+  // 流式期间消息每次增量都会变化，只在会话开关或暂停状态变化时同步遮罩
   useEffect(() => {
-    if (toolName !== undefined && detail !== undefined) {
-      void showControlOverlay(toolName, detail);
+    if (active) {
+      void showControlOverlay(paused);
     } else {
       void hideControlOverlay();
     }
-  }, [toolName, detail]);
+  }, [active, paused]);
 
   useEffect(() => () => void hideControlOverlay(), []);
 
@@ -55,7 +54,6 @@ export function useComputerControlSession(source: ComputerControlSessionSource):
     };
   }, []);
 
-  const active = session !== null;
   useEffect(() => {
     if (!active) return;
     const handleKeyDown = (event: KeyboardEvent) => {

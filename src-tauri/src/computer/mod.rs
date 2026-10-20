@@ -37,7 +37,7 @@ fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
-/// 合成输入期间（含收尾余量）遮罩必须保持鼠标穿透，否则落在接管横幅上的模拟点击会被遮罩吞掉
+/// 是否处于合成输入期间（含收尾余量）；全局 Esc 检测据此排除模型自己发送的按键
 pub fn synthetic_input_active() -> bool {
     now_ms() < INPUT_GUARD_UNTIL_MS.load(Ordering::SeqCst)
 }
@@ -45,6 +45,43 @@ pub fn synthetic_input_active() -> bool {
 #[cfg_attr(not(windows), allow(dead_code))]
 fn hold_input_guard(duration: Duration) {
     INPUT_GUARD_UNTIL_MS.fetch_max(now_ms() + duration.as_millis() as u64, Ordering::SeqCst);
+}
+
+#[cfg(windows)]
+static CURSOR_HIDDEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 控制期间把系统光标换成空白，屏幕上只留遮罩绘制的八千代光标；重复调用无副作用
+pub fn hide_system_cursor() {
+    #[cfg(windows)]
+    if !CURSOR_HIDDEN.swap(true, Ordering::SeqCst) {
+        win::hide_system_cursor();
+    }
+}
+
+/// 恢复用户的系统光标方案；未隐藏时不做任何事
+pub fn restore_system_cursor() {
+    #[cfg(windows)]
+    if CURSOR_HIDDEN.swap(false, Ordering::SeqCst) {
+        win::reload_system_cursors();
+    }
+}
+
+/// 启动时无条件重载光标方案：上次若在控制中途被强制结束，系统光标会一直是空白
+pub fn recover_system_cursor() {
+    #[cfg(windows)]
+    win::reload_system_cursors();
+}
+
+/// 用户是否按下了物理 Esc；合成输入期间一律视为未按，避免模型自己发送的 Esc 把运行停掉
+pub fn escape_pressed() -> bool {
+    #[cfg(windows)]
+    {
+        !synthetic_input_active() && win::escape_key_down()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
