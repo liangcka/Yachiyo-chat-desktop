@@ -1,6 +1,5 @@
 import {
   ArrowUp,
-  Bot,
   Check,
   ChevronRight,
   Globe,
@@ -15,6 +14,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ContextMeter } from "../../components/ContextMeter";
 import { ConversationView } from "../../components/ConversationView";
 import { ModelSelect } from "../../components/desktop/ModelSelect";
+import { ModeSelect } from "../../components/desktop/ModeSelect";
 import { PlanStrip } from "../../components/desktop/PlanStrip";
 import { ProjectSelector } from "../../components/desktop/ProjectSelector";
 import { PermissionCard } from "../../components/tools/PermissionCard";
@@ -676,35 +676,11 @@ export function DesktopChatArea({
             />
 
             {/* 执行模式 */}
-            <label
-              className={`desktop-mode-select desktop-header-pill desktop-mode-select--${controller.agentMode}`}
-              title={`${isJapanese ? "実行モード" : "执行模式"}：${
-                controller.agentMode === "readonly"
-                  ? (isJapanese ? "読み取り" : "只读")
-                  : controller.agentMode === "confirm"
-                    ? (isJapanese ? "自動" : "自动")
-                    : (isJapanese ? "完全アクセス" : "完全访问")
-              }`}
-            >
-              <Bot size={13} />
-              <span>
-                {controller.agentMode === "readonly"
-                  ? (isJapanese ? "読み取り" : "只读")
-                  : controller.agentMode === "confirm"
-                    ? (isJapanese ? "自動" : "自动")
-                    : (isJapanese ? "完全アクセス" : "完全访问")}
-              </span>
-              <select
-                aria-label={isJapanese ? "実行モード" : "执行模式"}
-                disabled={isStreaming}
-                value={controller.agentMode}
-                onChange={(event) => controller.setExecutionMode(event.target.value as "readonly" | "confirm" | "full_auto")}
-              >
-                <option value="readonly">{isJapanese ? "読み取り" : "只读"}</option>
-                <option value="confirm">{isJapanese ? "自動" : "自动"}</option>
-                <option value="full_auto">{isJapanese ? "完全アクセス" : "完全访问"}</option>
-              </select>
-            </label>
+            <ModeSelect
+              mode={controller.agentMode}
+              onSelect={controller.setExecutionMode}
+              disabled={isStreaming}
+            />
           </div>
 
           <div className="dsh-composer-card__tools-right">
