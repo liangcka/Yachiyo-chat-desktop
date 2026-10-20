@@ -93,6 +93,10 @@ const SAMPLE_BYTES: usize = 80;
 const MIN_DISTINCT_CHARS: usize = 10;
 /// 样本片段在窗口内不重叠出现的次数达到该值即判定为复读
 const REPEAT_THRESHOLD: usize = 8;
+/// 窗口末尾这么长的文本以不超过 MAX_PERIOD_BYTES 的周期严格重复，即判定为短周期复读（如“好的好的好的…”）；
+/// 这类输出的不同字符很少，会被样本规则跳过，而正常文本不会出现数千字节的严格周期
+const PERIODIC_RUN_BYTES: usize = 4096;
+const MAX_PERIOD_BYTES: usize = 64;
 
 #[derive(Debug, Default)]
 pub struct RepetitionDetector {
@@ -120,6 +124,19 @@ impl RepetitionDetector {
     }
 
     fn is_repeating(&self) -> bool {
+        self.has_repeated_sample() || self.has_periodic_tail()
+    }
+
+    fn has_periodic_tail(&self) -> bool {
+        let bytes = self.window.as_bytes();
+        if bytes.len() < PERIODIC_RUN_BYTES {
+            return false;
+        }
+        let tail = &bytes[bytes.len() - PERIODIC_RUN_BYTES..];
+        (1..=MAX_PERIOD_BYTES).any(|period| tail[period..] == tail[..tail.len() - period])
+    }
+
+    fn has_repeated_sample(&self) -> bool {
         if self.window.len() < SAMPLE_BYTES * REPEAT_THRESHOLD {
             return false;
         }

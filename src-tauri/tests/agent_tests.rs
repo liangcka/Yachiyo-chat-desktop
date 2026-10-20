@@ -1280,4 +1280,32 @@ fn test_repetition_detector_flags_degenerate_output_only() {
 
     let mut divider = RepetitionDetector::default();
     assert!(!(0..200).any(|_| divider.push("==========\n")));
+
+    // 不同字符很少的短周期复读不满足样本规则，靠末尾的严格周期规则兜住
+    let mut short_period = RepetitionDetector::default();
+    assert!(!(0..300).any(|_| short_period.push("好的")));
+    assert!((0..2000).any(|_| short_period.push("好的")));
+}
+
+#[tokio::test]
+async fn test_idle_agent_stream_emits_heartbeats_without_dropping_events() {
+    use yachiyo_desktop_lib::gateway::agent::runtime::next_emit_or_heartbeat;
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LoopEmit>();
+    let mut heartbeat = tokio::time::interval(std::time::Duration::from_millis(20));
+    heartbeat.tick().await;
+
+    // 没有事件时按周期下发心跳
+    assert!(matches!(next_emit_or_heartbeat(&mut rx, &mut heartbeat).await, Some(LoopEmit::Ping)));
+
+    // 事件先于心跳取出，且不丢失
+    tx.send(LoopEmit::Event(ClientStreamEvent::Delta { text: "你好".to_string() })).unwrap();
+    match next_emit_or_heartbeat(&mut rx, &mut heartbeat).await {
+        Some(LoopEmit::Event(ClientStreamEvent::Delta { text })) => assert_eq!(text, "你好"),
+        _ => panic!("应先取出已排队的事件"),
+    }
+
+    // 发送端全部关闭且队列清空后结束
+    drop(tx);
+    assert!(next_emit_or_heartbeat(&mut rx, &mut heartbeat).await.is_none());
 }

@@ -602,6 +602,22 @@ impl NativeTurnCollector {
     }
 }
 
+/// 下发心跳的周期，需明显小于客户端的流空闲超时（45 秒）
+const HEARTBEAT_PERIOD: Duration = Duration::from_secs(5);
+
+/// 取下一个待下发的事件；周期内没有事件时以 Ping 作为心跳，通道关闭时返回 None
+pub async fn next_emit_or_heartbeat(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<LoopEmit>,
+    heartbeat: &mut tokio::time::Interval,
+) -> Option<LoopEmit> {
+    tokio::select! {
+        // 已排队的事件优先于心跳，保证事件顺序和及时性
+        biased;
+        emit = rx.recv() => emit,
+        _ = heartbeat.tick() => Some(LoopEmit::Ping),
+    }
+}
+
 /// Agent 模式的 /api/chat 入口：SSE 流承载完整多轮运行
 pub fn run_agent_chat_stream(
     client: reqwest::Client,
@@ -735,7 +751,10 @@ pub fn run_agent_chat_stream(
             .await
         });
 
-        while let Some(emit) = rx.recv().await {
+        // 工具执行与上游长时间思考期间没有事件，定时心跳避免客户端按空闲超时误判断流
+        let mut heartbeat = tokio::time::interval_at(tokio::time::Instant::now() + HEARTBEAT_PERIOD, HEARTBEAT_PERIOD);
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        while let Some(emit) = next_emit_or_heartbeat(&mut rx, &mut heartbeat).await {
             match emit {
                 LoopEmit::Event(ev) => yield Ok(encode_client_event(&ev)),
                 LoopEmit::Ping => yield Ok(encode_ping().to_string()),
