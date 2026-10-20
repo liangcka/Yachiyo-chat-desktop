@@ -188,6 +188,57 @@ async fn handle_delete_key(
     }
 }
 
+const DEEPSEEK_BALANCE_URL: &str = "https://api.deepseek.com/user/balance";
+
+fn balance_problem(status: StatusCode, code: &str) -> Response {
+    (status, Json(serde_json::json!({ "error": { "code": code } }))).into_response()
+}
+
+/// 余额小鲸鱼插件的 DeepSeek 余额代理：Key 只在网关内取用且仅发往原生端点，
+/// 成功时原样返回 /user/balance 的 JSON；错误体与网页版 Pages Function 同为
+/// `{ error: { code } }`，前端共用一套解析
+async fn handle_deepseek_balance(State(state): State<AppState>) -> Response {
+    let Some(key) = state.key_store.get_key_for_endpoint("deepseek", None) else {
+        return balance_problem(StatusCode::BAD_REQUEST, "API_KEY_MISSING");
+    };
+    let (primary, fallback) = state.select_clients(Some(crate::types::ProviderId::Deepseek), None);
+    let send = |client: reqwest::Client| {
+        let key = key.clone();
+        async move {
+            client
+                .get(DEEPSEEK_BALANCE_URL)
+                .bearer_auth(key)
+                .header(header::ACCEPT, "application/json")
+                .timeout(std::time::Duration::from_secs(15))
+                .send()
+                .await
+        }
+    };
+    // 只在连接层失败时换客户端重试：HTTP 错误说明请求已到达 DeepSeek，换线路无益
+    let upstream = match send(primary).await {
+        Ok(response) => Ok(response),
+        Err(error) => match fallback {
+            Some(client) => send(client).await,
+            None => Err(error),
+        },
+    };
+    let upstream = match upstream {
+        Ok(response) => response,
+        Err(_) => return balance_problem(StatusCode::BAD_GATEWAY, "PROVIDER_ERROR"),
+    };
+    let status = upstream.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return balance_problem(StatusCode::UNAUTHORIZED, "PROVIDER_AUTH_FAILED");
+    }
+    if !status.is_success() {
+        return balance_problem(StatusCode::BAD_GATEWAY, "PROVIDER_ERROR");
+    }
+    match upstream.json::<serde_json::Value>().await {
+        Ok(body) => Json(body).into_response(),
+        Err(_) => balance_problem(StatusCode::BAD_GATEWAY, "PROVIDER_ERROR"),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct AgentApprovalRequest {
     #[serde(rename = "requestId")]
@@ -379,6 +430,7 @@ pub fn create_router(state: AppState, dist_path: PathBuf) -> Router {
         .route("/api/agent/approval", post(handle_agent_approval))
         .route("/api/keys", get(handle_list_keys).post(handle_save_key))
         .route("/api/keys/{provider}", delete(handle_delete_key))
+        .route("/api/deepseek/balance", post(handle_deepseek_balance))
         .route("/api/mcp/servers", get(handle_list_mcp_servers).post(handle_save_mcp_server))
         .route("/api/mcp/servers/{id}", delete(handle_delete_mcp_server))
         .route("/api/mcp/servers/{id}/toggle", post(handle_toggle_mcp_server))

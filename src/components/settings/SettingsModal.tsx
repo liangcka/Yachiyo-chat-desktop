@@ -7,6 +7,7 @@ import {
   HelpCircle,
   Keyboard,
   Palette,
+  Puzzle,
   Sliders,
   Sparkles,
   Trash2,
@@ -21,6 +22,7 @@ import { LlmSettingsPanel } from "../LlmSettingsPanel";
 import { SkillsPanel } from "../SkillsPanel";
 import { UserMemoryPanel } from "../UserMemoryPanel";
 import { McpPanel } from "./McpPanel";
+import { PluginsPanel } from "./PluginsPanel";
 import { SKILLS } from "../../skills";
 import { PROVIDER_METADATA } from "../../domain/llm";
 import {
@@ -41,6 +43,7 @@ export type SettingsTabKey =
   | "custom"
   | "browser"
   | "mcp"
+  | "plugins"
   | "shortcuts"
   | "user";
 
@@ -83,6 +86,7 @@ const zhCopy = {
   navCustom: "自定义",
   navBrowser: "联网搜索",
   navMcp: "MCP 服务",
+  navPlugins: "插件",
   shortcutsLink: "快捷键速查",
   feedbackLink: "问题反馈",
   userSettingsLabel: "用户设置",
@@ -213,6 +217,7 @@ const jaCopy: SettingsCopy = {
   navCustom: "カスタマイズ",
   navBrowser: "ウェブ検索",
   navMcp: "MCP サーバー",
+  navPlugins: "プラグイン",
   shortcutsLink: "ショートカット一覧",
   feedbackLink: "フィードバック",
   userSettingsLabel: "ユーザー設定",
@@ -575,6 +580,18 @@ export function SettingsModal({
                 <Server size={16} className="settings-modal__nav-icon" />
                 <span className="settings-modal__nav-item-text">{t.navMcp}</span>
               </button>
+
+              <button
+                type="button"
+                role="tab"
+                aria-label={t.navPlugins}
+                aria-selected={activeTab === "plugins"}
+                className={`settings-modal__nav-item ${activeTab === "plugins" ? "settings-modal__nav-item--active" : ""}`}
+                onClick={() => setActiveTab("plugins")}
+              >
+                <Puzzle size={16} className="settings-modal__nav-icon" />
+                <span className="settings-modal__nav-item-text">{t.navPlugins}</span>
+              </button>
             </div>
 
           </div>
@@ -876,6 +893,15 @@ export function SettingsModal({
           {/* TAB: MCP 扩展服务 */}
           {activeTab === "mcp" ? (
             <McpPanel showToast={shared.showToast} />
+          ) : null}
+
+          {/* TAB: 插件 */}
+          {activeTab === "plugins" ? (
+            <PluginsPanel
+              locale={shared.controller.locale}
+              hasDeepSeekKey={shared.llmEntries.some((entry) => entry.provider === "deepseek" && entry.baseUrl === undefined)}
+              onConfigureKey={() => setActiveTab("models")}
+            />
           ) : null}
 
           {/* TAB: 存储与维护 (App) */}

@@ -12,6 +12,8 @@ import { DesktopTopBar } from "./DesktopTopBar";
 import { DesktopRightPane } from "./DesktopRightPane";
 import type { DesktopRightTab } from "./sidebar/types";
 import type { SettingsTabKey } from "../../components/settings/SettingsModal";
+import { WhaleWidget } from "../../features/whale-widget/WhaleWidget";
+import { usePluginSettings } from "../../services/plugin-settings";
 
 const EditorView = lazy(() =>
   import("../../components/editor/EditorView").then((m) => ({ default: m.EditorView })),
@@ -318,6 +320,7 @@ export function DesktopLayout(props: SharedViewProps) {
 
   // AI 控制电脑期间由系统级全屏遮罩提示，按 Esc 取消控制
   useComputerControlSession(props.controller);
+  const pluginSettings = usePluginSettings();
 
   /* ── 渲染 ─────────────────────────────────────────── */
 
@@ -463,6 +466,17 @@ export function DesktopLayout(props: SharedViewProps) {
             shared={props}
           />
         </Suspense>
+      ) : null}
+
+      {pluginSettings.whaleWidget.enabled ? (
+        <WhaleWidget
+          locale={props.controller.locale}
+          entries={props.llmEntries}
+          activeProvider={props.llmActiveProvider}
+          phase={props.controller.phase}
+          settings={pluginSettings.whaleWidget}
+          onConfigureKey={() => handleOpenSettings("models")}
+        />
       ) : null}
 
       {/* shell 级浮层层：全局弹层 / toast 的挂载槽位，默认不拦截交互 */}
