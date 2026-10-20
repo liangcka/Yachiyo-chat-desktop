@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, Check, MoreHorizontal, Pencil, Pin, PinOff, Trash2, X } from "lucide-react";
+import { Archive, ArchiveRestore, MoreHorizontal, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
 import type { CSSProperties, FormEvent, MouseEvent as ReactMouseEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -46,6 +46,7 @@ export function SidebarConversationItem({
   const [menuPosition, setMenuPosition] = useState<CSSProperties>();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const renameSettledRef = useRef(false);
   const moreRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuOpen = menuPosition !== undefined;
@@ -106,17 +107,25 @@ export function SidebarConversationItem({
 
   const handleSaveRename = async (e?: FormEvent | React.SyntheticEvent) => {
     if (e) e.preventDefault();
+    // Enter 提交后输入框卸载、Esc 取消后都可能再触发一次 blur，只认第一次收尾
+    if (renameSettledRef.current) return;
+    renameSettledRef.current = true;
     const currentVal = inputRef.current ? inputRef.current.value : draftTitle;
     const trimmed = currentVal.trim();
     if (!trimmed || trimmed === conversation.title) {
       setEditing(false);
       return;
     }
-    await onRename(conversation.id, trimmed);
-    setEditing(false);
+    // 已无确认按钮可重试，保存失败也直接退出编辑态，标题回落为原值
+    try {
+      await onRename(conversation.id, trimmed);
+    } finally {
+      setEditing(false);
+    }
   };
 
   const handleCancelRename = () => {
+    renameSettledRef.current = true;
     setEditing(false);
     setDraftTitle(conversation.title);
   };
@@ -142,7 +151,9 @@ export function SidebarConversationItem({
             type="text"
             value={draftTitle}
             onChange={(e) => setDraftTitle(e.target.value)}
+            onBlur={() => void handleSaveRename()}
             onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
               if (e.key === "Escape") {
                 handleCancelRename();
               } else if (e.key === "Enter") {
@@ -153,22 +164,6 @@ export function SidebarConversationItem({
             className="desktop-sidebar__rename-input"
             aria-label={copy.rename}
           />
-          <button
-            type="submit"
-            onClick={(e) => void handleSaveRename(e)}
-            className="desktop-sidebar__history-action"
-            title={copy.confirm}
-          >
-            <Check size={14} />
-          </button>
-          <button
-            type="button"
-            onClick={handleCancelRename}
-            className="desktop-sidebar__history-action"
-            title={copy.cancel}
-          >
-            <X size={14} />
-          </button>
         </form>
       ) : (
         <>
@@ -239,6 +234,7 @@ export function SidebarConversationItem({
                 className="desktop-sidebar__item-menu-option"
                 onClick={() =>
                   runMenuAction(() => {
+                    renameSettledRef.current = false;
                     setDraftTitle(conversation.title);
                     setEditing(true);
                   })

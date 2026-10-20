@@ -1,5 +1,4 @@
 import {
-  Check,
   CodeXml,
   Copy,
   MessageSquare,
@@ -73,6 +72,8 @@ export function DesktopTopBar({
   const [editingTitleDraft, setEditingTitleDraft] = useState("");
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const savingTitleRef = useRef(false);
+  // Enter 提交后输入框卸载、Esc 取消后都可能再触发一次 blur，关闭后不再保存
+  const titleEditOpenRef = useRef(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -85,30 +86,36 @@ export function DesktopTopBar({
   const handleStartEditTitle = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (!activeConversationId) return;
+    titleEditOpenRef.current = true;
     setEditingTitleDraft(currentTitle);
     setIsEditingTitle(true);
   }, [activeConversationId, currentTitle]);
 
+  const closeTitleEditor = useCallback(() => {
+    titleEditOpenRef.current = false;
+    setIsEditingTitle(false);
+  }, []);
+
   const handleSaveTitle = useCallback(async (e?: FormEvent) => {
     if (e) e.preventDefault();
-    if (savingTitleRef.current) return;
+    if (!titleEditOpenRef.current || savingTitleRef.current) return;
     const title = editingTitleDraft.trim();
     if (!activeConversationId || !title || title === currentTitle) {
-      setIsEditingTitle(false);
+      closeTitleEditor();
       return;
     }
     savingTitleRef.current = true;
     setIsSavingTitle(true);
     try {
       await onRenameConversation?.(activeConversationId, title);
-      setIsEditingTitle(false);
+      closeTitleEditor();
     } catch {
       /* 静默降级 */
     } finally {
       savingTitleRef.current = false;
       setIsSavingTitle(false);
     }
-  }, [activeConversationId, currentTitle, editingTitleDraft, onRenameConversation]);
+  }, [activeConversationId, closeTitleEditor, currentTitle, editingTitleDraft, onRenameConversation]);
 
   // 初始化与监听桌面窗口最大化/还原状态
   useEffect(() => {
@@ -243,6 +250,7 @@ export function DesktopTopBar({
               value={editingTitleDraft}
               onChange={(e) => setEditingTitleDraft(e.target.value)}
               disabled={isSavingTitle}
+              onBlur={() => void handleSaveTitle()}
               onKeyDown={(event) => {
                 if (event.nativeEvent.isComposing || event.keyCode === 229) {
                   if (event.key === "Enter") event.preventDefault();
@@ -250,29 +258,12 @@ export function DesktopTopBar({
                 }
                 if (event.key === "Escape") {
                   event.preventDefault();
-                  setIsEditingTitle(false);
+                  closeTitleEditor();
                 }
               }}
               className="desktop-topbar__rename-input"
               aria-label={ja ? "現在の会話の名前を変更" : "重命名当前会话"}
             />
-            <button
-              type="submit"
-              className="desktop-topbar__rename-btn"
-              title={copy.confirm}
-              disabled={isSavingTitle}
-            >
-              <Check size={13} />
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsEditingTitle(false)}
-              className="desktop-topbar__rename-btn"
-              title={copy.cancel}
-              disabled={isSavingTitle}
-            >
-              <X size={13} />
-            </button>
           </form>
         ) : (
           <div className="desktop-topbar__title-wrapper">

@@ -169,7 +169,7 @@ describe("DesktopLayout", () => {
     expect(props.onRename).toHaveBeenCalledWith("conv-1", "重命名后的标题");
   });
 
-  it.each(["button", "Escape"])("取消标题编辑时不保存：%s", async (method) => {
+  it("按 Escape 取消标题编辑时不保存", async () => {
     const user = userEvent.setup();
     const props = createMockProps();
     render(<DesktopLayout {...props} />);
@@ -178,17 +178,13 @@ describe("DesktopLayout", () => {
     const input = screen.getByLabelText("重命名当前会话");
     await user.clear(input);
     await user.type(input, "尚未保存的标题");
-    if (method === "button") {
-      await user.click(screen.getByTitle(copy.cancel));
-    } else {
-      await user.keyboard("{Escape}");
-    }
+    await user.keyboard("{Escape}");
 
     expect(props.onRename).not.toHaveBeenCalled();
     expect(screen.queryByLabelText("重命名当前会话")).not.toBeInTheDocument();
   });
 
-  it("标题保存完成前重复确认只提交一次", async () => {
+  it("标题保存完成前回车后再失焦只提交一次", async () => {
     const user = userEvent.setup();
     const props = createMockProps();
     props.onRename = vi.fn(() => new Promise<void>(() => undefined));
@@ -197,8 +193,8 @@ describe("DesktopLayout", () => {
     await user.click(screen.getByTitle("重命名会话"));
     const input = screen.getByLabelText("重命名当前会话");
     await user.clear(input);
-    await user.type(input, "新标题");
-    await user.dblClick(screen.getByTitle(copy.confirm));
+    await user.type(input, "新标题{Enter}");
+    await user.click(document.body);
 
     expect(props.onRename).toHaveBeenCalledExactlyOnceWith("conv-1", "新标题");
   });
