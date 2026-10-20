@@ -114,7 +114,7 @@ export function App({ services, autoAiTitle }: AppProps) {
   const [imageUrls, setImageUrls] = useState<ReadonlyMap<string, string>>(new Map());
   const [llmActiveProvider, setLlmActiveProvider] = useState<ProviderId>();
   const [llmEntries, setLlmEntries] = useState<
-    readonly { provider: ProviderId; apiKey: string; model: string; baseUrl?: string }[]
+    readonly { provider: ProviderId; apiKey: string; model: string; baseUrl?: string; disabled?: boolean }[]
   >([]);
   const [pendingImageDataUrl, setPendingImageDataUrl] = useState<string>();
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
@@ -193,6 +193,7 @@ export function App({ services, autoAiTitle }: AppProps) {
         apiKey: record.apiKey,
         model: record.model,
         ...(record.baseUrl !== undefined ? { baseUrl: record.baseUrl } : {}),
+        ...(record.disabled === true ? { disabled: true } : {}),
       })),
     };
   }, [llmService]);
@@ -315,6 +316,14 @@ export function App({ services, autoAiTitle }: AppProps) {
       setLlmActiveProvider(provider);
     },
     [llmService],
+  );
+
+  const handleLlmSetEnabled = useCallback(
+    async (provider: ProviderId, enabled: boolean) => {
+      await llmService.setEnabled(provider, enabled);
+      await refreshLlm();
+    },
+    [llmService, refreshLlm],
   );
 
   const handleSkillToggle = useCallback(
@@ -647,6 +656,7 @@ export function App({ services, autoAiTitle }: AppProps) {
     onImage: handleImage,
     onLlmActivate: handleLlmActivate,
     onLlmClear: handleLlmClear,
+    onLlmSetEnabled: handleLlmSetEnabled,
     onLlmSave: handleLlmSave,
     onLocale: handleLocale,
     onNewChat: handleNewChat,

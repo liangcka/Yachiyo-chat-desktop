@@ -175,6 +175,8 @@ export interface LlmSettingsRecord {
   readonly updatedAt: number;
   /** 自定义 OpenAI 兼容端点；存在时跳过模型白名单，模型名交由上游校验 */
   readonly baseUrl?: string;
+  /** 停用后不出现在聊天区模型选择器中；缺省视为启用 */
+  readonly disabled?: boolean;
 }
 
 /** 发送聊天请求时携带的激活配置（未配置 Key 时为 undefined，走服务端 fallback） */

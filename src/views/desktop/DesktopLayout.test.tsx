@@ -75,6 +75,7 @@ describe("DesktopLayout", () => {
     onDelete: vi.fn(),
     onImage: vi.fn(),
     onLlmActivate: vi.fn(),
+    onLlmSetEnabled: vi.fn(),
     onLlmClear: vi.fn(),
     onLlmSave: vi.fn(),
     onLocale: vi.fn(),

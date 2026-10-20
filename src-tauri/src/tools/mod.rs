@@ -58,7 +58,7 @@ pub fn tool_risk(name: &str) -> Option<ToolRisk> {
     }
     match name {
         "read_file" | "list_directory" | "glob" | "grep" | "git_status" | "git_diff" | "web_fetch"
-        | "todo_write" => {
+        | "web_search" | "todo_write" => {
             Some(ToolRisk::Read)
         }
         "write_file" | "edit_file" | "run_command" => Some(ToolRisk::Write),
@@ -414,6 +414,20 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
         serde_json::json!({
             "type": "function",
             "function": {
+                "name": "web_search",
+                "description": "Search the web for up-to-date information and return titles, URLs and snippets. 联网搜索，返回网页标题、链接与摘要；需要正文时再用 web_fetch 抓取。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "精炼的检索词（1~6 个词）" }
+                    },
+                    "required": ["query"]
+                }
+            }
+        }),
+        serde_json::json!({
+            "type": "function",
+            "function": {
                 "name": "todo_write",
                 "description": "Update the agent's task checklist for this session. Pass the ENTIRE updated list every time (replace wholesale).",
                 "parameters": {
@@ -551,6 +565,10 @@ pub async fn execute_tool_with_context(
         "web_fetch" => {
             let url = args.get("url").and_then(|v| v.as_str()).ok_or("Missing 'url' argument")?;
             web::web_fetch(url, http_client).await
+        }
+        "web_search" => {
+            let query = args.get("query").and_then(|v| v.as_str()).ok_or("缺少 query 参数")?;
+            web::web_search(query, http_client).await
         }
         "todo_write" => {
             let todos = args

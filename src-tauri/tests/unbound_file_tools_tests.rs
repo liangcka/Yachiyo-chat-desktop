@@ -156,7 +156,7 @@ fn agent_prompts_keep_file_io_in_native_tools_in_both_locales() {
     use yachiyo_desktop_lib::gateway::prompt::build_agent_system_prompt;
     use yachiyo_desktop_lib::types::ChatLocale;
     for locale in [ChatLocale::ZhCn, ChatLocale::JaJp] {
-        let prompt = build_agent_system_prompt(locale, None, None, false);
+        let prompt = build_agent_system_prompt(locale, None, None, false, false);
         for required in ["read_file", "write_file", "Get-Content", "Set-Content", "cat", "echo >", "git"] {
             assert!(prompt.contains(required), "缺少 {required}");
         }

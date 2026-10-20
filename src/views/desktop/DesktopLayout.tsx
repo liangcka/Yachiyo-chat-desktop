@@ -315,7 +315,7 @@ export function DesktopLayout(props: SharedViewProps) {
   const paletteJa = props.controller.locale === "ja-JP";
   const paletteCommands: PaletteCommand[] = [
     ...props.conversations.map((conversation) => ({ id: `chat-${conversation.id}`, label: conversation.title, group: paletteJa ? "会話" : "对话", run: () => { void props.controller.selectConversation(conversation.id); switchCenterView("chat"); } })),
-    ...props.llmEntries.map((entry) => ({ id: `model-${entry.provider}`, label: entry.model || entry.provider, group: paletteJa ? "モデル" : "模型", run: () => { void props.onLlmActivate(entry.provider); } })),
+    ...props.llmEntries.filter((entry) => entry.disabled !== true).map((entry) => ({ id: `model-${entry.provider}`, label: entry.model || entry.provider, group: paletteJa ? "モデル" : "模型", run: () => { void props.onLlmActivate(entry.provider); } })),
     ...(paletteJa
       ? ([ ["general", "一般"], ["models", "モデル"], ["browser", "ウェブ検索"], ["custom", "スキル"], ["shortcuts", "ショートカット"] ] as const)
       : ([ ["general", "常规"], ["models", "模型"], ["browser", "联网搜索"], ["custom", "技能"], ["shortcuts", "快捷键"] ] as const)

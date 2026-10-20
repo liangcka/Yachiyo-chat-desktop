@@ -24,6 +24,7 @@ function extractDomain(rawUrl: string): string {
  * - write_file / edit_file → "编辑 <路径>" / "<路径> を編集"
  * - run_command → "运行 `<命令>`" / "`<命令>` を実行"
  * - web_fetch → "抓取 <域名>" / "<域名> を取得"
+ * - web_search → "搜索 <关键词>" / "<关键词> を検索"
  * - git_status → "查看 Git 状态" / "Git ステータスを確認"
  * - git_diff → "查看 Git 差异" / "Git 差分を確認"
  * - todo_write → "更新任务清单" / "タスク一覧を更新"
@@ -100,6 +101,14 @@ export function formatToolDescription(
         return isJa ? `${domain} を取得` : `抓取 ${domain}`;
       }
       return isJa ? "ウェブページを取得" : "抓取网页";
+    }
+
+    case "web_search": {
+      const query = typeof args?.query === "string" ? args.query : "";
+      if (query) {
+        return isJa ? `「${query}」をウェブ検索` : `联网搜索「${query}」`;
+      }
+      return isJa ? "ウェブ検索" : "联网搜索";
     }
 
     case "git_status":
