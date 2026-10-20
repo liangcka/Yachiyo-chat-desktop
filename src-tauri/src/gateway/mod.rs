@@ -5,7 +5,7 @@ pub mod stream;
 
 use crate::crypto::keys::KeyStore;
 use crate::gateway::providers::registry::get_provider_config;
-use crate::gateway::stream::{encode_client_event, extract_openai_delta};
+use crate::gateway::stream::{encode_client_event, OpenAiDeltaParser};
 use crate::tools::WorkspaceManager;
 use crate::types::{ClientChatRequest, ClientStreamEvent, ProviderId, TokenUsage};
 use async_stream::stream;
@@ -21,6 +21,28 @@ pub struct BuiltRequest {
     pub provider_id: ProviderId,
 }
 
+/// 请求自带的 Key 优先；否则取系统加密存储里的 Key，并要求请求的端点与保存时绑定的端点一致
+pub fn resolve_api_key(request: &ClientChatRequest, provider_id: ProviderId, key_store: &KeyStore) -> Option<String> {
+    request
+        .api_key
+        .clone()
+        .or_else(|| key_store.get_key_for_endpoint(provider_id.slug(), request.base_url.as_deref()))
+}
+
+/// 自定义端点只对 OpenAI 兼容厂商开放（Claude/Gemini 为原生协议），与 Web 端 /api/chat 的校验一致
+pub fn validated_base_url(request: &ClientChatRequest) -> Result<Option<&str>, String> {
+    let Some(base_url) = request.base_url.as_deref() else {
+        return Ok(None);
+    };
+    if !providers::openai_compat::is_valid_base_url(base_url) {
+        return Err("自定义端点需为 https:// 开头且不含空白".to_string());
+    }
+    if matches!(request.provider, Some(ProviderId::Claude | ProviderId::Gemini)) {
+        return Err("自定义端点仅支持 OpenAI 兼容协议".to_string());
+    }
+    Ok(Some(base_url))
+}
+
 pub fn build_upstream_request(
     request: &ClientChatRequest,
     api_key: &str,
@@ -28,6 +50,7 @@ pub fn build_upstream_request(
 ) -> Result<BuiltRequest, String> {
     let provider_id = request.provider.unwrap_or(ProviderId::Stepfun);
     let config = get_provider_config(provider_id);
+    let base_url = validated_base_url(request)?;
 
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
@@ -48,7 +71,7 @@ pub fn build_upstream_request(
                     .map_err(|e| e.to_string())?,
             );
             let body = providers::openai_compat::build_openai_compat_body(request, model, config);
-            (config.endpoint.to_string(), body)
+            (providers::openai_compat::resolve_chat_endpoint(base_url, config.endpoint), body)
         }
         ProviderId::Claude => {
             headers.insert(
@@ -118,17 +141,7 @@ pub fn handle_chat_stream(
             .clone()
             .unwrap_or_else(|| config.default_model.to_string());
 
-        let api_key = request.api_key.clone().or_else(|| {
-            let provider_name = match provider_id {
-                ProviderId::Stepfun => "stepfun",
-                ProviderId::Deepseek => "deepseek",
-                ProviderId::Glm => "glm",
-                ProviderId::Openai => "openai",
-                ProviderId::Claude => "claude",
-                ProviderId::Gemini => "gemini",
-            };
-            key_store.get_key(provider_name)
-        });
+        let api_key = resolve_api_key(&request, provider_id, &key_store);
 
         let api_key = match api_key {
             Some(k) if !k.is_empty() => k,
@@ -226,6 +239,7 @@ pub fn handle_chat_stream(
         let mut byte_stream = upstream_res.bytes_stream();
         let mut buffer = String::new();
         let mut accumulated_usage: Option<TokenUsage> = None;
+        let mut openai_parser = OpenAiDeltaParser::default();
 
         while let Some(chunk_res) = byte_stream.next().await {
             let chunk = match chunk_res {
@@ -269,7 +283,7 @@ pub fn handle_chat_stream(
 
                 let delta = match provider_id {
                     ProviderId::Stepfun | ProviderId::Deepseek | ProviderId::Glm | ProviderId::Openai => {
-                        extract_openai_delta(&data_str)
+                        openai_parser.parse(&data_str)
                     }
                     ProviderId::Claude => {
                         providers::anthropic::extract_anthropic_delta(&data_str)
@@ -314,6 +328,7 @@ pub fn handle_chat_stream(
                                 yield Ok(encode_client_event(&ClientStreamEvent::Done {
                                     truncated: true,
                                     usage: accumulated_usage,
+                                    reason: None,
                                 }));
                                 return;
                             }
@@ -326,6 +341,7 @@ pub fn handle_chat_stream(
         yield Ok(encode_client_event(&ClientStreamEvent::Done {
             truncated: false,
             usage: accumulated_usage,
+            reason: None,
         }));
     }
 }

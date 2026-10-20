@@ -101,7 +101,7 @@ Status: implemented
 
 ### agent 中途停止
 
-根因是 `AgentLoopConfig` 默认 `max_turns` 为 12：一次"打开应用 → inspect → 点击 → 核对 → 输入 → 发送"的桌面任务每步一轮，12 轮不够，循环以 `MaxTurnsReached` 结束，表现为最后一轮工具已执行但 agent 不再继续。默认值改为 `DEFAULT_MAX_TURNS = 50`。
+根因是 `AgentLoopConfig` 默认 `max_turns` 为 12：一次"打开应用 → inspect → 点击 → 核对 → 输入 → 发送"的桌面任务每步一轮，12 轮不够，循环以 `MaxTurnsReached` 结束，表现为最后一轮工具已执行但 agent 不再继续。现已改为默认不限轮次，由循环检测叫停（见 `feature/2026-10-19-agent-unbounded-turns-loop-detection.md`）。
 
 ### 状态条贯穿整个运行
 

@@ -4,7 +4,10 @@ import type { EnrichedChatRequest } from "../../../functions/_shared/web-search"
 import {
   buildOpenAICompatAdapter,
   buildOpenAICompatBody,
+  createOpenAIDeltaExtractor,
+  createThinkTagSplitter,
   extractOpenAIDeltaText,
+  extractOpenAIJudgeText,
 } from "../../../functions/_shared/providers/openai-compat";
 
 const textRequest: ClientChatRequest = {
@@ -326,5 +329,115 @@ describe("OpenAI official endpoint rules", () => {
     expect(body.max_tokens).toBe(8192);
     expect(body.max_completion_tokens).toBeUndefined();
     expect(body.reasoning_effort).toBeUndefined();
+  });
+});
+
+describe("third-party vendor rules on custom base URLs", () => {
+  const apiKey = "sk-" + "a".repeat(40);
+  const openai = buildOpenAICompatAdapter("openai", {
+    endpoint: "https://api.openai.com/v1/chat/completions",
+    defaultModel: "gpt-6-luna",
+    allowedModels: ["gpt-6-luna"],
+    supportsImage: true,
+    imageModels: ["gpt-6-luna"],
+    openaiOfficialRules: true,
+  });
+  const parse = (body: string) => JSON.parse(body) as Record<string, unknown>;
+
+  it("applies the vendor patch to chat, auxiliary and judge requests", () => {
+    const baseUrl = "https://api.moonshot.cn/v1";
+    const chat = parse(openai.buildRequest({ request: textRequest, apiKey, model: "kimi-k2.6", baseUrl }).body);
+    expect(chat.thinking).toBeUndefined();
+    const title = parse(
+      openai.buildRequest({ request: { ...textRequest, mode: "title" }, apiKey, model: "kimi-k2.6", baseUrl }).body,
+    );
+    expect(title.thinking).toEqual({ type: "disabled" });
+    const judge = parse(
+      openai.buildJudgeRequest({
+        apiKey,
+        model: "kimi-k3",
+        baseUrl,
+        systemPrompt: "judge",
+        messages: [{ role: "user", text: "上海天气" }],
+      }).body,
+    );
+    expect(judge.reasoning_effort).toBe("low");
+    expect(judge.thinking).toBeUndefined();
+  });
+
+  it("does not leak vendor rules onto unrelated endpoints", () => {
+    const body = parse(openai.buildRequest({ request: textRequest, apiKey, model: "kimi-k3" }).body);
+    expect(body.reasoning_effort).toBeUndefined();
+  });
+});
+
+describe("createOpenAIDeltaExtractor", () => {
+  const chunk = (delta: Record<string, unknown>) => JSON.stringify({ choices: [{ index: 0, delta }] });
+
+  it("turns cumulative reasoning_details snapshots into increments", () => {
+    const extract = createOpenAIDeltaExtractor();
+    const detail = (text: string) => ({ reasoning_details: [{ type: "reasoning.text", text }] });
+    expect(extract(chunk(detail("先想")))).toEqual({ content: null, thought: "先想" });
+    expect(extract(chunk(detail("先想一想")))).toEqual({ content: null, thought: "一想" });
+  });
+
+  it("appends incremental reasoning_details and prefers reasoning_content when both arrive", () => {
+    const extract = createOpenAIDeltaExtractor();
+    expect(extract(chunk({ reasoning_details: [{ text: "甲" }] }))).toEqual({ content: null, thought: "甲" });
+    expect(extract(chunk({ reasoning_details: [{ text: "乙" }] }))).toEqual({ content: null, thought: "乙" });
+    expect(extract(chunk({ reasoning_content: "丙", reasoning_details: [{ text: "甲乙丙" }] }))).toEqual({
+      content: null,
+      thought: "丙",
+    });
+  });
+
+  it("moves a leading think block out of content even when tags are split across chunks", () => {
+    const extract = createOpenAIDeltaExtractor();
+    expect(extract(chunk({ content: "<thi" }))).toBeNull();
+    expect(extract(chunk({ content: "nk>用户在问" }))).toEqual({ content: null, thought: "用户在问" });
+    expect(extract(chunk({ content: "候。</th" }))).toEqual({ content: null, thought: "候。" });
+    expect(extract(chunk({ content: "ink>\n\n你好" }))).toEqual({ content: "你好", thought: null });
+    expect(extract(chunk({ content: "<think>不是思考" }))).toEqual({ content: "<think>不是思考", thought: null });
+  });
+
+  it("drops a stray closing tag at the start of content", () => {
+    const split = createThinkTagSplitter();
+    expect(split("</think>")).toEqual({ content: "", thought: "" });
+    expect(split("\n答案")).toEqual({ content: "答案", thought: "" });
+  });
+
+  it("passes ordinary content through untouched", () => {
+    const extract = createOpenAIDeltaExtractor();
+    expect(extract(chunk({ content: "<b>你好</b>" }))).toEqual({ content: "<b>你好</b>", thought: null });
+  });
+});
+
+describe("extractOpenAIJudgeText", () => {
+  it("strips a leading think block before the verdict", () => {
+    const response = JSON.stringify({ choices: [{ message: { content: "<think>看看</think>\nYES" } }] });
+    expect(extractOpenAIJudgeText(response)).toBe("YES");
+  });
+});
+
+describe("createThinkTagSplitter chunk boundaries", () => {
+  const samples = [
+    "<think>用户在打招呼，回一句即可。</think>\n\n你好呀！",
+    "  \n<think>先想想</think>答案",
+    "</think>\n只有残留的闭合标签",
+    "<b>不是思考</b><think>也不是</think>",
+    "<thin不完整的标签也要原样输出",
+    "普通回答，没有任何标签",
+  ];
+
+  it("gives the same result however the stream is cut", () => {
+    for (const sample of samples) {
+      const whole = createThinkTagSplitter()(sample);
+      for (let index = 0; index <= sample.length; index += 1) {
+        const split = createThinkTagSplitter();
+        const head = split(sample.slice(0, index));
+        const tail = split(sample.slice(index));
+        expect({ content: head.content + tail.content, thought: head.thought + tail.thought }, `${sample} @${index}`).toEqual(whole);
+      }
+    }
   });
 });

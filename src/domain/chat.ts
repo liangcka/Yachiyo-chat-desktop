@@ -105,6 +105,8 @@ export interface ChatMessage {
   createdAt: number;
   /** 服务端按输出上限截断回复时为 true */
   truncated?: boolean;
+  /** Agent 检测到没有进展的循环而提前结束时为 true */
+  loopStopped?: boolean;
   /** 联网搜索的参考来源，随消息持久化 */
   sources?: ReadonlyArray<ChatSource>;
   /** 深度思考/思维链内容（DeepSeek-R1 / Claude Thinking / Gemini Thought） */

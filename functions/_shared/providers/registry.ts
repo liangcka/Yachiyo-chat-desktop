@@ -46,6 +46,8 @@ export interface ProviderAdapter {
   buildRequest(input: ProviderRequestInput): BuiltProviderRequest;
   /** 解析 upstream SSE 的单条 data，返回增量结果（正文、思考流与用量）；null 表示无内容或结束信号 */
   extractDeltaText(data: string): ExtractedDelta;
+  /** 需要跨 chunk 状态的厂商为每个请求创建独立解析器；未提供时使用无状态的 extractDeltaText */
+  createDeltaExtractor?(): (data: string) => ExtractedDelta;
   /** 构造非流式的搜索意图判断请求（小 token 预算、低思考档位） */
   buildJudgeRequest(input: JudgeRequestInput): BuiltProviderRequest;
   /** 解析非流式判断响应 JSON 的完整文本；null 表示无内容 */

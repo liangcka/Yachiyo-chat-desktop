@@ -268,7 +268,7 @@ async function handleUserKeyRequest(
       body: built.body,
       signal,
     }),
-    extractDeltaText: provider.extractDeltaText,
+    extractDeltaText: provider.createDeltaExtractor?.() ?? provider.extractDeltaText,
     errorResponse: (status) => {
       if (status === 401 || status === 403) {
         return problemResponse("PROVIDER_AUTH_FAILED", 502);

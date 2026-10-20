@@ -213,8 +213,15 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     id: "volcengine",
     name: "火山引擎",
     mappedProvider: "openai",
-    defaultModel: "doubao-pro-32k",
-    models: ["doubao-pro-32k", "doubao-lite-32k", "doubao-vision-pro"],
+    defaultModel: "doubao-seed-2-1-turbo-260628",
+    models: [
+      "doubao-seed-2-1-turbo-260628",
+      "doubao-seed-2-1-pro-260915",
+      "doubao-seed-2-1-lite-260915",
+      "doubao-seed-2-0-lite-260428",
+      "doubao-seed-2-0-mini-260428",
+      "doubao-seed-evolving",
+    ],
     defaultBaseUrl: "https://ark.cn-beijing.volces.com/api/v3",
     keySource: "console.volcengine.com/ark",
     supportsImage: true,
@@ -223,20 +230,20 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     id: "minimax_cn",
     name: "MiniMax CN",
     mappedProvider: "openai",
-    defaultModel: "abab6.5s-chat",
-    models: ["abab6.5s-chat", "abab6.5t-chat", "abab7-chat-preview"],
-    defaultBaseUrl: "https://api.minimax.chat/v1",
-    keySource: "platform.minimaxi.com",
+    defaultModel: "MiniMax-M3",
+    models: ["MiniMax-M3", "MiniMax-M3.1-Flash"],
+    defaultBaseUrl: "https://api.minimax.cn/v1",
+    keySource: "platform.minimax.cn",
     supportsImage: true,
   },
   {
     id: "minimax_global",
     name: "MiniMax Global",
     mappedProvider: "openai",
-    defaultModel: "abab6.5s-chat",
-    models: ["abab6.5s-chat", "abab6.5t-chat"],
-    defaultBaseUrl: "https://api.minimaxi.chat/v1",
-    keySource: "api.minimaxi.chat",
+    defaultModel: "MiniMax-M3",
+    models: ["MiniMax-M3", "MiniMax-M3.1-Flash"],
+    defaultBaseUrl: "https://api.minimax.io/v1",
+    keySource: "platform.minimax.io",
     supportsImage: true,
   },
   {
@@ -250,23 +257,23 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
   },
   {
     id: "aliyun",
-    name: "阿里云",
+    name: "阿里云百炼",
     mappedProvider: "openai",
-    defaultModel: "qwen-max",
-    models: ["qwen-max", "qwen-plus", "qwen-turbo", "qwen-vl-max"],
+    defaultModel: "qwen3.8-flash",
+    models: ["qwen3.8-flash", "qwen3.8-max", "qwen3.7-plus", "qwen3.7-flash"],
     defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     keySource: "dashscope.console.aliyun.com",
     supportsImage: true,
   },
   {
     id: "xiaomi_mimo",
-    name: "Xiaomi MIMO",
+    name: "Xiaomi MiMo",
     mappedProvider: "openai",
-    defaultModel: "mimo-v1-chat",
-    models: ["mimo-v1-chat", "mimo-v1-pro"],
-    defaultBaseUrl: "https://api.mimo.mi.com/v1",
+    defaultModel: "mimo-v2.6-flash",
+    models: ["mimo-v2.6-flash", "mimo-v2.6-pro", "mimo-v2.6-pro-ultraspeed"],
+    defaultBaseUrl: "https://api.xiaomimimo.com/v1",
     keySource: "mimo.mi.com",
-    supportsImage: false,
+    supportsImage: true,
   },
   {
     id: "siliconflow",
@@ -283,7 +290,8 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     name: "Z.ai",
     mappedProvider: "glm",
     defaultModel: "glm-5.3-flash",
-    models: ["glm-5.3-flash", "glm-4.7-flash"],
+    models: ["glm-5.3-flash", "glm-5.3", "glm-5.3-flashx", "glm-5.2"],
+    defaultBaseUrl: "https://api.z.ai/api/paas/v4",
     keySource: "z.ai",
     supportsImage: true,
   },
@@ -301,30 +309,30 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     id: "kimi_cn",
     name: "Kimi CN",
     mappedProvider: "openai",
-    defaultModel: "moonshot-v1-8k",
-    models: ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
+    defaultModel: "kimi-k2.6",
+    models: ["kimi-k2.6", "kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
     defaultBaseUrl: "https://api.moonshot.cn/v1",
-    keySource: "platform.moonshot.cn",
+    keySource: "platform.kimi.com",
     supportsImage: true,
   },
   {
     id: "kimi_global",
     name: "Kimi Global",
     mappedProvider: "openai",
-    defaultModel: "moonshot-v1-8k",
-    models: ["moonshot-v1-8k", "moonshot-v1-32k"],
-    defaultBaseUrl: "https://api.moonshot.cn/v1",
-    keySource: "platform.moonshot.cn",
+    defaultModel: "kimi-k2.6",
+    models: ["kimi-k2.6", "kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
+    defaultBaseUrl: "https://api.moonshot.ai/v1",
+    keySource: "platform.kimi.ai",
     supportsImage: true,
   },
   {
     id: "byteplus",
-    name: "BytePlus",
+    name: "BytePlus ModelArk",
     mappedProvider: "openai",
-    defaultModel: "doubao-pro-32k",
-    models: ["doubao-pro-32k", "doubao-lite-32k"],
-    defaultBaseUrl: "https://api.byteplus.com/v1",
-    keySource: "byteplus.com",
+    defaultModel: "dola-seed-2-1-turbo-260628",
+    models: ["dola-seed-2-1-turbo-260628", "seed-2-0-pro-260328", "seed-2-0-lite-260428", "seed-2-0-mini-260428"],
+    defaultBaseUrl: "https://ark.ap-southeast.bytepluses.com/api/v3",
+    keySource: "console.byteplus.com/ark",
     supportsImage: true,
   },
   {
@@ -338,12 +346,22 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
   },
   {
     id: "tencent",
-    name: "腾讯云",
+    name: "腾讯云 TokenHub",
     mappedProvider: "openai",
-    defaultModel: "hunyuan-pro",
-    models: ["hunyuan-pro", "hunyuan-standard", "hunyuan-vision"],
-    defaultBaseUrl: "https://api.hunyuan.cloud.tencent.com/v1",
-    keySource: "console.cloud.tencent.com/hunyuan",
+    defaultModel: "hy3",
+    models: ["hy3", "hy4-preview", "hy-vision-2.0-instruct"],
+    defaultBaseUrl: "https://tokenhub.tencentmaas.com/v1",
+    keySource: "腾讯云 TokenHub 控制台",
+    supportsImage: true,
+  },
+  {
+    id: "qianfan",
+    name: "百度千帆",
+    mappedProvider: "openai",
+    defaultModel: "ernie-5.1",
+    models: ["ernie-5.1", "ernie-5.0-thinking-preview", "ernie-4.5-turbo-vl"],
+    defaultBaseUrl: "https://qianfan.baidubce.com/v2",
+    keySource: "console.bce.baidu.com/qianfan",
     supportsImage: true,
   },
   {
@@ -412,6 +430,35 @@ export const MODEL_VENDORS: readonly ModelVendorItem[] = [
     supportsImage: true,
   },
 ];
+
+function endpointHost(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined;
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 多张厂商卡片共用同一 ProviderId 存储槽（火山、Kimi、百炼等都映射到 openai），
+ * 按端点主机名找回已保存配置所属的卡片；未自定义端点时对应不带默认端点的卡片，
+ * 仍有多张时优先取 id 与存储槽同名的原生卡片。
+ */
+export function findVendorForEntry(
+  provider: ProviderId,
+  baseUrl: string | undefined,
+): ModelVendorItem | undefined {
+  const host = endpointHost(baseUrl);
+  const candidates = MODEL_VENDORS.filter(
+    (vendor) =>
+      vendor.mappedProvider === provider &&
+      (host === undefined
+        ? vendor.defaultBaseUrl === undefined
+        : endpointHost(vendor.defaultBaseUrl) === host),
+  );
+  return candidates.find((vendor) => vendor.id === provider) ?? candidates[0];
+}
 
 /** 前端 API Key 宽松校验：非空、长度 20-512、可打印 ASCII（与后端 isValidApiKey 对齐） */
 export function isValidApiKey(value: string): boolean {

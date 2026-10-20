@@ -1,5 +1,10 @@
 use crate::crypto::keys::KeyStore;
 use crate::gateway::agent::checkpoint::CheckpointStore;
+use crate::gateway::providers::compat_vendor::CompatVendor;
+use crate::gateway::agent::loop_guard::{
+    RepetitionDetector, ToolLoopDetector, ToolLoopVerdict, DONE_REASON_LOOP_DETECTED, REPETITION_LOOP_DETECTED,
+    TOOL_LOOP_NUDGE,
+};
 use crate::gateway::agent::messages::{history_to_agent_messages, AgentMessage};
 use crate::gateway::agent::permission::{approval_key, ApprovalRegistry};
 use crate::gateway::agent::pruner::{
@@ -31,19 +36,17 @@ pub enum LoopEmit {
     Ping,
 }
 
-/// 默认最大轮数：桌面操作一次点击或输入就占一轮，发一条消息往往要十几轮，12 轮会在任务中途截断
-pub const DEFAULT_MAX_TURNS: u32 = 50;
-
 #[derive(Debug, Clone)]
 pub struct AgentLoopConfig {
-    pub max_turns: u32,
+    /// 轮次上限；None 表示不限，运行由模型自行结束或循环检测叫停
+    pub max_turns: Option<u32>,
     pub permission_timeout_secs: u64,
     pub execution_mode: AgentExecutionMode,
 }
 
 impl Default for AgentLoopConfig {
     fn default() -> Self {
-        Self { max_turns: DEFAULT_MAX_TURNS, permission_timeout_secs: 300, execution_mode: AgentExecutionMode::Confirm }
+        Self { max_turns: None, permission_timeout_secs: 300, execution_mode: AgentExecutionMode::Confirm }
     }
 }
 
@@ -68,6 +71,8 @@ pub trait TurnExecutor: Send + Sync {
 pub enum LoopOutcome {
     Completed { usage: TokenUsage },
     MaxTurnsReached { usage: TokenUsage },
+    /// 检测到没有进展的工具循环或输出复读，提前结束
+    LoopDetected { usage: TokenUsage },
     Cancelled,
 }
 
@@ -135,7 +140,13 @@ pub async fn run_agent_loop_ext(
         .map(|c| c.run_id().to_string())
         .unwrap_or_else(|| format!("no-workspace-{:016x}", rand::random::<u64>()));
 
-    for turn in 1..=config.max_turns {
+    let mut loop_detector = ToolLoopDetector::default();
+    let mut turn: u32 = 0;
+    loop {
+        turn += 1;
+        if config.max_turns.is_some_and(|max| turn > max) {
+            return Ok(LoopOutcome::MaxTurnsReached { usage });
+        }
         let mut turn_checkpoint_created = false;
         if cancelled.load(Ordering::Relaxed) {
             return Ok(LoopOutcome::Cancelled);
@@ -148,7 +159,10 @@ pub async fn run_agent_loop_ext(
             DEFAULT_PRUNE_HEAD_CHARS,
             DEFAULT_PRUNE_TAIL_CHARS,
         );
-        let outcome = executor.execute(&pruned_messages, sink).await?;
+        let outcome = match executor.execute(&pruned_messages, sink).await {
+            Err(error) if error == REPETITION_LOOP_DETECTED => return Ok(LoopOutcome::LoopDetected { usage }),
+            other => other?,
+        };
         accumulate_usage(&mut usage, &outcome.usage);
 
         if outcome.tool_calls.is_empty() {
@@ -162,6 +176,7 @@ pub async fn run_agent_loop_ext(
             native: outcome.native.clone(),
         });
 
+        let mut turn_outputs: Vec<String> = Vec::with_capacity(outcome.tool_calls.len());
         for call in &outcome.tool_calls {
             if cancelled.load(Ordering::Relaxed) { return Ok(LoopOutcome::Cancelled); }
             sink(LoopEmit::Event(ClientStreamEvent::ToolCall {
@@ -306,14 +321,25 @@ pub async fn run_agent_loop_ext(
                 is_error,
                 duration_ms,
             }));
+            turn_outputs.push(model_output.clone());
             messages.push(AgentMessage::ToolResult {
                 tool_call_id: call.id.clone(),
                 name: call.name.clone(),
                 content: model_output,
             });
         }
+
+        match loop_detector.record(&outcome.tool_calls, &turn_outputs) {
+            ToolLoopVerdict::Progressing => {}
+            ToolLoopVerdict::Nudge => {
+                // 提醒附在工具结果末尾而不是另起一条用户消息，各家协议的消息交替约束都不受影响
+                if let Some(AgentMessage::ToolResult { content, .. }) = messages.last_mut() {
+                    content.push_str(TOOL_LOOP_NUDGE);
+                }
+            }
+            ToolLoopVerdict::Stop => return Ok(LoopOutcome::LoopDetected { usage }),
+        }
     }
-    Ok(LoopOutcome::MaxTurnsReached { usage })
 }
 
 /// 真实执行器：走上游 HTTP 流式接口，透传 thought/delta/sources 事件
@@ -321,6 +347,8 @@ pub struct HttpTurnExecutor {
     pub client: reqwest::Client,
     pub fallback_client: Option<reqwest::Client>,
     pub provider_id: ProviderId,
+    /// 已校验的自定义 OpenAI 兼容端点；存在时 OpenAI 也改走 Chat Completions
+    pub base_url: Option<String>,
     pub api_key: String,
     pub model: String,
     pub system_prompt: String,
@@ -336,6 +364,7 @@ impl TurnExecutor for HttpTurnExecutor {
         let client = self.client.clone();
         let fallback_client = self.fallback_client.clone();
         let provider_id = self.provider_id;
+        let base_url = self.base_url.clone();
         let api_key = self.api_key.clone();
         let model = self.model.clone();
         let system_prompt = self.system_prompt.clone();
@@ -344,29 +373,28 @@ impl TurnExecutor for HttpTurnExecutor {
         let sink = Arc::clone(sink);
         Box::pin(async move {
             let config = get_provider_config(provider_id);
+            let protocol = WireProtocol::resolve(provider_id, base_url.as_deref());
 
-            let (url, body) = match provider_id {
-                ProviderId::Stepfun | ProviderId::Deepseek | ProviderId::Glm => {
-                    (
-                        config.endpoint.to_string(),
-                        crate::gateway::providers::openai_compat::build_openai_agent_body(
-                            provider_id, &model, &messages, &system_prompt, &tools_schema,
-                        ),
-                    )
-                }
-                ProviderId::Openai => (
+            let (url, body) = match protocol {
+                WireProtocol::ChatCompletions => (
+                    crate::gateway::providers::openai_compat::resolve_chat_endpoint(base_url.as_deref(), config.endpoint),
+                    crate::gateway::providers::openai_compat::build_openai_agent_body(
+                        provider_id, base_url.as_deref(), &model, &messages, &system_prompt, &tools_schema,
+                    ),
+                ),
+                WireProtocol::Responses => (
                     crate::gateway::providers::openai_responses::OPENAI_RESPONSES_ENDPOINT.to_string(),
                     crate::gateway::providers::openai_responses::build_openai_responses_agent_body(
                         &model, &messages, &system_prompt, &tools_schema,
                     ),
                 ),
-                ProviderId::Claude => (
+                WireProtocol::Anthropic => (
                     config.endpoint.to_string(),
                     crate::gateway::providers::anthropic::build_anthropic_agent_body(
                         &model, &messages, &system_prompt, &tools_schema,
                     ),
                 ),
-                ProviderId::Gemini => (
+                WireProtocol::Gemini => (
                     format!("{}/models/{}:streamGenerateContent?alt=sse", config.endpoint, model),
                     crate::gateway::providers::gemini::build_gemini_agent_body(
                         &model, &messages, &system_prompt, &tools_schema,
@@ -433,9 +461,12 @@ impl TurnExecutor for HttpTurnExecutor {
             }
 
             let mut agg = crate::gateway::agent::stream_agg::ToolCallAggregator::new();
-            let mut native = NativeTurnCollector::for_provider(provider_id);
+            let mut native = NativeTurnCollector::for_protocol(protocol, CompatVendor::resolve(base_url.as_deref(), config.endpoint));
+            let mut openai_parser = crate::gateway::stream::OpenAiDeltaParser::default();
             let mut full_text = String::new();
             let mut reasoning = String::new();
+            let mut thought_repetition = RepetitionDetector::default();
+            let mut text_repetition = RepetitionDetector::default();
             let mut usage: Option<TokenUsage> = None;
             let mut buffer = String::new();
             let mut byte_stream = res.bytes_stream();
@@ -463,11 +494,11 @@ impl TurnExecutor for HttpTurnExecutor {
                         continue;
                     }
                     native.push(&data_str);
-                    let delta = match provider_id {
-                        ProviderId::Stepfun | ProviderId::Deepseek | ProviderId::Glm => crate::gateway::stream::extract_openai_delta(&data_str),
-                        ProviderId::Openai => crate::gateway::providers::openai_responses::extract_openai_responses_delta(&data_str),
-                        ProviderId::Claude => crate::gateway::providers::anthropic::extract_anthropic_delta(&data_str),
-                        ProviderId::Gemini => crate::gateway::providers::gemini::extract_gemini_delta(&data_str),
+                    let delta = match protocol {
+                        WireProtocol::ChatCompletions => openai_parser.parse(&data_str),
+                        WireProtocol::Responses => crate::gateway::providers::openai_responses::extract_openai_responses_delta(&data_str),
+                        WireProtocol::Anthropic => crate::gateway::providers::anthropic::extract_anthropic_delta(&data_str),
+                        WireProtocol::Gemini => crate::gateway::providers::gemini::extract_gemini_delta(&data_str),
                     };
                     let Some(delta) = delta else { continue };
                     if let Some(sources) = delta.sources {
@@ -481,13 +512,22 @@ impl TurnExecutor for HttpTurnExecutor {
                     if let Some(thought) = delta.thought {
                         if !thought.is_empty() {
                             reasoning.push_str(&thought);
+                            let repeating = thought_repetition.push(&thought);
                             sink(LoopEmit::Event(ClientStreamEvent::Thought { text: thought }));
+                            // 丢弃响应流即断开上游连接，不再为退化输出继续计费
+                            if repeating {
+                                return Err(REPETITION_LOOP_DETECTED.to_string());
+                            }
                         }
                     }
                     if let Some(content) = delta.content {
                         if !content.is_empty() {
                             full_text.push_str(&content);
+                            let repeating = text_repetition.push(&content);
                             sink(LoopEmit::Event(ClientStreamEvent::Delta { text: content }));
+                            if repeating {
+                                return Err(REPETITION_LOOP_DETECTED.to_string());
+                            }
                         }
                     }
                     for tc in &delta.tool_calls {
@@ -502,21 +542,46 @@ impl TurnExecutor for HttpTurnExecutor {
     }
 }
 
-/// 按 provider 收集需要原样回传的原生输出；Chat Completions 系 provider 无需收集
+/// Agent 请求的线路协议：OpenAI 官方端点走 Responses，自定义端点与国内厂商走 Chat Completions
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WireProtocol {
+    ChatCompletions,
+    Responses,
+    Anthropic,
+    Gemini,
+}
+
+impl WireProtocol {
+    pub fn resolve(provider: ProviderId, base_url: Option<&str>) -> Self {
+        match provider {
+            ProviderId::Claude => Self::Anthropic,
+            ProviderId::Gemini => Self::Gemini,
+            ProviderId::Openai if base_url.is_none() => Self::Responses,
+            ProviderId::Openai | ProviderId::Stepfun | ProviderId::Deepseek | ProviderId::Glm => Self::ChatCompletions,
+        }
+    }
+}
+
+/// 按线路协议收集需要原样回传的原生输出；Chat Completions 无需收集
 enum NativeTurnCollector {
     None,
     Anthropic(crate::gateway::providers::anthropic::AnthropicTurnCollector),
     Gemini(crate::gateway::providers::gemini::GeminiTurnCollector),
     Responses(crate::gateway::providers::openai_responses::ResponsesTurnCollector),
+    /// 方舟 Seed 2.1 起思考以加密块下发，流里单独一个 chunk 携带整串 encrypted_content
+    ArkEncrypted(Option<String>),
 }
 
 impl NativeTurnCollector {
-    fn for_provider(provider: ProviderId) -> Self {
-        match provider {
-            ProviderId::Claude => Self::Anthropic(Default::default()),
-            ProviderId::Gemini => Self::Gemini(Default::default()),
-            ProviderId::Openai => Self::Responses(Default::default()),
-            ProviderId::Stepfun | ProviderId::Deepseek | ProviderId::Glm => Self::None,
+    fn for_protocol(protocol: WireProtocol, vendor: Option<CompatVendor>) -> Self {
+        if protocol == WireProtocol::ChatCompletions && vendor == Some(CompatVendor::Ark) {
+            return Self::ArkEncrypted(None);
+        }
+        match protocol {
+            WireProtocol::Anthropic => Self::Anthropic(Default::default()),
+            WireProtocol::Gemini => Self::Gemini(Default::default()),
+            WireProtocol::Responses => Self::Responses(Default::default()),
+            WireProtocol::ChatCompletions => Self::None,
         }
     }
 
@@ -526,6 +591,18 @@ impl NativeTurnCollector {
             Self::Anthropic(collector) => collector.push(data),
             Self::Gemini(collector) => collector.push(data),
             Self::Responses(collector) => collector.push(data),
+            Self::ArkEncrypted(encrypted) => {
+                let found = serde_json::from_str::<serde_json::Value>(data).ok().and_then(|chunk| {
+                    chunk
+                        .pointer("/choices/0/delta/encrypted_content")
+                        .and_then(|value| value.as_str())
+                        .filter(|text| !text.is_empty())
+                        .map(str::to_string)
+                });
+                if found.is_some() {
+                    *encrypted = found;
+                }
+            }
         }
     }
 
@@ -539,7 +616,27 @@ impl NativeTurnCollector {
             Self::Anthropic(collector) => Ok(collector.finish()),
             Self::Gemini(collector) => Ok((collector.finish(), agg.finish())),
             Self::Responses(collector) => Ok((collector.finish()?, agg.finish())),
+            Self::ArkEncrypted(encrypted) => Ok((
+                encrypted.map(|text| vec![serde_json::json!({ "encrypted_content": text })]).unwrap_or_default(),
+                agg.finish(),
+            )),
         }
+    }
+}
+
+/// 下发心跳的周期，需明显小于客户端的流空闲超时（45 秒）
+const HEARTBEAT_PERIOD: Duration = Duration::from_secs(5);
+
+/// 取下一个待下发的事件；周期内没有事件时以 Ping 作为心跳，通道关闭时返回 None
+pub async fn next_emit_or_heartbeat(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<LoopEmit>,
+    heartbeat: &mut tokio::time::Interval,
+) -> Option<LoopEmit> {
+    tokio::select! {
+        // 已排队的事件优先于心跳，保证事件顺序和及时性
+        biased;
+        emit = rx.recv() => emit,
+        _ = heartbeat.tick() => Some(LoopEmit::Ping),
     }
 }
 
@@ -558,21 +655,19 @@ pub fn run_agent_chat_stream(
         let config = get_provider_config(provider_id);
         let model = request.model.clone().unwrap_or_else(|| config.default_model.to_string());
 
-        let api_key = request.api_key.clone().or_else(|| {
-            let provider_name = match provider_id {
-                ProviderId::Stepfun => "stepfun",
-                ProviderId::Deepseek => "deepseek",
-                ProviderId::Glm => "glm",
-                ProviderId::Openai => "openai",
-                ProviderId::Claude => "claude",
-                ProviderId::Gemini => "gemini",
-            };
-            key_store.get_key(provider_name)
-        });
+        let api_key = crate::gateway::resolve_api_key(&request, provider_id, &key_store);
         let api_key = match api_key {
             Some(k) if !k.is_empty() => k,
             _ => {
                 yield Ok(encode_client_event(&ClientStreamEvent::Error { code: "SESSION_REQUIRED".to_string() }));
+                return;
+            }
+        };
+        let base_url = match crate::gateway::validated_base_url(&request) {
+            Ok(base_url) => base_url.map(str::to_string),
+            Err(error) => {
+                tracing::warn!("Agent 自定义端点无效: {}", error);
+                yield Ok(encode_client_event(&ClientStreamEvent::Error { code: "INVALID_REQUEST".to_string() }));
                 return;
             }
         };
@@ -625,6 +720,7 @@ pub fn run_agent_chat_stream(
             client: client.clone(),
             fallback_client,
             provider_id,
+            base_url,
             api_key,
             model,
             system_prompt,
@@ -632,7 +728,7 @@ pub fn run_agent_chat_stream(
         };
 
         let agent_config = request.agent.as_ref()
-            .map(|a| AgentLoopConfig { max_turns: a.max_turns.unwrap_or(DEFAULT_MAX_TURNS), permission_timeout_secs: 300, execution_mode: a.execution_mode })
+            .map(|a| AgentLoopConfig { max_turns: a.max_turns, permission_timeout_secs: 300, execution_mode: a.execution_mode })
             .unwrap_or_default();
         let run_id = format!(
             "{}-{}",
@@ -667,7 +763,10 @@ pub fn run_agent_chat_stream(
             .await
         });
 
-        while let Some(emit) = rx.recv().await {
+        // 工具执行与上游长时间思考期间没有事件，定时心跳避免客户端按空闲超时误判断流
+        let mut heartbeat = tokio::time::interval_at(tokio::time::Instant::now() + HEARTBEAT_PERIOD, HEARTBEAT_PERIOD);
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        while let Some(emit) = next_emit_or_heartbeat(&mut rx, &mut heartbeat).await {
             match emit {
                 LoopEmit::Event(ev) => yield Ok(encode_client_event(&ev)),
                 LoopEmit::Ping => yield Ok(encode_ping().to_string()),
@@ -677,13 +776,16 @@ pub fn run_agent_chat_stream(
         match handle.await {
             Ok(Ok(outcome)) => match outcome {
                 LoopOutcome::Completed { usage } => {
-                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: false, usage: Some(usage) }));
+                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: false, usage: Some(usage), reason: None }));
                 }
                 LoopOutcome::MaxTurnsReached { usage } => {
-                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: true, usage: Some(usage) }));
+                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: true, usage: Some(usage), reason: None }));
+                }
+                LoopOutcome::LoopDetected { usage } => {
+                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: false, usage: Some(usage), reason: Some(DONE_REASON_LOOP_DETECTED.to_string()) }));
                 }
                 LoopOutcome::Cancelled => {
-                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: true, usage: None }));
+                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: true, usage: None, reason: None }));
                 }
             },
             Ok(Err(e)) => {

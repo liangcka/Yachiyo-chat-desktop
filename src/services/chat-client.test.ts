@@ -48,6 +48,15 @@ describe("streamChat", () => {
     serverFetch = vi.fn<typeof fetch>();
   });
 
+  it("reports an agent loop stop carried by the done event", async () => {
+    serverFetch.mockResolvedValue(
+      sseResponse('event: done\ndata: {"truncated":false,"reason":"loop_detected"}\n\n'),
+    );
+    await expect(
+      streamChat(sampleRequest, { fetcher: serverFetch, onDelta: () => undefined }),
+    ).resolves.toEqual({ truncated: false, stopReason: "loop_detected" });
+  });
+
   it("parses Unicode delta records split across arbitrary byte boundaries", async () => {
     serverFetch.mockResolvedValue(
       sseResponse(

@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   DOMESTIC_PROVIDERS,
   INTERNATIONAL_PROVIDERS,
+  MODEL_VENDORS,
   PROVIDER_IDS,
   PROVIDER_METADATA,
+  findVendorForEntry,
   getProviderMeta,
   isProviderId,
   isValidApiKey,
@@ -91,5 +93,51 @@ describe("isValidApiKey", () => {
     expect(isValidApiKey("含中文的key-abcdefghij")).toBe(false);
     // 内部会 trim，两侧空格不影响判定
     expect(isValidApiKey("  " + "a".repeat(20) + "  ")).toBe(true);
+  });
+});
+
+describe("MODEL_VENDORS", () => {
+  it("keeps card ids unique and every default model inside its own model list", () => {
+    const ids = MODEL_VENDORS.map((vendor) => vendor.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const vendor of MODEL_VENDORS) {
+      expect(vendor.models, vendor.id).toContain(vendor.defaultModel);
+    }
+  });
+
+  it("only maps native-protocol providers to cards without a custom endpoint", () => {
+    for (const vendor of MODEL_VENDORS) {
+      if (vendor.mappedProvider === "claude" || vendor.mappedProvider === "gemini") {
+        expect(vendor.defaultBaseUrl, vendor.id).toBeUndefined();
+      }
+    }
+  });
+
+  it("gives every preset endpoint a distinct host inside its shared provider slot", () => {
+    const seen = new Set<string>();
+    for (const vendor of MODEL_VENDORS) {
+      if (vendor.defaultBaseUrl === undefined) continue;
+      const key = `${vendor.mappedProvider}|${new URL(vendor.defaultBaseUrl).hostname}`;
+      expect(seen.has(key), `${vendor.id} shares ${key}`).toBe(false);
+      seen.add(key);
+    }
+  });
+});
+
+describe("findVendorForEntry", () => {
+  it("finds the card that owns a saved endpoint by its host", () => {
+    expect(findVendorForEntry("openai", "https://api.moonshot.cn/v1")?.id).toBe("kimi_cn");
+    expect(findVendorForEntry("openai", "https://api.moonshot.ai/v1/")?.id).toBe("kimi_global");
+    expect(findVendorForEntry("glm", "https://api.z.ai/api/paas/v4")?.id).toBe("zai");
+  });
+
+  it("maps entries without an endpoint to the native card of the slot", () => {
+    expect(findVendorForEntry("openai", undefined)?.id).toBe("openai");
+    expect(findVendorForEntry("claude", undefined)?.id).toBe("claude");
+    expect(findVendorForEntry("glm", undefined)?.id).toBe("glm");
+  });
+
+  it("returns undefined for an endpoint no card presets", () => {
+    expect(findVendorForEntry("openai", "https://my-proxy.example.com/v1")).toBeUndefined();
   });
 });

@@ -18,6 +18,7 @@ import {
   KEYSTORE_MANAGED_API_KEY,
   MODEL_VENDORS,
   PROVIDER_METADATA,
+  findVendorForEntry,
   getProviderMeta,
   isValidApiKey,
   isValidBaseUrl,
@@ -85,6 +86,7 @@ const zhCopy = {
   vendorFallback: "服务商",
   closeConfig: "关闭配置弹窗",
   storedKeyPlaceholder: "已加密保存在本机，留空则保持不变",
+  endpointChangedNeedsKey: "已保存的 Key 只用于原来的端点，更改端点后请重新输入 API Key",
   keyPlaceholder: "请输入服务商 API Key",
   hideKey: "隐藏 API Key",
   showKey: "显示 API Key",
@@ -142,6 +144,7 @@ const jaCopy: PanelCopy = {
   vendorFallback: "プロバイダー",
   closeConfig: "設定ダイアログを閉じる",
   storedKeyPlaceholder: "この PC に暗号化して保存済み。空欄のままなら変更しません",
+  endpointChangedNeedsKey: "保存済みのキーは元のエンドポイント専用です。エンドポイントを変更した場合は API キーを再入力してください",
   keyPlaceholder: "プロバイダーの API キーを入力",
   hideKey: "API キーを隠す",
   showKey: "API キーを表示",
@@ -197,6 +200,8 @@ export function LlmSettingsPanel({
   const [isCustomModel, setIsCustomModel] = useState(false);
   const [customBaseUrl, setCustomBaseUrl] = useState("");
   const [customModelName, setCustomModelName] = useState("");
+  // 从共用存储槽的其他厂商卡片切换过来时，槽内已存的 Key 属于别家，不能留空沿用
+  const [reuseStoredKey, setReuseStoredKey] = useState(true);
 
   const { render, closing } = useClosing(open, 300);
 
@@ -213,6 +218,7 @@ export function LlmSettingsPanel({
       setFeedback(undefined);
       setShowKey(false);
       setModalMode(null);
+      setReuseStoredKey(true);
     }
   }
 
@@ -261,7 +267,13 @@ export function LlmSettingsPanel({
     setIsCustomModel(false);
     setSelectedProvider(vendor.mappedProvider);
     setPrevSyncKey({ provider: vendor.mappedProvider, entries });
-    const entry = entries.find((item) => item.provider === vendor.mappedProvider);
+    const stored = entries.find((item) => item.provider === vendor.mappedProvider);
+    // 槽内配置属于其他卡片时，其模型名与端点对当前厂商无效，改用卡片预设
+    const entry =
+      stored !== undefined && findVendorForEntry(stored.provider, stored.baseUrl)?.id === vendor.id
+        ? stored
+        : undefined;
+    setReuseStoredKey(stored === undefined || entry !== undefined);
     setApiKeyInput(keyInputFor(entry));
     setModelInput(entry?.model || vendor.defaultModel);
     setCustomBaseUrl(entry?.baseUrl ?? vendor.defaultBaseUrl ?? "");
@@ -271,6 +283,7 @@ export function LlmSettingsPanel({
   const handleSelectCustomModel = () => {
     setIsCustomModel(true);
     setTargetVendor(null);
+    setReuseStoredKey(true);
     setSelectedProvider("openai");
     setPrevSyncKey({ provider: "openai", entries });
     const entry = entries.find((item) => item.provider === "openai");
@@ -282,13 +295,16 @@ export function LlmSettingsPanel({
   };
 
   const handleEditEntry = (providerId: ProviderId, currentModelName: string) => {
+    const entry = entries.find((item) => item.provider === providerId);
     const vendor =
-      MODEL_VENDORS.find((v) => v.mappedProvider === providerId) ?? MODEL_VENDORS[0];
+      findVendorForEntry(providerId, entry?.baseUrl) ??
+      MODEL_VENDORS.find((v) => v.mappedProvider === providerId) ??
+      MODEL_VENDORS[0];
     setTargetVendor(vendor);
     setIsCustomModel(false);
+    setReuseStoredKey(true);
     setSelectedProvider(providerId);
     setPrevSyncKey({ provider: providerId, entries });
-    const entry = entries.find((item) => item.provider === providerId);
     setApiKeyInput(keyInputFor(entry));
     setModelInput(currentModelName || entry?.model || vendor.defaultModel);
     setCustomBaseUrl(entry?.baseUrl ?? vendor.defaultBaseUrl ?? "");
@@ -348,13 +364,16 @@ export function LlmSettingsPanel({
   }));
 
   const currentMeta = getProviderMeta(selectedProvider);
-  const hasStoredKey =
-    entries.find((entry) => entry.provider === selectedProvider)?.apiKey === KEYSTORE_MANAGED_API_KEY;
-  const keyToSave = hasStoredKey && apiKeyInput.trim() === "" ? KEYSTORE_MANAGED_API_KEY : apiKeyInput;
-  const isKeyValid = isValidApiKey(keyToSave);
   // Base URL 允许留空（走厂商原生端点），填写时必须是合法 https 地址
   const trimmedBaseUrl = customBaseUrl.trim();
   const isBaseUrlValid = trimmedBaseUrl.length === 0 || isValidBaseUrl(trimmedBaseUrl);
+  const storedEntry = entries.find((entry) => entry.provider === selectedProvider);
+  const hasStoredKey = reuseStoredKey && storedEntry?.apiKey === KEYSTORE_MANAGED_API_KEY;
+  // 桌面网关把已存 Key 绑定在保存时的端点上，端点改了就不能再沿用
+  const endpointChanged = hasStoredKey && (trimmedBaseUrl || undefined) !== storedEntry?.baseUrl;
+  const canReuseStoredKey = hasStoredKey && !endpointChanged;
+  const keyToSave = canReuseStoredKey && apiKeyInput.trim() === "" ? KEYSTORE_MANAGED_API_KEY : apiKeyInput;
+  const isKeyValid = isValidApiKey(keyToSave);
 
   return (
     <div className={`model-mgmt-container ${closing ? "model-mgmt-container--closing" : ""}`}>
@@ -666,7 +685,7 @@ export function LlmSettingsPanel({
                     id="model-cfg-api-key"
                     type={showKey ? "text" : "password"}
                     className="model-form-input"
-                    placeholder={hasStoredKey ? t.storedKeyPlaceholder : t.keyPlaceholder}
+                    placeholder={canReuseStoredKey ? t.storedKeyPlaceholder : t.keyPlaceholder}
                     value={apiKeyInput}
                     onChange={(e) => setApiKeyInput(e.target.value)}
                     autoComplete="off"
@@ -681,7 +700,11 @@ export function LlmSettingsPanel({
                   </button>
                 </div>
                 <span className="model-form-hint">
-                  {targetVendor ? t.keySource(targetVendor.keySource) : t.keySourceFallback}
+                  {endpointChanged && apiKeyInput.trim() === ""
+                    ? t.endpointChangedNeedsKey
+                    : targetVendor
+                      ? t.keySource(targetVendor.keySource)
+                      : t.keySourceFallback}
                 </span>
               </div>
 

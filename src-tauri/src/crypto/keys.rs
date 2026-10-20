@@ -12,9 +12,18 @@ use std::sync::Mutex;
 
 const NONCE_SIZE: usize = 12;
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct KeyStoreData {
     pub keys: HashMap<String, String>,
+    /// 保存 Key 时绑定的自定义端点；没有记录表示 Key 属于厂商原生端点。
+    /// 旧版文件没有该字段，按原生端点处理
+    #[serde(default)]
+    pub endpoints: HashMap<String, String>,
+}
+
+/// 端点比较前的规范化：去掉首尾空白与尾部斜杠
+fn normalize_endpoint(endpoint: &str) -> String {
+    endpoint.trim().trim_end_matches('/').to_string()
 }
 
 pub struct KeyStore {
@@ -32,7 +41,8 @@ impl KeyStore {
         Self::at_path(storage_path)
     }
 
-    fn at_path(storage_path: PathBuf) -> Self {
+    /// 指定加密文件路径，供隔离的测试使用
+    pub fn at_path(storage_path: PathBuf) -> Self {
         Self {
             storage_path,
             key: derive_machine_key(),
@@ -43,14 +53,12 @@ impl KeyStore {
     fn read_data(&self) -> KeyStoreData {
         let mut cache_guard = self.cache.lock().unwrap();
         if let Some(cached) = &*cache_guard {
-            return cached.keys.clone().into();
+            return cached.clone();
         }
 
         if !self.storage_path.exists() {
             let data = KeyStoreData::default();
-            *cache_guard = Some(KeyStoreData {
-                keys: data.keys.clone(),
-            });
+            *cache_guard = Some(data.clone());
             return data;
         }
 
@@ -68,9 +76,7 @@ impl KeyStore {
         if needs_reseal(&encrypted_bytes) {
             let _ = self.write_file(&data);
         }
-        *cache_guard = Some(KeyStoreData {
-            keys: data.keys.clone(),
-        });
+        *cache_guard = Some(data.clone());
         data
     }
 
@@ -85,9 +91,7 @@ impl KeyStore {
         self.write_file(data)?;
 
         let mut cache_guard = self.cache.lock().unwrap();
-        *cache_guard = Some(KeyStoreData {
-            keys: data.keys.clone(),
-        });
+        *cache_guard = Some(data.clone());
         Ok(())
     }
 
@@ -96,15 +100,47 @@ impl KeyStore {
         data.keys.get(provider).cloned()
     }
 
+    /// 取用已保存的 Key 前校验请求的目的端点：Key 只能发往保存时绑定的端点，
+    /// 否则页面里的脚本可以带着攻击者的 baseUrl 让网关把真实 Key 发出去
+    pub fn get_key_for_endpoint(&self, provider: &str, base_url: Option<&str>) -> Option<String> {
+        let data = self.read_data();
+        let bound = data.endpoints.get(provider).map(String::as_str);
+        let requested = base_url.map(normalize_endpoint);
+        let matches = match (bound, requested.as_deref()) {
+            (None, None) => true,
+            (Some(bound), Some(requested)) => normalize_endpoint(bound) == requested,
+            _ => false,
+        };
+        if matches {
+            data.keys.get(provider).cloned()
+        } else {
+            None
+        }
+    }
+
     pub fn set_key(&self, provider: &str, key: &str) -> Result<(), String> {
+        self.set_key_for_endpoint(provider, key, None)
+    }
+
+    /// 保存 Key 并绑定到保存时使用的自定义端点（None 表示厂商原生端点）
+    pub fn set_key_for_endpoint(&self, provider: &str, key: &str, base_url: Option<&str>) -> Result<(), String> {
         let mut data = self.read_data();
         data.keys.insert(provider.to_string(), key.to_string());
+        match base_url {
+            Some(base_url) => {
+                data.endpoints.insert(provider.to_string(), normalize_endpoint(base_url));
+            }
+            None => {
+                data.endpoints.remove(provider);
+            }
+        }
         self.write_data(&data)
     }
 
     pub fn delete_key(&self, provider: &str) -> Result<(), String> {
         let mut data = self.read_data();
         data.keys.remove(provider);
+        data.endpoints.remove(provider);
         self.write_data(&data)
     }
 
@@ -236,12 +272,6 @@ mod dpapi {
             LocalFree(output.pbData.cast());
         }
         Ok(bytes)
-    }
-}
-
-impl From<HashMap<String, String>> for KeyStoreData {
-    fn from(keys: HashMap<String, String>) -> Self {
-        Self { keys }
     }
 }
 

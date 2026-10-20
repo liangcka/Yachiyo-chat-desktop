@@ -1,6 +1,7 @@
 use crate::gateway::agent::messages::AgentMessage;
 use crate::gateway::prompt::build_system_prompt;
-use crate::gateway::providers::registry::ProviderConfig;
+use crate::gateway::providers::compat_vendor::{self, CompatVendor, ReasoningPassback, RequestPurpose};
+use crate::gateway::providers::registry::{get_provider_config, ProviderConfig};
 use crate::types::{ClientChatRequest, ProviderId, RequestMode};
 use serde_json::json;
 
@@ -13,10 +14,20 @@ pub fn is_openai_reasoning_model(model: &str) -> bool {
     model.starts_with("gpt-5") || model.starts_with("gpt-6")
 }
 
-/// GLM-4.7 起的强制思考模型支持保留式思考：`clear_thinking: false` 时服务端保留回传的 reasoning_content，
-/// 跨工具轮次延续同一任务的推理；更早的混合或非思考模型（glm-4.6、glm-4v-flash）不发送该开关
-fn glm_preserves_thinking(model: &str) -> bool {
-    model.starts_with("glm-5") || model.starts_with("glm-4.7")
+/// 自定义端点校验，与 Web 端 validation 一致：https 起始、无空白、不超过 2048 字符
+pub fn is_valid_base_url(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 2048
+        && value.starts_with("https://")
+        && !value.chars().any(char::is_whitespace)
+}
+
+/// 端点解析，与 Web 端 resolveEndpoint 一致：自定义 baseUrl 剥掉尾部斜杠后拼 /chat/completions
+pub fn resolve_chat_endpoint(base_url: Option<&str>, default_endpoint: &str) -> String {
+    match base_url {
+        Some(base) => format!("{}/chat/completions", base.trim_end_matches('/')),
+        None => default_endpoint.to_string(),
+    }
 }
 
 pub fn build_openai_messages(
@@ -77,9 +88,10 @@ pub fn build_openai_compat_body(
         "stream_options": { "include_usage": true }
     });
 
-    // OpenAI 推理模型拒绝 max_tokens，官方端点统一改用 max_completion_tokens；
-    // 思考 token 计入输出预算，摘要预算与 Web 端对齐，避免被思考耗尽
-    let max_tokens_field = if config.id == ProviderId::Openai { "max_completion_tokens" } else { "max_tokens" };
+    // OpenAI 推理模型拒绝 max_tokens，官方端点统一改用 max_completion_tokens；第三方兼容网关不一定认该字段与
+    // reasoning_effort，官方规则只在未自定义 baseUrl 时生效。思考 token 计入输出预算，摘要预算与 Web 端对齐
+    let openai_official = config.id == ProviderId::Openai && request.base_url.is_none();
+    let max_tokens_field = if openai_official { "max_completion_tokens" } else { "max_tokens" };
     if let Some(RequestMode::Summary) = request.mode {
         body[max_tokens_field] = json!(4096);
     } else if let Some(RequestMode::Title) = request.mode {
@@ -88,7 +100,7 @@ pub fn build_openai_compat_body(
 
     let reasoning_effort = match config.id {
         ProviderId::Stepfun => true,
-        ProviderId::Openai => is_openai_reasoning_model(model),
+        ProviderId::Openai => openai_official && is_openai_reasoning_model(model),
         _ => false,
     };
     if reasoning_effort {
@@ -98,10 +110,15 @@ pub fn build_openai_compat_body(
 
     // 标题与摘要的输出预算很小，DeepSeek 默认开启的思考会先耗尽预算导致正文为空，
     // 辅助请求一律关闭思考（对齐 DSH 辅助调用的 thinking.disabled）
-    if config.id == ProviderId::Deepseek
-        && matches!(request.mode, Some(RequestMode::Summary | RequestMode::Title))
-    {
+    let auxiliary = matches!(request.mode, Some(RequestMode::Summary | RequestMode::Title));
+    if config.id == ProviderId::Deepseek && auxiliary {
         body["thinking"] = json!({ "type": "disabled" });
+    }
+
+    let purpose = if auxiliary { RequestPurpose::Auxiliary } else { RequestPurpose::Chat };
+    let vendor = CompatVendor::resolve(request.base_url.as_deref(), config.endpoint);
+    for (field, value) in compat_vendor::body_patch(vendor, model, purpose) {
+        body[field] = value;
     }
 
     body
@@ -110,19 +127,43 @@ pub fn build_openai_compat_body(
 /// Agent 模式请求体：messages 含 assistant tool_calls 与 role:"tool" 结果回填
 pub fn build_openai_agent_body(
     provider: ProviderId,
+    base_url: Option<&str>,
     model: &str,
     messages: &[AgentMessage],
     system_prompt: &str,
     tools: &[serde_json::Value],
 ) -> serde_json::Value {
-    // DeepSeek 思考模式要求 assistant 消息回传 reasoning_content，工具轮次缺失会被上游 400 拒绝；
-    // 客户端重放的历史不含思维链时回传空串（对齐 DSH reasoning passback 与 pi-ai 的 DeepSeek 兼容规则）
     let deepseek = provider == ProviderId::Deepseek;
-    // GLM 保留式思考要求按原顺序回传未修改的 reasoning_content，但不得为没有思维链的历史轮次补写空串
-    let glm_preserved = provider == ProviderId::Glm && glm_preserves_thinking(model);
-    let reasoning_field = |message: &mut serde_json::Value, reasoning: &str| {
-        if deepseek || (glm_preserved && !reasoning.is_empty()) {
-            message["reasoning_content"] = json!(reasoning);
+    let vendor = CompatVendor::resolve(base_url, get_provider_config(provider).endpoint);
+    let passback = if deepseek {
+        // DeepSeek 思考模式要求 assistant 消息回传 reasoning_content，工具轮次缺失会被上游 400 拒绝；
+        // 客户端重放的历史不含思维链时回传空串（对齐 DSH reasoning passback 与 pi-ai 的 DeepSeek 兼容规则）
+        Some(ReasoningPassback::EveryAssistant)
+    } else {
+        compat_vendor::reasoning_passback(vendor, model)
+    };
+    let reasoning_field = |message: &mut serde_json::Value, reasoning: &str| match passback {
+        Some(ReasoningPassback::EveryAssistant) => message["reasoning_content"] = json!(reasoning),
+        Some(ReasoningPassback::NonEmpty) if !reasoning.is_empty() => message["reasoning_content"] = json!(reasoning),
+        Some(ReasoningPassback::MiniMaxDetails) if !reasoning.is_empty() => {
+            message["reasoning_details"] = json!([{
+                "type": "reasoning.text",
+                "id": "reasoning-text-1",
+                "format": "MiniMax-response-v1",
+                "index": 0,
+                "text": reasoning
+            }]);
+        }
+        _ => {}
+    };
+    // 方舟 Seed 2.1 起思考为加密块，随 assistant 消息原样回传（同时带 reasoning_content 时以加密块为准）；
+    // 加密块与产出它的模型绑定，只在同一运行内存在
+    let ark = vendor == Some(CompatVendor::Ark);
+    let encrypted_field = |message: &mut serde_json::Value, native: &[serde_json::Value]| {
+        if let Some(text) = native.iter().find_map(|item| item.get("encrypted_content")) {
+            if ark {
+                message["encrypted_content"] = text.clone();
+            }
         }
     };
     let mut out = vec![json!({ "role": "system", "content": system_prompt })];
@@ -141,11 +182,12 @@ pub fn build_openai_agent_body(
                     out.push(json!({ "role": "user", "content": text }));
                 }
             }
-            AgentMessage::Assistant { text, reasoning, tool_calls, .. } => {
+            AgentMessage::Assistant { text, reasoning, tool_calls, native } => {
                 if tool_calls.is_empty() {
                     if !text.is_empty() {
                         let mut message = json!({ "role": "assistant", "content": text });
                         reasoning_field(&mut message, reasoning);
+                        encrypted_field(&mut message, native);
                         out.push(message);
                     }
                     continue;
@@ -166,6 +208,7 @@ pub fn build_openai_agent_body(
                     "tool_calls": calls
                 });
                 reasoning_field(&mut message, reasoning);
+                encrypted_field(&mut message, native);
                 out.push(message);
             }
             AgentMessage::ToolResult { tool_call_id, content, .. } => {
@@ -192,8 +235,8 @@ pub fn build_openai_agent_body(
     if deepseek {
         body["max_tokens"] = json!(DEEPSEEK_AGENT_MAX_TOKENS);
     }
-    if glm_preserved {
-        body["thinking"] = json!({ "type": "enabled", "clear_thinking": false });
+    for (field, value) in compat_vendor::body_patch(vendor, model, RequestPurpose::Agent) {
+        body[field] = value;
     }
     body
 }

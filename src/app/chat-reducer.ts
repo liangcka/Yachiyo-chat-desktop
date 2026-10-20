@@ -41,7 +41,7 @@ export type ChatAction =
   | { type: "delta"; messageId: string; text: string; contentSegments?: ReadonlyArray<MessageContentSegment> }
   | { type: "thought-delta"; messageId: string; text: string; contentSegments?: ReadonlyArray<MessageContentSegment> }
   | { type: "sources-received"; messageId: string; sources: ReadonlyArray<ChatSource> }
-  | { type: "completed"; messageId: string; usage?: TokenUsage; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment>; contentStartedAtMs?: number }
+  | { type: "completed"; messageId: string; usage?: TokenUsage; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment>; contentStartedAtMs?: number; loopStopped?: boolean }
   | { type: "stopped"; messageId: string; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment> }
   | { type: "failed"; messageId: string; errorCode: string; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment> }
   | { type: "connectivity-changed"; online: boolean }
@@ -208,6 +208,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           ...(action.contentStartedAtMs !== undefined ? { contentStartedAtMs: action.contentStartedAtMs } : {}),
           ...(action.usage !== undefined ? { usage: action.usage } : {}),
           ...(action.latencyMs !== undefined ? { latencyMs: action.latencyMs } : {}),
+          ...(action.loopStopped === true ? { loopStopped: true } : {}),
         })),
         streaming: folded.streaming,
         phase: state.phase === "offline" ? "offline" : "idle",

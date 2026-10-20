@@ -447,6 +447,32 @@ describe("useChatController", () => {
     expect(result.current.messages.at(-1)?.text).toBe("接续完成！");
   });
 
+  it("keeps a loop-stopped agent run with tool steps but no text as complete", async () => {
+    const repository = repositoryWith();
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onToolCall?.({ id: "call-1", name: "read_file", arguments: { path: "a.txt" } });
+      options.onToolResult?.({ id: "call-1", name: "read_file", output: "内容", isError: false, durationMs: 5 });
+      return { truncated: false, stopReason: "loop_detected" };
+    });
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("user-1", "assistant-1"),
+        repository,
+        streamChat: stream,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => result.current.send("读 a.txt"));
+
+    expect(result.current.phase).toBe("idle");
+    const assistant = result.current.messages.at(-1);
+    expect(assistant?.status).toBe("complete");
+    expect(assistant?.loopStopped).toBe(true);
+    const persisted = vi.mocked(repository.putMessage).mock.calls.map(([message]) => message).at(-1);
+    expect(persisted?.loopStopped).toBe(true);
+  });
+
   it("aborts the active request on unmount", async () => {
     let capturedSignal: AbortSignal | undefined;
     const stream = vi.fn<StreamChatFunction>(async (_request, options) => {

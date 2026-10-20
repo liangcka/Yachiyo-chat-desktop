@@ -83,10 +83,15 @@ fn test_client_event_encoding() {
             completion_tokens: Some(20),
             total_tokens: Some(30),
         }),
+        reason: None,
     };
     let encoded_done = encode_client_event(&done_event);
     assert!(encoded_done.starts_with("event: done\ndata: "));
     assert!(encoded_done.contains("\"truncated\":false"));
+    assert!(!encoded_done.contains("reason"));
+
+    let loop_done = ClientStreamEvent::Done { truncated: false, usage: None, reason: Some("loop_detected".to_string()) };
+    assert_eq!(encode_client_event(&loop_done), "event: done\ndata: {\"truncated\":false,\"reason\":\"loop_detected\"}\n\n");
 }
 
 #[test]
@@ -374,9 +379,12 @@ fn test_openai_official_body_uses_completion_budget_and_reasoning_effort() {
     assert_eq!(step["max_tokens"], 4096);
     assert_eq!(step["reasoning_effort"], "low");
     let glm = get_provider_config(ProviderId::Glm);
+    // GLM-5.3 强制思考，不能 disabled，只能把档位降到 low
     let glm_body = build_openai_compat_body(&plain_request("glm", "title"), "glm-5.3", glm);
-    assert!(glm_body.get("reasoning_effort").is_none());
+    assert_eq!(glm_body["reasoning_effort"], "low");
     assert!(glm_body.get("thinking").is_none());
+    let legacy_glm = build_openai_compat_body(&plain_request("glm", "title"), "glm-4.7-flash", glm);
+    assert!(legacy_glm.get("reasoning_effort").is_none());
 }
 
 #[test]
@@ -426,4 +434,203 @@ fn test_gemini_chat_body_requests_thought_summaries() {
     assert_eq!(chat["generationConfig"]["thinkingConfig"]["includeThoughts"], true);
     let summary = build_gemini_body(&plain_request("gemini", "summary"));
     assert!(summary["generationConfig"]["thinkingConfig"].get("includeThoughts").is_none());
+}
+
+fn custom_request(provider: &str, mode: &str, base_url: &str) -> yachiyo_desktop_lib::types::ClientChatRequest {
+    let mode = if mode.is_empty() { String::new() } else { format!(r#","mode":"{}""#, mode) };
+    serde_json::from_str(&format!(
+        r#"{{"locale":"zh-CN","provider":"{}","baseUrl":"{}","messages":[{{"role":"user","text":"你好"}}]{}}}"#,
+        provider, base_url, mode
+    ))
+    .unwrap()
+}
+
+#[test]
+fn test_custom_base_url_routes_plain_requests_without_official_openai_rules() {
+    use yachiyo_desktop_lib::gateway::build_upstream_request;
+
+    let request = custom_request("openai", "summary", "https://api.moonshot.cn/v1/");
+    let built = build_upstream_request(&request, "sk-test", "kimi-k3").unwrap();
+    assert_eq!(built.url, "https://api.moonshot.cn/v1/chat/completions");
+    let body: serde_json::Value = serde_json::from_str(&built.body).unwrap();
+    assert_eq!(body["max_tokens"], 4096);
+    assert!(body.get("max_completion_tokens").is_none());
+    assert_eq!(body["reasoning_effort"], "low");
+    assert!(body.get("thinking").is_none());
+
+    let k26 = build_upstream_request(&custom_request("openai", "title", "https://api.moonshot.ai/v1"), "sk-test", "kimi-k2.6").unwrap();
+    let body: serde_json::Value = serde_json::from_str(&k26.body).unwrap();
+    assert_eq!(body["thinking"]["type"], "disabled");
+    assert!(body.get("reasoning_effort").is_none());
+
+    assert!(build_upstream_request(&custom_request("claude", "", "https://api.moonshot.cn/v1"), "sk-test", "kimi-k3").is_err());
+    assert!(build_upstream_request(&custom_request("openai", "", "http://api.moonshot.cn/v1"), "sk-test", "kimi-k3").is_err());
+}
+
+#[test]
+fn test_compat_vendor_detection_and_domestic_routing() {
+    use yachiyo_desktop_lib::gateway::providers::compat_vendor::{is_domestic_endpoint, CompatVendor};
+
+    assert_eq!(CompatVendor::detect("https://ark.cn-beijing.volces.com/api/v3"), Some(CompatVendor::Ark));
+    assert_eq!(CompatVendor::detect("https://ws-1.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"), Some(CompatVendor::Dashscope));
+    assert_eq!(CompatVendor::detect("https://api.minimax.cn/v1"), Some(CompatVendor::MiniMax));
+    assert_eq!(CompatVendor::detect("https://evilmoonshot.cn/v1"), None);
+    assert_eq!(CompatVendor::resolve(None, "https://open.bigmodel.cn/api/paas/v4/chat/completions"), Some(CompatVendor::Zhipu));
+    assert_eq!(CompatVendor::resolve(Some("https://api.z.ai/api/paas/v4"), "https://api.openai.com/v1/chat/completions"), Some(CompatVendor::Zhipu));
+    assert_eq!(CompatVendor::resolve(None, "https://api.openai.com/v1/chat/completions"), None);
+
+    assert!(is_domestic_endpoint("https://ark.cn-beijing.volces.com/api/v3"));
+    assert!(is_domestic_endpoint("https://api.moonshot.cn/v1"));
+    assert!(!is_domestic_endpoint("https://api.moonshot.ai/v1"));
+    assert!(!is_domestic_endpoint("https://openrouter.ai/api/v1"));
+}
+
+#[test]
+fn test_compat_vendor_body_patches_match_web_rules() {
+    use yachiyo_desktop_lib::gateway::providers::compat_vendor::{body_patch, CompatVendor, RequestPurpose};
+
+    let patch = |vendor, model, purpose| -> serde_json::Value {
+        serde_json::Value::Object(body_patch(Some(vendor), model, purpose).into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+    };
+    use serde_json::json;
+    assert_eq!(patch(CompatVendor::Dashscope, "qwen3.8-flash", RequestPurpose::Auxiliary), json!({ "enable_thinking": false }));
+    assert_eq!(patch(CompatVendor::Dashscope, "qwen3.7-plus-2026-05-26", RequestPurpose::Auxiliary), json!({ "enable_thinking": false }));
+    assert_eq!(patch(CompatVendor::Dashscope, "qwen3.8-max-preview", RequestPurpose::Auxiliary), json!({}));
+    assert_eq!(patch(CompatVendor::Dashscope, "qwen3.7-max-2026-05-17", RequestPurpose::Auxiliary), json!({}));
+    assert_eq!(patch(CompatVendor::Dashscope, "qwen3.8-max", RequestPurpose::Chat), json!({ "reasoning_effort": "low" }));
+    assert_eq!(patch(CompatVendor::Dashscope, "qwen3.8-max", RequestPurpose::Agent), json!({}));
+    for model in ["doubao-seed-2-1-pro-260915", "doubao-seed-2-1-lite-260915", "doubao-seed-2-0-mini-260428", "doubao-seed-evolving", "dola-seed-2-1-turbo-260628", "seed-2-0-lite-260428"] {
+        assert_eq!(patch(CompatVendor::Ark, model, RequestPurpose::Auxiliary), json!({ "thinking": { "type": "disabled" } }), "{model}");
+    }
+    for model in ["glm-5-3-flash-260828", "kimi-k2.7-code", "doubao-seed-1-6-thinking-250715", "doubao-seed-2-0-code-preview-260215", "seed-2-0-code-preview-260328", "doubao-seed-character-251128", "ep-20260101000000-abcde"] {
+        assert_eq!(patch(CompatVendor::Ark, model, RequestPurpose::Auxiliary), json!({}), "{model}");
+    }
+    assert_eq!(patch(CompatVendor::Ark, "doubao-seed-2-1-turbo-260628", RequestPurpose::Chat), json!({ "reasoning_effort": "low" }));
+    assert_eq!(patch(CompatVendor::Ark, "doubao-seed-2-0-lite-260428", RequestPurpose::Chat), json!({}));
+    assert_eq!(patch(CompatVendor::Ark, "doubao-seed-2-1-turbo-260628", RequestPurpose::Agent), json!({}));
+    assert_eq!(patch(CompatVendor::MiniMax, "MiniMax-M3", RequestPurpose::Auxiliary), json!({ "reasoning_split": true, "thinking": { "type": "disabled" } }));
+    assert_eq!(patch(CompatVendor::MiniMax, "MiniMax-M3", RequestPurpose::Agent), json!({ "reasoning_split": true }));
+    assert_eq!(patch(CompatVendor::MiniMax, "MiniMax-M3.1-Flash", RequestPurpose::Chat), json!({ "reasoning_effort": "low" }));
+    assert_eq!(patch(CompatVendor::Zhipu, "glm-5.3-flash", RequestPurpose::Chat), json!({ "reasoning_effort": "low" }));
+    assert_eq!(patch(CompatVendor::Zhipu, "glm-5.2", RequestPurpose::Auxiliary), json!({ "reasoning_effort": "low" }));
+    assert_eq!(patch(CompatVendor::Zhipu, "glm-4.7-flash", RequestPurpose::Chat), json!({}));
+    assert_eq!(patch(CompatVendor::Zhipu, "glm-5.3", RequestPurpose::Agent), json!({ "thinking": { "type": "enabled", "clear_thinking": false } }));
+    assert_eq!(patch(CompatVendor::Moonshot, "kimi-k3", RequestPurpose::Agent), json!({}));
+    assert_eq!(patch(CompatVendor::Moonshot, "kimi-k2.7-code", RequestPurpose::Auxiliary), json!({}));
+}
+
+#[test]
+fn test_openai_delta_parser_splits_inline_thinking_and_details_snapshots() {
+    use yachiyo_desktop_lib::gateway::stream::OpenAiDeltaParser;
+
+    let chunk = |delta: serde_json::Value| serde_json::json!({ "choices": [{ "index": 0, "delta": delta }] }).to_string();
+    let mut parser = OpenAiDeltaParser::default();
+    let first = parser.parse(&chunk(serde_json::json!({ "reasoning_details": [{ "type": "reasoning.text", "text": "先想" }] }))).unwrap();
+    assert_eq!(first.thought.as_deref(), Some("先想"));
+    let second = parser.parse(&chunk(serde_json::json!({ "reasoning_details": [{ "type": "reasoning.text", "text": "先想一想" }] }))).unwrap();
+    assert_eq!(second.thought.as_deref(), Some("一想"));
+
+    let mut parser = OpenAiDeltaParser::default();
+    let held = parser.parse(&chunk(serde_json::json!({ "content": "<thi" }))).unwrap();
+    assert!(held.content.is_none() && held.thought.is_none());
+    let thinking = parser.parse(&chunk(serde_json::json!({ "content": "nk>用户在问候。</th" }))).unwrap();
+    assert_eq!(thinking.thought.as_deref(), Some("用户在问候。"));
+    assert!(thinking.content.is_none());
+    let answer = parser.parse(&chunk(serde_json::json!({ "content": "ink>\n\n你好" }))).unwrap();
+    assert_eq!(answer.content.as_deref(), Some("你好"));
+    let later = parser.parse(&chunk(serde_json::json!({ "content": "<think>不是思考" }))).unwrap();
+    assert_eq!(later.content.as_deref(), Some("<think>不是思考"));
+
+    let mut parser = OpenAiDeltaParser::default();
+    let plain = parser.parse(&chunk(serde_json::json!({ "content": "<b>你好</b>" }))).unwrap();
+    assert_eq!(plain.content.as_deref(), Some("<b>你好</b>"));
+}
+
+#[test]
+fn test_stored_key_is_only_released_to_the_endpoint_it_was_saved_for() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = KeyStore::at_path(dir.path().join("keys.enc"));
+
+    // 原生端点保存的 Key 不能被带自定义端点的请求取走
+    store.set_key("openai", "sk-native-key-1234567890").unwrap();
+    assert_eq!(store.get_key_for_endpoint("openai", None).as_deref(), Some("sk-native-key-1234567890"));
+    assert_eq!(store.get_key_for_endpoint("openai", Some("https://evil.example/v1")), None);
+
+    // 绑定自定义端点后，只有同一端点（忽略尾部斜杠与空白）能取到，原生端点和其他端点都取不到
+    store.set_key_for_endpoint("openai", "sk-moonshot-key-1234567890", Some("https://api.moonshot.cn/v1")).unwrap();
+    assert_eq!(store.get_key_for_endpoint("openai", Some("https://api.moonshot.cn/v1")).as_deref(), Some("sk-moonshot-key-1234567890"));
+    assert_eq!(store.get_key_for_endpoint("openai", Some(" https://api.moonshot.cn/v1/ ")).as_deref(), Some("sk-moonshot-key-1234567890"));
+    assert_eq!(store.get_key_for_endpoint("openai", None), None);
+    assert_eq!(store.get_key_for_endpoint("openai", Some("https://evil.example/v1")), None);
+
+    // 重新以原生端点保存会清掉绑定；删除 Key 同时清掉绑定
+    store.set_key("openai", "sk-native-again-1234567890").unwrap();
+    assert_eq!(store.get_key_for_endpoint("openai", Some("https://api.moonshot.cn/v1")), None);
+    assert_eq!(store.get_key_for_endpoint("openai", None).as_deref(), Some("sk-native-again-1234567890"));
+    store.set_key_for_endpoint("openai", "sk-moonshot-key-1234567890", Some("https://api.moonshot.cn/v1")).unwrap();
+    store.delete_key("openai").unwrap();
+    store.set_key("openai", "sk-after-delete-1234567890").unwrap();
+    assert_eq!(store.get_key_for_endpoint("openai", None).as_deref(), Some("sk-after-delete-1234567890"));
+}
+
+#[test]
+fn test_endpoint_binding_survives_reopening_and_old_files_count_as_native() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("keys.enc");
+    let store = KeyStore::at_path(path.clone());
+    store.set_key_for_endpoint("glm", "sk-zai-key-1234567890", Some("https://api.z.ai/api/paas/v4")).unwrap();
+    store.set_key("deepseek", "sk-deepseek-key-1234567890").unwrap();
+
+    let reopened = KeyStore::at_path(path);
+    assert_eq!(reopened.get_key_for_endpoint("glm", Some("https://api.z.ai/api/paas/v4")).as_deref(), Some("sk-zai-key-1234567890"));
+    assert_eq!(reopened.get_key_for_endpoint("glm", None), None);
+    // 没有绑定记录的 Key（旧版本写入）视为原生端点
+    assert_eq!(reopened.get_key_for_endpoint("deepseek", None).as_deref(), Some("sk-deepseek-key-1234567890"));
+    assert_eq!(reopened.get_key_for_endpoint("deepseek", Some("https://evil.example/v1")), None);
+}
+
+#[test]
+fn test_resolve_api_key_never_sends_the_stored_key_to_another_endpoint() {
+    use yachiyo_desktop_lib::gateway::resolve_api_key;
+    use yachiyo_desktop_lib::types::ProviderId;
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = KeyStore::at_path(dir.path().join("keys.enc"));
+    store.set_key("openai", "sk-native-key-1234567890").unwrap();
+
+    let stored_only = plain_request("openai", "");
+    assert_eq!(resolve_api_key(&stored_only, ProviderId::Openai, &store).as_deref(), Some("sk-native-key-1234567890"));
+
+    let redirected = custom_request("openai", "", "https://evil.example/v1");
+    assert_eq!(resolve_api_key(&redirected, ProviderId::Openai, &store), None);
+
+    // 请求自带的 Key 是调用方已知的，不受绑定限制
+    let mut explicit = custom_request("openai", "", "https://api.moonshot.cn/v1");
+    explicit.api_key = Some("sk-explicit-key-1234567890".to_string());
+    assert_eq!(resolve_api_key(&explicit, ProviderId::Openai, &store).as_deref(), Some("sk-explicit-key-1234567890"));
+}
+
+#[test]
+fn test_think_tag_splitter_is_independent_of_chunk_boundaries() {
+    use yachiyo_desktop_lib::gateway::stream::ThinkTagSplitter;
+
+    let samples = [
+        "<think>用户在打招呼，回一句即可。</think>\n\n你好呀！",
+        "  \n<think>先想想</think>答案",
+        "</think>\n只有残留的闭合标签",
+        "<b>不是思考</b><think>也不是</think>",
+        "<thin不完整的标签也要原样输出",
+        "普通回答，没有任何标签",
+    ];
+    for sample in samples {
+        let mut whole = ThinkTagSplitter::default();
+        let (whole_content, whole_thought) = whole.push(sample);
+        for (index, _) in sample.char_indices().chain(std::iter::once((sample.len(), ' '))) {
+            let (head, tail) = sample.split_at(index);
+            let mut split = ThinkTagSplitter::default();
+            let (c1, t1) = split.push(head);
+            let (c2, t2) = split.push(tail);
+            assert_eq!((format!("{c1}{c2}"), format!("{t1}{t2}")), (whole_content.clone(), whole_thought.clone()), "sample {sample:?} split at {index}");
+        }
+    }
 }

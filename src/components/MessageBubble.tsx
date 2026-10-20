@@ -294,6 +294,9 @@ export const MessageBubble = memo(function MessageBubble({
       {message.truncated === true ? (
         <span className="message-bubble__truncated">{copyFor(locale).truncated}</span>
       ) : null}
+      {message.loopStopped === true ? (
+        <span className="message-bubble__truncated">{copyFor(locale).loopStopped}</span>
+      ) : null}
       {hasVisibleSources && visibleSources !== undefined ? (
         <div aria-label={copyFor(locale).sourcesLabel} className="message-bubble__sources">
           {visibleSources.map((source) => (

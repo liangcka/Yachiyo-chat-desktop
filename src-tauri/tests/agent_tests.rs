@@ -96,7 +96,7 @@ fn test_openai_agent_body_structure() {
         "type": "function",
         "function": {"name": "read_file", "description": "read", "parameters": {"type": "object", "properties": {}}}
     })];
-    let body = build_openai_agent_body(ProviderId::Openai, "test-model", &messages, "系统提示", &tools);
+    let body = build_openai_agent_body(ProviderId::Openai, None, "test-model", &messages, "系统提示", &tools);
     assert_eq!(body["model"], "test-model");
     assert_eq!(body["tool_choice"], "auto");
     assert_eq!(body["tools"].as_array().unwrap().len(), 1);
@@ -129,7 +129,7 @@ fn test_deepseek_agent_body_replays_reasoning_and_sets_output_budget() {
         AgentMessage::Assistant { text: String::new(), reasoning: "需要重新读取".to_string(), tool_calls: vec![call("call-1")], native: Vec::new() },
         AgentMessage::ToolResult { tool_call_id: "call-1".to_string(), name: "read_file".to_string(), content: "新".to_string() },
     ];
-    let body = build_openai_agent_body(ProviderId::Deepseek, "deepseek-v4-flash", &messages, "系统提示", &[]);
+    let body = build_openai_agent_body(ProviderId::Deepseek, None, "deepseek-v4-flash", &messages, "系统提示", &[]);
     let msgs = body["messages"].as_array().unwrap();
     assert_eq!(msgs[2]["reasoning_content"], "");
     assert_eq!(msgs[4]["reasoning_content"], "");
@@ -663,7 +663,7 @@ async fn test_loop_permission_timeout_treated_as_denied() {
     let outcome = run_agent_loop(
         vec![AgentMessage::User { text: "写".to_string(), image_data_url: None }],
         get_agent_tools_schema(),
-        AgentLoopConfig { max_turns: 12, permission_timeout_secs: 1, ..AgentLoopConfig::default() },
+        AgentLoopConfig { max_turns: Some(12), permission_timeout_secs: 1, ..AgentLoopConfig::default() },
         &executor,
         &gate,
         &mut checkpoint,
@@ -1098,13 +1098,253 @@ fn test_glm_agent_body_enables_preserved_thinking() {
         AgentMessage::Assistant { text: String::new(), reasoning: "需要读取".to_string(), tool_calls: vec![call], native: Vec::new() },
         AgentMessage::ToolResult { tool_call_id: "call-1".to_string(), name: "read_file".to_string(), content: "内容".to_string() },
     ];
-    let body = build_openai_agent_body(ProviderId::Glm, "glm-5.3", &messages, "系统提示", &[]);
+    let body = build_openai_agent_body(ProviderId::Glm, None, "glm-5.3", &messages, "系统提示", &[]);
     assert_eq!(body["thinking"], serde_json::json!({ "type": "enabled", "clear_thinking": false }));
     let msgs = body["messages"].as_array().unwrap();
     assert!(msgs[2].get("reasoning_content").is_none());
     assert_eq!(msgs[4]["reasoning_content"], "需要读取");
 
-    let hybrid = build_openai_agent_body(ProviderId::Glm, "glm-4.6", &messages, "系统提示", &[]);
+    let hybrid = build_openai_agent_body(ProviderId::Glm, None, "glm-4.6", &messages, "系统提示", &[]);
     assert!(hybrid.get("thinking").is_none());
     assert!(hybrid["messages"][4].get("reasoning_content").is_none());
+}
+
+#[test]
+fn test_third_party_agent_bodies_replay_reasoning_per_vendor() {
+    let call = ToolInvocation { id: "call-1".to_string(), name: "read_file".to_string(), arguments: serde_json::json!({ "path": "a.rs" }) };
+    let messages = vec![
+        AgentMessage::User { text: "读 a.rs".to_string(), image_data_url: None },
+        AgentMessage::Assistant { text: "上一轮".to_string(), reasoning: String::new(), tool_calls: vec![], native: Vec::new() },
+        AgentMessage::User { text: "再读".to_string(), image_data_url: None },
+        AgentMessage::Assistant { text: String::new(), reasoning: "需要读取".to_string(), tool_calls: vec![call], native: Vec::new() },
+        AgentMessage::ToolResult { tool_call_id: "call-1".to_string(), name: "read_file".to_string(), content: "内容".to_string() },
+    ];
+
+    let kimi = build_openai_agent_body(ProviderId::Openai, Some("https://api.moonshot.cn/v1"), "kimi-k3", &messages, "系统提示", &[]);
+    assert_eq!(kimi["messages"][2]["reasoning_content"], "");
+    assert_eq!(kimi["messages"][4]["reasoning_content"], "需要读取");
+    assert!(kimi.get("reasoning_effort").is_none());
+
+    let qwen = build_openai_agent_body(ProviderId::Openai, Some("https://dashscope.aliyuncs.com/compatible-mode/v1"), "qwen3.8-flash", &messages, "系统提示", &[]);
+    assert!(qwen["messages"][2].get("reasoning_content").is_none());
+    assert_eq!(qwen["messages"][4]["reasoning_content"], "需要读取");
+
+    let minimax = build_openai_agent_body(ProviderId::Openai, Some("https://api.minimax.io/v1"), "MiniMax-M3", &messages, "系统提示", &[]);
+    assert_eq!(minimax["reasoning_split"], true);
+    assert!(minimax["messages"][2].get("reasoning_details").is_none());
+    assert_eq!(minimax["messages"][4]["reasoning_details"][0]["text"], "需要读取");
+    assert_eq!(minimax["messages"][4]["reasoning_details"][0]["format"], "MiniMax-response-v1");
+    assert!(minimax["messages"][4].get("reasoning_content").is_none());
+
+    let plain = build_openai_agent_body(ProviderId::Openai, Some("https://example.com/v1"), "kimi-k3", &messages, "系统提示", &[]);
+    assert!(plain["messages"][4].get("reasoning_content").is_none());
+}
+
+#[test]
+fn test_wire_protocol_uses_chat_completions_for_custom_openai_endpoints() {
+    use yachiyo_desktop_lib::gateway::agent::runtime::WireProtocol;
+
+    assert_eq!(WireProtocol::resolve(ProviderId::Openai, None), WireProtocol::Responses);
+    assert_eq!(WireProtocol::resolve(ProviderId::Openai, Some("https://api.moonshot.cn/v1")), WireProtocol::ChatCompletions);
+    assert_eq!(WireProtocol::resolve(ProviderId::Deepseek, None), WireProtocol::ChatCompletions);
+    assert_eq!(WireProtocol::resolve(ProviderId::Claude, None), WireProtocol::Anthropic);
+    assert_eq!(WireProtocol::resolve(ProviderId::Gemini, None), WireProtocol::Gemini);
+}
+
+fn done_turn(text: &str) -> TurnOutcome {
+    TurnOutcome { reasoning: String::new(), native: Vec::new(), text: text.to_string(), tool_calls: vec![], usage: None }
+}
+
+#[tokio::test]
+async fn test_loop_has_no_turn_cap_while_making_progress() {
+    let dir = temp_workspace();
+    let mut turns: Vec<TurnOutcome> = (0..20).map(|i| read_call(&format!("call-{i}"), &format!("file-{i}.txt"))).collect();
+    turns.push(done_turn("读完了"));
+    let executor = ScriptedExecutor::new(turns);
+    let (sink, _events) = collector();
+    let outcome = run_agent_loop(
+        vec![AgentMessage::User { text: "逐个读".to_string(), image_data_url: None }],
+        get_agent_tools_schema(),
+        AgentLoopConfig::default(),
+        &executor,
+        &ApprovalRegistry::new(),
+        &mut None,
+        &AtomicBool::new(false),
+        &sink,
+        Some(dir.path()),
+        &reqwest::Client::new(),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(outcome, LoopOutcome::Completed { .. }));
+    assert_eq!(executor.seen.lock().unwrap().len(), 21);
+}
+
+#[tokio::test]
+async fn test_identical_tool_turns_are_nudged_then_stopped() {
+    let dir = temp_workspace();
+    std::fs::write(dir.path().join("a.txt"), "内容").unwrap();
+    let turns: Vec<TurnOutcome> = (0..10).map(|i| read_call(&format!("call-{i}"), "a.txt")).collect();
+    let executor = ScriptedExecutor::new(turns);
+    let (sink, _events) = collector();
+    let outcome = run_agent_loop(
+        vec![AgentMessage::User { text: "读 a.txt".to_string(), image_data_url: None }],
+        get_agent_tools_schema(),
+        AgentLoopConfig::default(),
+        &executor,
+        &ApprovalRegistry::new(),
+        &mut None,
+        &AtomicBool::new(false),
+        &sink,
+        Some(dir.path()),
+        &reqwest::Client::new(),
+    )
+    .await
+    .unwrap();
+
+    assert!(matches!(outcome, LoopOutcome::LoopDetected { .. }));
+    let seen = executor.seen.lock().unwrap();
+    // 第 3 轮后提醒、计数清零，再重复 3 轮后停止
+    assert_eq!(seen.len(), 6);
+    let nudged = seen[3].iter().any(|message| matches!(message, AgentMessage::ToolResult { content, .. } if content.contains("[循环提醒]")));
+    assert!(nudged, "第 4 次请求应带上循环提醒");
+    assert!(!seen[2].iter().any(|message| matches!(message, AgentMessage::ToolResult { content, .. } if content.contains("[循环提醒]"))));
+}
+
+struct RepetitionExecutor;
+
+impl TurnExecutor for RepetitionExecutor {
+    fn execute(
+        &self,
+        _messages: &[AgentMessage],
+        _sink: &yachiyo_desktop_lib::gateway::agent::runtime::EventSink,
+    ) -> futures::future::BoxFuture<'_, Result<TurnOutcome, String>> {
+        Box::pin(async { Err(yachiyo_desktop_lib::gateway::agent::loop_guard::REPETITION_LOOP_DETECTED.to_string()) })
+    }
+}
+
+#[tokio::test]
+async fn test_stream_repetition_ends_the_run_as_loop_detected() {
+    let (sink, _events) = collector();
+    let outcome = run_agent_loop(
+        vec![AgentMessage::User { text: "hi".to_string(), image_data_url: None }],
+        get_agent_tools_schema(),
+        AgentLoopConfig::default(),
+        &RepetitionExecutor,
+        &ApprovalRegistry::new(),
+        &mut None,
+        &AtomicBool::new(false),
+        &sink,
+        None,
+        &reqwest::Client::new(),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(outcome, LoopOutcome::LoopDetected { .. }));
+}
+
+#[test]
+fn test_tool_loop_detector_catches_short_cycles_only() {
+    use yachiyo_desktop_lib::gateway::agent::loop_guard::{ToolLoopDetector, ToolLoopVerdict};
+
+    let call = |path: &str| vec![ToolInvocation { id: "x".to_string(), name: "read_file".to_string(), arguments: serde_json::json!({ "path": path }) }];
+    let mut detector = ToolLoopDetector::default();
+    let output = |text: &str| vec![text.to_string()];
+    // A、B 两步交替且结果不变：第 3 个周期结束时判定为循环
+    let sequence = ["a", "b", "a", "b", "a"];
+    for path in sequence {
+        assert_eq!(detector.record(&call(path), &output(path)), ToolLoopVerdict::Progressing);
+    }
+    assert_eq!(detector.record(&call("b"), &output("b")), ToolLoopVerdict::Nudge);
+
+    // 调用相同但结果在变（轮询）时放宽到 5 次
+    let mut polling = ToolLoopDetector::default();
+    for round in 0..4 {
+        assert_eq!(polling.record(&call("status"), &output(&format!("第 {round} 次"))), ToolLoopVerdict::Progressing);
+    }
+    assert_eq!(polling.record(&call("status"), &output("第 4 次")), ToolLoopVerdict::Nudge);
+}
+
+#[test]
+fn test_repetition_detector_flags_degenerate_output_only() {
+    use yachiyo_desktop_lib::gateway::agent::loop_guard::RepetitionDetector;
+
+    let mut looping = RepetitionDetector::default();
+    let sentence = "我需要再检查一下这个文件的内容，确认配置项是否正确。";
+    let tripped = (0..40).any(|_| looping.push(sentence));
+    assert!(tripped);
+
+    let mut normal = RepetitionDetector::default();
+    let tripped = (0..400).any(|i| normal.push(&format!("第 {i} 步：读取模块 {} 并记录它导出的接口。", i * 7)));
+    assert!(!tripped);
+
+    let mut divider = RepetitionDetector::default();
+    assert!(!(0..200).any(|_| divider.push("==========\n")));
+
+    // 不同字符很少的短周期复读不满足样本规则，靠末尾的严格周期规则兜住
+    let mut short_period = RepetitionDetector::default();
+    assert!(!(0..300).any(|_| short_period.push("好的")));
+    assert!((0..2000).any(|_| short_period.push("好的")));
+}
+
+#[tokio::test]
+async fn test_idle_agent_stream_emits_heartbeats_without_dropping_events() {
+    use yachiyo_desktop_lib::gateway::agent::runtime::next_emit_or_heartbeat;
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LoopEmit>();
+    let mut heartbeat = tokio::time::interval(std::time::Duration::from_millis(20));
+    heartbeat.tick().await;
+
+    // 没有事件时按周期下发心跳
+    assert!(matches!(next_emit_or_heartbeat(&mut rx, &mut heartbeat).await, Some(LoopEmit::Ping)));
+
+    // 事件先于心跳取出，且不丢失
+    tx.send(LoopEmit::Event(ClientStreamEvent::Delta { text: "你好".to_string() })).unwrap();
+    match next_emit_or_heartbeat(&mut rx, &mut heartbeat).await {
+        Some(LoopEmit::Event(ClientStreamEvent::Delta { text })) => assert_eq!(text, "你好"),
+        _ => panic!("应先取出已排队的事件"),
+    }
+
+    // 发送端全部关闭且队列清空后结束
+    drop(tx);
+    assert!(next_emit_or_heartbeat(&mut rx, &mut heartbeat).await.is_none());
+}
+
+#[test]
+fn test_ark_agent_body_replays_encrypted_thinking_within_the_run() {
+    let call = ToolInvocation { id: "call-1".to_string(), name: "read_file".to_string(), arguments: serde_json::json!({ "path": "a.rs" }) };
+    let messages = vec![
+        AgentMessage::User { text: "读 a.rs".to_string(), image_data_url: None },
+        AgentMessage::Assistant { text: String::new(), reasoning: "思考摘要".to_string(), tool_calls: vec![call.clone()], native: vec![serde_json::json!({ "encrypted_content": "密文-abc" })] },
+        AgentMessage::ToolResult { tool_call_id: "call-1".to_string(), name: "read_file".to_string(), content: "内容".to_string() },
+    ];
+    let ark = build_openai_agent_body(ProviderId::Openai, Some("https://ark.cn-beijing.volces.com/api/v3"), "doubao-seed-2-1-pro-260915", &messages, "系统提示", &[]);
+    assert_eq!(ark["messages"][2]["encrypted_content"], "密文-abc");
+    assert_eq!(ark["messages"][2]["reasoning_content"], "思考摘要");
+
+    // 其他厂商不带加密块；客户端重放的历史没有 native，也不带
+    let other = build_openai_agent_body(ProviderId::Openai, Some("https://api.moonshot.cn/v1"), "kimi-k3", &messages, "系统提示", &[]);
+    assert!(other["messages"][2].get("encrypted_content").is_none());
+    let replayed = vec![
+        AgentMessage::User { text: "x".to_string(), image_data_url: None },
+        AgentMessage::Assistant { text: String::new(), reasoning: String::new(), tool_calls: vec![call], native: Vec::new() },
+    ];
+    let body = build_openai_agent_body(ProviderId::Openai, Some("https://ark.cn-beijing.volces.com/api/v3"), "doubao-seed-2-1-pro-260915", &replayed, "系统提示", &[]);
+    assert!(body["messages"][2].get("encrypted_content").is_none());
+}
+
+#[test]
+fn test_hunyuan_and_qianfan_agent_bodies_replay_non_empty_reasoning() {
+    let call = ToolInvocation { id: "call-1".to_string(), name: "read_file".to_string(), arguments: serde_json::json!({}) };
+    let messages = vec![
+        AgentMessage::User { text: "读".to_string(), image_data_url: None },
+        AgentMessage::Assistant { text: String::new(), reasoning: "需要读取".to_string(), tool_calls: vec![call.clone()], native: Vec::new() },
+        AgentMessage::ToolResult { tool_call_id: "call-1".to_string(), name: "read_file".to_string(), content: "内容".to_string() },
+        AgentMessage::Assistant { text: String::new(), reasoning: String::new(), tool_calls: vec![call], native: Vec::new() },
+    ];
+    for (url, model) in [("https://tokenhub.tencentmaas.com/v1", "hy3"), ("https://qianfan.baidubce.com/v2", "ernie-5.1")] {
+        let body = build_openai_agent_body(ProviderId::Openai, Some(url), model, &messages, "系统提示", &[]);
+        assert_eq!(body["messages"][2]["reasoning_content"], "需要读取", "{model}");
+        assert!(body["messages"][4].get("reasoning_content").is_none(), "{model}");
+    }
 }

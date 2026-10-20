@@ -37,6 +37,8 @@ export interface StreamChatRequest {
 export interface StreamChatResult {
   truncated: boolean;
   usage?: TokenUsage;
+  /** 桌面 Agent 检测到没有进展的循环而提前结束 */
+  stopReason?: "loop_detected";
 }
 
 export type ChatClientErrorCode =
@@ -301,7 +303,11 @@ export async function streamChat(
         options.onTurn?.(usage !== undefined ? { index: payload.index, usage } : { index: payload.index });
       } else if (fields.event === "done" && typeof payload.truncated === "boolean") {
         const usage = isUsagePayload(payload.usage) ? payload.usage : undefined;
-        finished = { truncated: payload.truncated, ...(usage !== undefined ? { usage } : {}) };
+        finished = {
+          truncated: payload.truncated,
+          ...(usage !== undefined ? { usage } : {}),
+          ...(payload.reason === "loop_detected" ? { stopReason: "loop_detected" as const } : {}),
+        };
       } else if (fields.event === "error" && typeof payload.code === "string") {
         throw streamErrorEvent(payload.code, typeof payload.message === "string" ? payload.message : undefined);
       } else {

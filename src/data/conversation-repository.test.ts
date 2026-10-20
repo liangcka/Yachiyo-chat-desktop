@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ChatMessage, StoredImage } from "../domain/chat";
-import { ConversationLimitError, ConversationRepository } from "./conversation-repository";
+import { ConversationRepository } from "./conversation-repository";
 import { YachiyoDatabase } from "./db";
 
 describe("ConversationRepository", () => {
@@ -187,27 +187,12 @@ describe("ConversationRepository", () => {
     expect(await repository.getLocale()).toBe("zh-CN");
   });
 
-  it("rejects a thirty-first conversation without deleting existing history", async () => {
-    for (let index = 0; index < 30; index += 1) {
+  it("keeps creating conversations beyond thirty without dropping history", async () => {
+    for (let index = 0; index < 35; index += 1) {
       await repository.createConversation("zh-CN", index);
     }
 
-    await expect(repository.createConversation("zh-CN", 31)).rejects.toBeInstanceOf(
-      ConversationLimitError,
-    );
-    expect(await repository.listConversations()).toHaveLength(30);
-  });
-
-  it("keeps the conversation limit under concurrent creation", async () => {
-    const results = await Promise.allSettled(
-      Array.from({ length: 31 }, (_, index) =>
-        repository.createConversation("zh-CN", index),
-      ),
-    );
-
-    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(30);
-    expect(results.filter(({ status }) => status === "rejected")).toHaveLength(1);
-    expect(await repository.listConversations()).toHaveLength(30);
+    expect(await repository.listConversations()).toHaveLength(35);
   });
 
   it("pages messages backwards from an exclusive createdAt watermark", async () => {
