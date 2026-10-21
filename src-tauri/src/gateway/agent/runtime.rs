@@ -94,6 +94,15 @@ fn accumulate_usage(acc: &mut TokenUsage, inc: &Option<TokenUsage>) {
     }
 }
 
+/// 取消标志的轮询周期：足够及时地断开上游，又不至于空转占用 CPU
+const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+async fn wait_cancelled(cancelled: &AtomicBool) {
+    while !cancelled.load(Ordering::Relaxed) {
+        tokio::time::sleep(CANCEL_POLL_INTERVAL).await;
+    }
+}
+
 /// 工具被用户拒绝时回填给模型的说明
 const DENIED_TOOL_RESULT: &str = "用户拒绝了本次操作。不要立即重试同一动作；请改用其他方案，或向用户说明需要该操作的理由。";
 
@@ -165,7 +174,13 @@ pub async fn run_agent_loop_ext(
             DEFAULT_PRUNE_HEAD_CHARS,
             DEFAULT_PRUNE_TAIL_CHARS,
         );
-        let outcome = match executor.execute(&pruned_messages, sink).await {
+        // 用户停止时丢弃进行中的上游请求 Future 即断开 HTTP 连接，厂商随之停止生成与计费，
+        // 而不是等这一轮（可能是长时间思考或数万 token 的输出）完整跑完
+        let outcome = tokio::select! {
+            outcome = executor.execute(&pruned_messages, sink) => outcome,
+            _ = wait_cancelled(cancelled) => return Ok(LoopOutcome::Cancelled),
+        };
+        let outcome = match outcome {
             Err(error) if error == REPETITION_LOOP_DETECTED => return Ok(LoopOutcome::LoopDetected { usage }),
             other => other?,
         };
@@ -402,6 +417,8 @@ pub struct HttpTurnExecutor {
     pub model: String,
     pub system_prompt: String,
     pub tools_schema: Vec<serde_json::Value>,
+    /// 用户所选思考档位的原生取值；None 时沿用各厂商的默认规则
+    pub reasoning_effort: Option<&'static str>,
 }
 
 impl TurnExecutor for HttpTurnExecutor {
@@ -422,13 +439,14 @@ impl TurnExecutor for HttpTurnExecutor {
         let model = self.model.clone();
         let system_prompt = self.system_prompt.clone();
         let tools_schema = self.tools_schema.clone();
+        let reasoning_effort = self.reasoning_effort;
         let messages = messages.to_vec();
         let sink = Arc::clone(sink);
         Box::pin(async move {
             let config = get_provider_config(provider_id);
             let protocol = WireProtocol::resolve(provider_id, base_url.as_deref());
 
-            let (url, body) = match protocol {
+            let (url, mut body) = match protocol {
                 WireProtocol::ChatCompletions => (
                     crate::gateway::providers::openai_compat::resolve_chat_endpoint(base_url.as_deref(), config.endpoint),
                     crate::gateway::providers::openai_compat::build_openai_agent_body(
@@ -454,6 +472,10 @@ impl TurnExecutor for HttpTurnExecutor {
                     ),
                 ),
             };
+
+            if let Some(effort) = reasoning_effort {
+                crate::gateway::providers::reasoning::apply_agent_effort(&mut body, protocol, effort);
+            }
 
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert(reqwest::header::CONTENT_TYPE, reqwest::header::HeaderValue::from_static("application/json"));
@@ -826,6 +848,9 @@ pub fn run_agent_chat_stream(
                 .is_some_and(|name| name.starts_with(crate::computer::TOOL_PREFIX))
         });
         let system_prompt = build_agent_system_prompt(request.locale, root.as_deref(), desktop_control, web_search);
+        let reasoning_effort = request.reasoning_effort.and_then(|level| {
+            crate::gateway::providers::reasoning::native_effort(provider_id, base_url.as_deref(), &model, level)
+        });
         let executor = HttpTurnExecutor {
             client: client.clone(),
             fallback_client,
@@ -835,6 +860,7 @@ pub fn run_agent_chat_stream(
             model,
             system_prompt,
             tools_schema,
+            reasoning_effort,
         };
 
         let agent_config = request.agent.as_ref()

@@ -2,6 +2,7 @@ import type { ChatSource, Locale, TokenUsage } from "../domain/chat";
 import { KEYSTORE_MANAGED_API_KEY, type ProviderId } from "../domain/llm";
 import { apiCredentials } from "./app-platform";
 import { apiFetch } from "./api-origins";
+import type { ReasoningLevel } from "./reasoning-effort";
 
 export interface StreamChatMessage {
   role: "user" | "assistant" | "tool";
@@ -30,6 +31,8 @@ export interface StreamChatRequest {
   webSearch?: boolean;
   /** 智能搜索：联网搜索开启时启用双市场并行检索（结果更多、带发布日期） */
   smartSearch?: boolean;
+  /** 对话框选择的思考档位；桌面网关映射为厂商原生取值，模型不支持时忽略 */
+  reasoningEffort?: ReasoningLevel;
   /** Agent 模式：开启后服务端启用多轮工具调用循环 */
   agent?: {
     enabled: true;

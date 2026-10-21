@@ -12,10 +12,11 @@ export interface MessageBubbleProps {
   /** "显示引用来源"开关；false 时不渲染 assistant 消息的参考来源列表 */
   showSources?: boolean;
   onRecall?: () => void;
-  onRegenerate?: () => void;
-  onEdit?: (text: string) => void;
+  /** 以下回调都带消息 id：上层可直接传入同一个稳定引用，不必为每条消息新建闭包而让 memo 失效 */
+  onRegenerate?: (messageId: string) => void;
+  onEdit?: (messageId: string, text: string) => void;
   versions?: number[];
-  onVersionChange?: (version: number) => void;
+  onVersionChange?: (messageId: string, version: number) => void;
   onToast?: (message: string) => void;
   onImageLoad?: () => void;
   isLastAssistant?: boolean;
@@ -216,7 +217,7 @@ export const MessageBubble = memo(function MessageBubble({
   const handleRegenerateAction = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     setMenuOpen(false);
-    onRegenerate?.();
+    onRegenerate?.(message.id);
   };
 
   const hasVersions = versions !== undefined && versions.length > 1;
@@ -259,7 +260,7 @@ export const MessageBubble = memo(function MessageBubble({
         )
       ) : null}
       {editing ? (
-        <form className="message-bubble__edit" onSubmit={(event) => { event.preventDefault(); if (editText.trim()) { onEdit?.(editText); setEditing(false); } }}>
+        <form className="message-bubble__edit" onSubmit={(event) => { event.preventDefault(); if (editText.trim()) { onEdit?.(message.id, editText); setEditing(false); } }}>
           <textarea aria-label={locale === "ja-JP" ? "メッセージを編集" : "编辑消息"} value={editText} onChange={(event) => setEditText(event.target.value)} />
           <div><button type="button" onClick={() => setEditing(false)}>{locale === "ja-JP" ? "キャンセル" : "取消"}</button><button type="submit" disabled={!editText.trim()}>{locale === "ja-JP" ? "保存して再生成" : "保存并重新生成"}</button></div>
         </form>
@@ -315,9 +316,9 @@ export const MessageBubble = memo(function MessageBubble({
         <div className="message-bubble__actions">
           {showVersions && versions ? (
             <div className="message-bubble__versions" aria-label={locale === "ja-JP" ? "メッセージのバージョン" : "消息版本"}>
-              <button type="button" aria-label={locale === "ja-JP" ? "前のバージョン" : "上一个版本"} disabled={!onVersionChange || versions.indexOf(message.branchVersion ?? 1) <= 0} onClick={() => onVersionChange?.(versions[versions.indexOf(message.branchVersion ?? 1) - 1]!)}><ChevronLeft size={13} /></button>
+              <button type="button" aria-label={locale === "ja-JP" ? "前のバージョン" : "上一个版本"} disabled={!onVersionChange || versions.indexOf(message.branchVersion ?? 1) <= 0} onClick={() => onVersionChange?.(message.id, versions[versions.indexOf(message.branchVersion ?? 1) - 1]!)}><ChevronLeft size={13} /></button>
               <span>{versions.indexOf(message.branchVersion ?? 1) + 1} / {versions.length}</span>
-              <button type="button" aria-label={locale === "ja-JP" ? "次のバージョン" : "下一个版本"} disabled={!onVersionChange || versions.indexOf(message.branchVersion ?? 1) >= versions.length - 1} onClick={() => onVersionChange?.(versions[versions.indexOf(message.branchVersion ?? 1) + 1]!)}><ChevronRight size={13} /></button>
+              <button type="button" aria-label={locale === "ja-JP" ? "次のバージョン" : "下一个版本"} disabled={!onVersionChange || versions.indexOf(message.branchVersion ?? 1) >= versions.length - 1} onClick={() => onVersionChange?.(message.id, versions[versions.indexOf(message.branchVersion ?? 1) + 1]!)}><ChevronRight size={13} /></button>
             </div>
           ) : null}
           {showCopy ? (

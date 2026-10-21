@@ -12,7 +12,7 @@ Status: implemented
 ## Decision
 
 - `build_agent_system_prompt` 不再接收时间，系统提示词只含静态说明；`run_agent_chat_stream` 用 `build_time_note` 把时间注入最新一条用户消息开头。系统提示词与已发送的历史前缀逐字稳定，下一次请求只有最后几条消息未命中缓存。
-- `prompt.rs` 通过 `role_prompt()` 在桌面端发送前剔除工具定义章节（以章节标题定位，找不到标题时原样发送）。根目录 `角色提示词.txt` 与云端 Functions 不受影响。
+- `prompt.rs` 通过 `role_prompt()` 在桌面端发送前剔除工具定义章节（按标题括号内的 `tool_definitions` id 定位，找不到时原样发送）。根目录 `角色提示词.txt` 与云端 Functions 不受影响。
 
 ## Alternatives considered
 
@@ -22,7 +22,7 @@ Status: implemented
 
 ## Consequences
 
-- 若重命名角色提示词中的章节标题，需要同步 `TOOL_DEFINITIONS_START` / `TOOL_DEFINITIONS_END`，否则裁剪失效（回退为完整发送，不会出错）。
+- 若修改工具定义章节标题括号内的 id，需要同步 `TOOL_DEFINITIONS_ID`，否则裁剪失效（回退为完整发送，不会出错）。
 - 历史超过 20 条后窗口逐条滑动，历史部分仍会失去缓存，系统提示词部分不受影响。
 
 ## Verification

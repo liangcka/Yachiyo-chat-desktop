@@ -16,6 +16,9 @@ const EMERGENCY_STOP_EVENT: &str = "emergency_stop_control";
 const CURSOR_EVENT: &str = "control_cursor_move";
 /// 30ms 一次：光标跟随足够平滑，也能捕获一次正常时长的 Esc 按键
 const TRACK_INTERVAL: Duration = Duration::from_millis(30);
+/// 光标静止时的保底重发周期（以跟踪轮数计，约 0.5 秒）：遮罩在状态切换后才异步订阅光标事件，
+/// 首个坐标可能早于订阅到达而丢失，静止时若不再推送，系统光标已隐藏的彩叶会看不到任何光标
+const CURSOR_RESEND_TICKS: u32 = 16;
 
 /// paused 表示运行仍在进行但正在等待彩叶审批：状态条保留，系统光标恢复以便点击审批卡片
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
@@ -91,6 +94,9 @@ fn start_tracking(app: AppHandle) {
         return;
     }
     tauri::async_runtime::spawn(async move {
+        // 光标静止时降为低频重发，遮罩窗口无需每 30ms 重渲一次光标
+        let mut last_cursor: Option<(f64, f64)> = None;
+        let mut ticks_since_emit: u32 = 0;
         loop {
             tokio::time::sleep(TRACK_INTERVAL).await;
             let state = app.state::<ControlOverlayState>();
@@ -103,12 +109,16 @@ fn start_tracking(app: AppHandle) {
                 break;
             }
             let Some(overlay) = app.get_webview_window(OVERLAY_LABEL) else { break };
-            if !payload.paused {
-                if let (Ok(cursor), Ok(origin)) = (overlay.cursor_position(), overlay.inner_position()) {
-                    let _ = overlay.emit(
-                        CURSOR_EVENT,
-                        CursorPosition { x: cursor.x - origin.x as f64, y: cursor.y - origin.y as f64 },
-                    );
+            if payload.paused {
+                // 暂停期间遮罩不画光标，恢复后需要重新推送当前位置
+                last_cursor = None;
+            } else if let (Ok(cursor), Ok(origin)) = (overlay.cursor_position(), overlay.inner_position()) {
+                let position = (cursor.x - origin.x as f64, cursor.y - origin.y as f64);
+                ticks_since_emit += 1;
+                if last_cursor != Some(position) || ticks_since_emit >= CURSOR_RESEND_TICKS {
+                    last_cursor = Some(position);
+                    ticks_since_emit = 0;
+                    let _ = overlay.emit(CURSOR_EVENT, CursorPosition { x: position.0, y: position.1 });
                 }
             }
         }

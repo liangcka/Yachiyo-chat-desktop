@@ -58,7 +58,7 @@ pub fn tool_risk(name: &str) -> Option<ToolRisk> {
     }
     match name {
         "read_file" | "list_directory" | "glob" | "grep" | "git_status" | "git_diff" | "web_fetch"
-        | "web_search" | "todo_write" | "task" => {
+        | "web_search" | "todo_write" | "task" | crate::gateway::prompt::READ_GUIDELINE_TOOL => {
             Some(ToolRisk::Read)
         }
         "write_file" | "edit_file" | "run_command" => Some(ToolRisk::Write),
@@ -291,7 +291,7 @@ pub fn get_fallback_cwd() -> PathBuf {
 }
 
 pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
-    vec![
+    let mut tools = vec![
         serde_json::json!({
             "type": "function",
             "function": {
@@ -493,7 +493,9 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
                 }
             }
         }),
-    ]
+    ];
+    tools.extend(crate::gateway::prompt::read_guideline_schema());
+    tools
 }
 
 pub async fn execute_tool_with_context(
@@ -645,6 +647,10 @@ pub async fn execute_tool_with_context(
                 "Updated todo list: {} pending, {} in progress, {} completed.",
                 pending, in_progress, completed
             ))
+        }
+        crate::gateway::prompt::READ_GUIDELINE_TOOL => {
+            let guideline = args.get("name").and_then(|v| v.as_str()).ok_or("缺少 name 参数")?;
+            crate::gateway::prompt::read_guideline(guideline)
         }
         unknown => Err(format!("Unknown tool: '{}'", unknown)),
     }

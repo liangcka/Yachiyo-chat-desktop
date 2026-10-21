@@ -832,6 +832,7 @@
 
 /* 运行中会话的状态点：蓝色呼吸表示正在生成，琥珀色表示在等用户确认工具权限 */
 .desktop-sidebar__history-activity {
+  position: relative;
   flex-shrink: 0;
   width: 7px;
   height: 7px;
@@ -843,6 +844,16 @@
   animation: sidebar-activity-pulse 1.4s ease-in-out infinite;
 }
 
+/* 扩散光环只动 transform 与 opacity，由合成器处理；动画 box-shadow 会在整个运行期间逐帧重绘 */
+.desktop-sidebar__history-activity--streaming::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: inherit;
+  animation: sidebar-activity-ring 1.4s ease-in-out infinite;
+}
+
 .desktop-sidebar__history-activity--approval {
   background: var(--warning);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 22%, transparent);
@@ -852,16 +863,27 @@
   0%,
   100% {
     opacity: 1;
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--dsw-alias-state-business-primary, #4b8bf5) 45%, transparent);
   }
   50% {
     opacity: 0.55;
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4b8bf5) 0%, transparent);
+  }
+}
+
+@keyframes sidebar-activity-ring {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0;
+    transform: scale(2.15);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .desktop-sidebar__history-activity--streaming {
+  .desktop-sidebar__history-activity--streaming,
+  .desktop-sidebar__history-activity--streaming::after {
     animation: none;
   }
 }

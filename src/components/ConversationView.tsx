@@ -16,6 +16,12 @@ const OVERSCAN = 6;
 /** 消息气泡高度估算值；实际高度由 measureElement 实测校正 */
 const ESTIMATED_MESSAGE_HEIGHT = 96;
 
+/** 单一版本时返回 undefined：气泡只在多版本时展示切换器，且每次新建的数组会让 memo 失效 */
+function switchableVersions(conversation: Conversation | undefined, message: ChatMessage): number[] | undefined {
+  const versions = conversation === undefined ? undefined : branchVersions(conversation, message);
+  return versions !== undefined && versions.length > 1 ? versions : undefined;
+}
+
 function isNearBottom(
   element: Pick<HTMLElement, "clientHeight" | "scrollHeight" | "scrollTop">,
 ) {
@@ -103,12 +109,13 @@ export function ConversationView({
 
   const scrollToBottom = useCallback(
     (smooth = true) => {
-      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      // 虚拟模式下占位层提供真实总高度，endRef 始终可达，两个分支共用同一逻辑
-      endRef.current?.scrollIntoView({
-        behavior: !smooth || reducedMotion ? "auto" : "smooth",
-        block: "end",
-      });
+      // 虚拟模式下占位层提供真实总高度，底部始终可达，两个分支共用同一逻辑
+      if (smooth && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      } else if (containerRef.current) {
+        // 流式增量每帧都会触发：直接定位滚动容器，避免每帧重启平滑滚动动画与 scrollIntoView 的祖先链布局
+        containerRef.current.scrollTop = containerRef.current.scrollHeight;
+      }
       followingRef.current = true;
       if (containerRef.current) {
         syncTopScrimOpacity(containerRef.current, onScrolledFromTopChange);
@@ -131,8 +138,10 @@ export function ConversationView({
       currentLastMessage.id === previousLastMessage.id &&
       currentLastMessage.text !== previousLastMessage.text;
 
-    if (isInitialMessage || isNewMessage || (isStreamingDelta && followingRef.current)) {
+    if (isInitialMessage || isNewMessage) {
       scrollToBottom();
+    } else if (isStreamingDelta && followingRef.current) {
+      scrollToBottom(false);
     } else if (containerRef.current) {
       syncTopScrimOpacity(containerRef.current, onScrolledFromTopChange);
     }
@@ -172,15 +181,10 @@ export function ConversationView({
           onImageLoad={handleImageLoad}
           showSources={showSources}
           onRecall={message.role === "user" && index === lastUserMessageIndex ? onRecall : undefined}
-          onRegenerate={
-            message.role === "assistant" &&
-            onRegenerate !== undefined
-              ? () => onRegenerate(message.id)
-              : undefined
-          }
-          onEdit={message.role === "user" && onEdit ? (text) => onEdit(message.id, text) : undefined}
-          versions={conversation ? branchVersions(conversation, message) : undefined}
-          onVersionChange={onVersionChange ? (version) => onVersionChange(message.id, version) : undefined}
+          onRegenerate={message.role === "assistant" ? onRegenerate : undefined}
+          onEdit={message.role === "user" ? onEdit : undefined}
+          versions={switchableVersions(conversation, message)}
+          onVersionChange={onVersionChange}
           onToast={onToast}
           isLastAssistant={message.role === "assistant" && index === lastAssistantMessageIndex}
           isGenerating={isGenerating}

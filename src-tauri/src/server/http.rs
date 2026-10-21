@@ -208,6 +208,30 @@ fn balance_problem(status: StatusCode, code: &str) -> Response {
 /// 余额小鲸鱼插件的 DeepSeek 余额代理：Key 只在网关内取用且仅发往原生端点，
 /// 成功时原样返回 /user/balance 的 JSON；错误体与网页版 Pages Function 同为
 /// `{ error: { code } }`，前端共用一套解析
+#[derive(Deserialize)]
+struct ReasoningLevelsRequest {
+    provider: crate::types::ProviderId,
+    model: String,
+    #[serde(rename = "baseUrl")]
+    base_url: Option<String>,
+}
+
+/// 对话框思考档位选择器的数据源：模型可选档位（由浅到深）与不指定时的默认档；不支持调节时 levels 为空
+async fn handle_reasoning_levels(Json(request): Json<ReasoningLevelsRequest>) -> impl IntoResponse {
+    let support = crate::gateway::providers::reasoning::reasoning_support(
+        request.provider,
+        request.base_url.as_deref(),
+        &request.model,
+    );
+    Json(match support {
+        Some(support) => serde_json::json!({
+            "levels": support.levels.iter().map(|(level, _)| *level).collect::<Vec<_>>(),
+            "defaultLevel": support.default,
+        }),
+        None => serde_json::json!({ "levels": [] }),
+    })
+}
+
 async fn handle_deepseek_balance(State(state): State<AppState>) -> Response {
     let Some(key) = state.key_store.get_key_for_endpoint("deepseek", None) else {
         return balance_problem(StatusCode::BAD_REQUEST, "API_KEY_MISSING");
@@ -442,6 +466,7 @@ pub fn create_router(state: AppState, dist_path: PathBuf) -> Router {
         .route("/api/keys", get(handle_list_keys).post(handle_save_key))
         .route("/api/keys/{provider}", delete(handle_delete_key))
         .route("/api/deepseek/balance", post(handle_deepseek_balance))
+        .route("/api/reasoning/levels", post(handle_reasoning_levels))
         .route("/api/mcp/servers", get(handle_list_mcp_servers).post(handle_save_mcp_server))
         .route("/api/mcp/servers/{id}", delete(handle_delete_mcp_server))
         .route("/api/mcp/servers/{id}/toggle", post(handle_toggle_mcp_server))

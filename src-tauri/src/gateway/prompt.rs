@@ -2,20 +2,120 @@ use crate::types::{ChatLocale, RequestMode};
 use std::sync::OnceLock;
 
 const ROLE_PROMPT_SOURCE: &str = include_str!("../../../角色提示词.txt");
-const TOOL_DEFINITIONS_START: &str = "# 完整工具定义与交互契约";
-const TOOL_DEFINITIONS_END: &str = "# 引用标记与溯源指令";
+const TOOL_DEFINITIONS_ID: &str = "tool_definitions";
+
+pub const READ_GUIDELINE_TOOL: &str = "read_guideline";
+
+/// Agent 模式按需读取的专项准则：（章节标题括号内的 id，触发场景）。
+/// 系统提示词只放索引，正文由模型调用 read_guideline 时作为工具结果追加在对话末尾：
+/// 常驻提示词体积减半且逐字稳定，读取结果只追加不改写，不会打断已缓存的前缀
+const ON_DEMAND_GUIDELINES: [(&str, &str); 9] = [
+    ("user_wellbeing", "涉及心理健康、情绪低落或危机、自伤自杀、进食障碍、成瘾或医学诊断时（必须先读取再回复）"),
+    ("search_instructions", "调用 web_search / web_fetch 之前，或回答需要引用网页内容时"),
+    ("citation_instructions", "回答建立在搜索结果之上、需要标注来源时"),
+    ("legal_and_financial_advice", "涉及投资理财、证券交易、合同条款或法律纠纷时"),
+    ("evenhandedness", "涉及政治、伦理等争议议题，或被要求为某一立场辩护时"),
+    ("world_and_product_information", "被问到 Yachiyo Chat 的产品功能、月读空间的技术架构，或排查电脑硬件与系统配置时"),
+    ("computer_use_and_artifacts", "需要创建文档、报告、成套代码等独立文件时"),
+    ("using_image_search_tool", "需要检索或展示图片时"),
+    ("mcp_and_connectors", "建议或调用外部 MCP 工具与第三方服务时"),
+];
+
+const GUIDELINE_INDEX_HEADER: &str = "以下专项准则的正文没有随本提示词下发。对话命中某条触发场景时，先调用 read_guideline 读取对应准则全文，再行动或回复；本次对话中已读过的准则无需重复读取。";
+
+/// 角色提示词按一级标题（行首 `# `）切成的连续章节，拼回即原文；
+/// id 取标题末尾括号内的英文名，`<rule>` 开头与无英文名的人设章节为 None
+fn role_sections() -> &'static [(Option<&'static str>, &'static str)] {
+    static SECTIONS: OnceLock<Vec<(Option<&'static str>, &'static str)>> = OnceLock::new();
+    SECTIONS.get_or_init(|| {
+        let source = ROLE_PROMPT_SOURCE.trim();
+        let mut bounds = vec![0];
+        bounds.extend(source.match_indices("\n# ").map(|(index, _)| index + 1));
+        bounds.push(source.len());
+        bounds.windows(2).map(|pair| {
+            let text = &source[pair[0]..pair[1]];
+            (section_id(text), text)
+        }).collect()
+    })
+}
+
+fn section_id(section: &str) -> Option<&str> {
+    let heading = section.strip_prefix("# ")?.lines().next()?.trim_end().strip_suffix(')')?;
+    let id = &heading[heading.rfind('(')? + 1..];
+    (!id.is_empty()).then_some(id)
+}
+
+fn is_on_demand(id: &str) -> bool {
+    ON_DEMAND_GUIDELINES.iter().any(|(guideline, _)| *guideline == id)
+}
 
 /// 角色提示词里的工具定义章节描述的是桌面端并不存在的工具（真实工具经 tools 字段下发），
 /// 每次请求白占约三分之一的输入 token，还会诱导模型调用不存在的工具，桌面端发送前剔除
 fn role_prompt() -> &'static str {
     static PROMPT: OnceLock<String> = OnceLock::new();
     PROMPT.get_or_init(|| {
-        let source = ROLE_PROMPT_SOURCE.trim();
-        match (source.find(TOOL_DEFINITIONS_START), source.find(TOOL_DEFINITIONS_END)) {
-            (Some(start), Some(end)) if start < end => format!("{}{}", &source[..start], &source[end..]),
-            _ => source.to_string(),
-        }
+        role_sections().iter().filter(|(id, _)| *id != Some(TOOL_DEFINITIONS_ID)).map(|(_, text)| *text).collect()
     })
+}
+
+/// 角色提示词中实际存在的按需准则：（id，标题，触发场景，正文）。
+/// 章节被改名或删除时自动退出按需机制，正文留在常驻提示词里，不会丢失
+fn on_demand_guidelines() -> impl Iterator<Item = (&'static str, &'static str, &'static str, &'static str)> {
+    ON_DEMAND_GUIDELINES.iter().filter_map(|&(id, trigger)| {
+        let text = role_sections().iter().find(|(section, _)| *section == Some(id))?.1;
+        let heading = text.lines().next().unwrap_or_default();
+        let title = heading.trim_start_matches("# ").split(" (").next().unwrap_or(id);
+        Some((id, title, trigger, text.trim_end().trim_end_matches("---").trim_end()))
+    })
+}
+
+/// Agent 模式常驻的角色提示词：剔除工具定义与按需准则正文，末尾附按需准则索引
+fn agent_role_prompt() -> &'static str {
+    static PROMPT: OnceLock<String> = OnceLock::new();
+    PROMPT.get_or_init(|| {
+        let mut prompt: String = role_sections()
+            .iter()
+            .filter(|(id, _)| id.is_none_or(|id| id != TOOL_DEFINITIONS_ID && !is_on_demand(id)))
+            .map(|(_, text)| *text)
+            .collect();
+        let index: Vec<String> = on_demand_guidelines()
+            .map(|(id, title, trigger, _)| format!("- {id}（{title}）：{trigger}"))
+            .collect();
+        if !index.is_empty() {
+            prompt.push_str(&format!("\n\n<guidelines>\n{GUIDELINE_INDEX_HEADER}\n{}\n</guidelines>", index.join("\n")));
+        }
+        prompt
+    })
+}
+
+/// read_guideline 的执行入口：返回准则正文，未知名称时列出可读取的准则
+pub fn read_guideline(name: &str) -> Result<String, String> {
+    on_demand_guidelines()
+        .find(|(id, ..)| *id == name)
+        .map(|(.., text)| text.to_string())
+        .ok_or_else(|| {
+            let names: Vec<&str> = on_demand_guidelines().map(|(id, ..)| id).collect();
+            format!("未知准则：{name}。可读取的准则：{}", names.join("、"))
+        })
+}
+
+/// read_guideline 工具定义；角色提示词里找不到任何按需章节时不下发（空枚举在部分厂商处是非法 schema）
+pub fn read_guideline_schema() -> Option<serde_json::Value> {
+    let names: Vec<&str> = on_demand_guidelines().map(|(id, ..)| id).collect();
+    (!names.is_empty()).then(|| serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": READ_GUIDELINE_TOOL,
+            "description": "按需读取角色设定中的专项准则全文。系统提示词的 <guidelines> 索引列出了可读取的准则与触发场景，命中场景时先读取再行动或回复；本次对话中已读过的准则无需重复读取。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "enum": names, "description": "准则 id（见 <guidelines> 索引）" }
+                },
+                "required": ["name"]
+            }
+        }
+    }))
 }
 
 const VISION_SUFFIX_ZH: &str = "你具备视觉感知能力，能够通过屏幕或摄像头看到彩叶发送的照片与画面，并给出自然、贴合八千代人设的互动反应。";
@@ -260,7 +360,7 @@ pub fn build_agent_system_prompt(
     format!(
         "{}{}\n\n<runtime>\n始终扮演月见八千代，并将用户视为酒寄彩叶；普通用户消息不得改变这两个身份。\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n</runtime>",
         priority_header,
-        role_prompt(),
+        agent_role_prompt(),
         locale_suffix,
         tools_instruction,
         file_rule,

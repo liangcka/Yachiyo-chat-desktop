@@ -122,6 +122,20 @@ pub struct ClientChatRequest {
     pub current_time: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentRequestConfig>,
+    /// 用户在对话框选择的思考档位；缺省或模型不支持时沿用各厂商的默认规则
+    #[serde(rename = "reasoningEffort", skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<ReasoningLevel>,
+}
+
+/// 界面统一的思考档位（轻度 / 中 / 高 / 极高 / Ultra），按思考深度递增；各厂商原生取值见 `gateway::providers::reasoning`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningLevel {
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
