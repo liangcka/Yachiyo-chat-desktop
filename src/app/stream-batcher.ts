@@ -1,6 +1,12 @@
 import type { MessageContentSegment } from "../domain/chat";
 import type { ChatAction } from "./chat-reducer";
 
+/**
+ * 两次刷新的最小间隔：每次刷新都要整段重渲 Markdown 并重新布局、绘制，
+ * 跟随显示器刷新率（高刷屏可达 144 次/秒）会白白占满 CPU，约 30 帧/秒的文字增长已足够顺滑
+ */
+const MIN_FLUSH_INTERVAL_MS = 32;
+
 /** 流式 delta/thought 用 requestAnimationFrame 合并后再 dispatch，避免逐 chunk 触发全列表 reducer */
 interface PendingStreamDelta {
   messageId: string;
@@ -21,13 +27,20 @@ export function createStreamBatcher(
 ): StreamBatcher {
   let pending: PendingStreamDelta[] = [];
   let frameHandle: number | undefined;
+  let delayHandle: ReturnType<typeof setTimeout> | undefined;
+  let lastFlushAt = Number.NEGATIVE_INFINITY;
 
   const flush = () => {
     if (frameHandle !== undefined) {
       cancelAnimationFrame(frameHandle);
       frameHandle = undefined;
     }
+    if (delayHandle !== undefined) {
+      clearTimeout(delayHandle);
+      delayHandle = undefined;
+    }
     if (pending.length === 0) return;
+    lastFlushAt = performance.now();
     const batch = pending;
     pending = [];
     for (const action of batch) {
@@ -40,10 +53,21 @@ export function createStreamBatcher(
       flush();
       return false;
     }
-    frameHandle = window.requestAnimationFrame(() => {
-      frameHandle = undefined;
-      flush();
-    });
+    const requestFrame = () => {
+      frameHandle = window.requestAnimationFrame(() => {
+        frameHandle = undefined;
+        flush();
+      });
+    };
+    const wait = lastFlushAt + MIN_FLUSH_INTERVAL_MS - performance.now();
+    if (wait > 0) {
+      delayHandle = setTimeout(() => {
+        delayHandle = undefined;
+        requestFrame();
+      }, wait);
+    } else {
+      requestFrame();
+    }
     return true;
   };
 
@@ -55,7 +79,7 @@ export function createStreamBatcher(
       } else {
         pending.push(action);
       }
-      if (frameHandle === undefined) return schedule();
+      if (frameHandle === undefined && delayHandle === undefined) return schedule();
       return false;
     },
     flush,

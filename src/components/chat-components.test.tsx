@@ -100,7 +100,7 @@ describe("reference chat components", () => {
     expect(screen.getByLabelText(ja ? "メッセージのバージョン" : "消息版本")).toHaveTextContent("2 / 2");
     expect(screen.getByRole("button", { name: ja ? "次のバージョン" : "下一个版本" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: ja ? "前のバージョン" : "上一个版本" }));
-    expect(onVersionChange).toHaveBeenCalledWith(1);
+    expect(onVersionChange).toHaveBeenCalledWith(message.id, 1);
   });
 
   it("空的停止回复保留版本切换入口", () => {
@@ -286,7 +286,9 @@ describe("reference chat components", () => {
         messages={[{ ...firstMessage, text: "回到底部后继续跟随" }]}
       />,
     );
-    expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: "smooth", block: "end" });
+    // 流式增量每帧都会触发，直接定位到底部，不重启平滑滚动
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(conversation!.scrollTop).toBe(1_000);
 
     const nextMessage: ChatMessage = {
       conversationId: "one",
@@ -330,7 +332,11 @@ describe("reference chat components", () => {
       text: "少一点动态也很好",
     };
     const view = render(<ConversationView locale="zh-CN" messages={[firstMessage]} />);
-    expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: "auto", block: "end" });
+    const conversation = view.container.querySelector<HTMLElement>(".conversation-view");
+    Object.defineProperties(conversation, {
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, value: 0, writable: true },
+    });
 
     view.rerender(
       <ConversationView
@@ -342,8 +348,8 @@ describe("reference chat components", () => {
       />,
     );
 
-    expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: "auto", block: "end" });
-    expect(scrollIntoView).toHaveBeenCalledTimes(2);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(conversation!.scrollTop).toBe(1_000);
   });
 
   it("opens context menu with recall option on right-click or long-press for the latest user message", () => {
