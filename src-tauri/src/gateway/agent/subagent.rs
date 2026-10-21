@@ -161,6 +161,7 @@ pub async fn run_subagent(
         LoopOutcome::Completed { usage } => (usage, None),
         LoopOutcome::MaxTurnsReached { usage } => (usage, Some("子任务达到轮次上限，以下为截至目前的结果")),
         LoopOutcome::LoopDetected { usage } => (usage, Some("子任务陷入重复操作被提前结束，以下为截至目前的结果")),
+        LoopOutcome::Truncated { usage } => (usage, Some("子任务输出被截断，以下为截至目前的结果")),
         LoopOutcome::Cancelled => return Err("子任务已取消".to_string()),
     };
     let report = report.lock().unwrap().trim().to_string();

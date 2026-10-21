@@ -202,9 +202,83 @@
   opacity: 0;
 }
 
+/* 星点闪烁与流星划过只动 opacity / transform，由合成器处理；只在 Ultra 弹层打开期间运行 */
+.dsh-reasoning-select__panel--ultra .dsh-reasoning-select__track::before {
+  animation: reasoning-twinkle 1.6s ease-in-out infinite alternate;
+}
+
+.dsh-reasoning-select__meteors {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.dsh-reasoning-select__meteors i {
+  position: absolute;
+  left: 0;
+  width: 28px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.95));
+  opacity: 0;
+  animation: reasoning-meteor 2.6s linear infinite;
+}
+
+.dsh-reasoning-select__meteors i:nth-child(1) {
+  top: 6px;
+}
+
+.dsh-reasoning-select__meteors i:nth-child(2) {
+  top: 15px;
+  animation-delay: 0.7s;
+  animation-duration: 2.2s;
+}
+
+.dsh-reasoning-select__meteors i:nth-child(3) {
+  top: 10px;
+  animation-delay: 1.4s;
+  animation-duration: 3s;
+}
+
+.dsh-reasoning-select__meteors i:nth-child(4) {
+  top: 19px;
+  animation-delay: 2s;
+}
+
+@keyframes reasoning-meteor {
+  0% {
+    opacity: 0;
+    transform: translate(-36px, -4px) rotate(10deg);
+  }
+  12%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(250px, 8px) rotate(10deg);
+  }
+}
+
+@keyframes reasoning-twinkle {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dsh-reasoning-select__fill,
   .dsh-reasoning-select__thumb {
     transition: none;
+  }
+
+  .dsh-reasoning-select__panel--ultra .dsh-reasoning-select__track::before,
+  .dsh-reasoning-select__meteors i {
+    animation: none;
   }
 }

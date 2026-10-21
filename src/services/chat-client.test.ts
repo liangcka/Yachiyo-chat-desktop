@@ -57,6 +57,21 @@ describe("streamChat", () => {
     ).resolves.toEqual({ truncated: false, stopReason: "loop_detected" });
   });
 
+  it("forwards notice events without ending the stream", async () => {
+    serverFetch.mockResolvedValue(
+      sseResponse(
+        'event: notice\ndata: {"code":"REASONING_EFFORT_REJECTED"}\n\n' +
+          'event: delta\ndata: {"text":"好"}\n\n' +
+          'event: done\ndata: {"truncated":false}\n\n',
+      ),
+    );
+    const onNotice = vi.fn();
+    const onDelta = vi.fn();
+    await expect(streamChat(sampleRequest, { fetcher: serverFetch, onDelta, onNotice })).resolves.toEqual({ truncated: false });
+    expect(onNotice).toHaveBeenCalledWith("REASONING_EFFORT_REJECTED");
+    expect(onDelta).toHaveBeenCalledWith("好");
+  });
+
   it("parses Unicode delta records split across arbitrary byte boundaries", async () => {
     serverFetch.mockResolvedValue(
       sseResponse(

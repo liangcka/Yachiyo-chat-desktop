@@ -25,6 +25,12 @@ pub fn encode_client_event(event: &ClientStreamEvent) -> String {
         ClientStreamEvent::Error { code } => {
             format!("event: error\ndata: {}\n\n", json!({ "code": code }))
         }
+        ClientStreamEvent::UpstreamError { message } => {
+            format!("event: error\ndata: {}\n\n", json!({ "code": "PROVIDER_STREAM_ERROR", "message": message }))
+        }
+        ClientStreamEvent::Notice { code } => {
+            format!("event: notice\ndata: {}\n\n", json!({ "code": code }))
+        }
         ClientStreamEvent::ToolCall { id, name, arguments } => {
             format!("event: tool_call\ndata: {}\n\n", json!({ "id": id, "name": name, "arguments": arguments }))
         }

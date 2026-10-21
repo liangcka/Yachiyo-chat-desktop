@@ -1447,3 +1447,127 @@ fn anthropic_merges_screenshot_into_tool_result_turn() {
     assert_eq!(last[0]["type"], "tool_result");
     assert_eq!(last.last().unwrap()["type"], "image");
 }
+
+/// 本地假上游：带 reasoning_effort 的请求返回 400，其余返回一段正常的流式回复；记录每次请求体
+async fn effort_rejecting_upstream() -> (String, Arc<Mutex<Vec<serde_json::Value>>>) {
+    use axum::{body::Body, extract::State, http::StatusCode, response::Response, routing::post, Json, Router};
+    let seen: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+    async fn handle(State(seen): State<Arc<Mutex<Vec<serde_json::Value>>>>, Json(body): Json<serde_json::Value>) -> Response {
+        let rejected = body.get("reasoning_effort").is_some();
+        seen.lock().unwrap().push(body);
+        if rejected {
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::from(r#"{"error":{"message":"Unsupported value: reasoning_effort"}}"#))
+                .unwrap();
+        }
+        let sse = "data: {\"choices\":[{\"delta\":{\"content\":\"好的\"}}]}\n\ndata: [DONE]\n\n";
+        Response::builder().header("content-type", "text/event-stream").body(Body::from(sse)).unwrap()
+    }
+    let app = Router::new().route("/chat/completions", post(handle)).with_state(Arc::clone(&seen));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (format!("http://{addr}"), seen)
+}
+
+#[tokio::test]
+async fn test_rejected_reasoning_effort_retries_without_it_and_notifies() {
+    use yachiyo_desktop_lib::gateway::agent::runtime::{HttpTurnExecutor, NOTICE_REASONING_EFFORT_REJECTED};
+
+    let (base_url, seen) = effort_rejecting_upstream().await;
+    let executor = HttpTurnExecutor {
+        client: reqwest::Client::new(),
+        fallback_client: None,
+        provider_id: ProviderId::Openai,
+        base_url: Some(base_url),
+        api_key: "test-key".to_string(),
+        model: "test-model".to_string(),
+        system_prompt: "system".to_string(),
+        tools_schema: Vec::new(),
+        reasoning_effort: Some("max"),
+        effort_rejected: Arc::new(AtomicBool::new(false)),
+    };
+    let (sink, events) = collector();
+    let messages = vec![AgentMessage::User { text: "hi".to_string(), image_data_url: None }];
+
+    let outcome = executor.execute(&messages, &sink).await.expect("档位被拒后应去掉强度字段重发成功");
+    assert_eq!(outcome.text, "好的");
+    assert!(events.lock().unwrap().iter().any(|event| matches!(event,
+        ClientStreamEvent::Notice { code } if code == NOTICE_REASONING_EFFORT_REJECTED)));
+    {
+        let requests = seen.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0]["reasoning_effort"], "max");
+        assert!(requests[1].get("reasoning_effort").is_none());
+    }
+
+    // 同一运行的后续轮次不再携带被拒的档位，也不再重复提示
+    events.lock().unwrap().clear();
+    executor.execute(&messages, &sink).await.unwrap();
+    assert_eq!(seen.lock().unwrap().len(), 3);
+    assert!(seen.lock().unwrap()[2].get("reasoning_effort").is_none());
+    assert!(events.lock().unwrap().iter().all(|event| !matches!(event, ClientStreamEvent::Notice { .. })));
+}
+
+struct TruncatedExecutor;
+
+impl TurnExecutor for TruncatedExecutor {
+    fn execute(
+        &self,
+        _messages: &[AgentMessage],
+        _sink: &yachiyo_desktop_lib::gateway::agent::runtime::EventSink,
+    ) -> futures::future::BoxFuture<'_, Result<TurnOutcome, String>> {
+        Box::pin(async { Err(yachiyo_desktop_lib::gateway::agent::runtime::OUTPUT_TRUNCATED.to_string()) })
+    }
+}
+
+#[tokio::test]
+async fn test_truncated_turn_ends_the_run_as_truncated() {
+    let (sink, _events) = collector();
+    let outcome = run_agent_loop(
+        vec![AgentMessage::User { text: "hi".to_string(), image_data_url: None }],
+        get_agent_tools_schema(),
+        AgentLoopConfig::default(),
+        &TruncatedExecutor,
+        &ApprovalRegistry::new(),
+        &mut None,
+        &AtomicBool::new(false),
+        &sink,
+        None,
+        &reqwest::Client::new(),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(outcome, LoopOutcome::Truncated { .. }));
+}
+
+#[test]
+fn test_output_limit_stop_detection_per_protocol() {
+    use yachiyo_desktop_lib::gateway::agent::runtime::{is_output_limit_stop, WireProtocol};
+
+    assert!(is_output_limit_stop(WireProtocol::ChatCompletions, r#"{"choices":[{"delta":{},"finish_reason":"length"}]}"#));
+    assert!(!is_output_limit_stop(WireProtocol::ChatCompletions, r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#));
+    assert!(!is_output_limit_stop(WireProtocol::ChatCompletions, r#"{"choices":[{"delta":{"content":"\"length\""}}]}"#));
+    assert!(is_output_limit_stop(WireProtocol::Anthropic, r#"{"type":"message_delta","delta":{"stop_reason":"max_tokens"}}"#));
+    assert!(is_output_limit_stop(WireProtocol::Gemini, r#"{"candidates":[{"finishReason":"MAX_TOKENS"}]}"#));
+    assert!(is_output_limit_stop(
+        WireProtocol::Responses,
+        r#"{"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}"#,
+    ));
+}
+
+#[test]
+fn test_upstream_error_summary_prefers_upstream_message() {
+    use yachiyo_desktop_lib::gateway::agent::runtime::upstream_error_summary;
+
+    assert_eq!(
+        upstream_error_summary(r#"上游返回错误 400 Bad Request: {"error":{"message":"Invalid reasoning_effort","type":"invalid_request_error"}}"#),
+        "上游返回错误 400 Bad Request：Invalid reasoning_effort",
+    );
+    assert_eq!(upstream_error_summary("上游网络错误: connection refused"), "上游网络错误: connection refused");
+    let long = format!("上游返回错误 500: {}", "界".repeat(400));
+    let summary = upstream_error_summary(&long);
+    assert_eq!(summary.chars().count(), 301);
+    assert!(summary.ends_with('…'));
+}

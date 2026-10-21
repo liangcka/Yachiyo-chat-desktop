@@ -119,11 +119,18 @@ describe("chatReducer", () => {
     const failed = chatReducer(withText, {
       type: "failed",
       errorCode: "PROVIDER_ERROR",
+      errorDetail: "上游返回错误 400：Invalid reasoning_effort",
       messageId: assistant.id,
     });
 
-    expect(failed).toMatchObject({ phase: "error", errorCode: "PROVIDER_ERROR" });
+    expect(failed).toMatchObject({
+      phase: "error",
+      errorCode: "PROVIDER_ERROR",
+      errorDetail: "上游返回错误 400：Invalid reasoning_effort",
+    });
     expect(failed.messages.at(-1)).toMatchObject({ text: "彩叶~", status: "failed" });
+    // 重新发送时失败原因随错误码一起清除
+    expect(chatReducer(failed, { type: "send-started", user, assistant }).errorDetail).toBeUndefined();
   });
 
   it("keeps history readable while offline and resets state on conversation switch", () => {

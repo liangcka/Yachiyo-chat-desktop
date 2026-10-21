@@ -18,7 +18,7 @@ const ON_DEMAND_GUIDELINES: [(&str, &str); 9] = [
     ("world_and_product_information", "被问到 Yachiyo Chat 的产品功能、月读空间的技术架构，或排查电脑硬件与系统配置时"),
     ("computer_use_and_artifacts", "需要创建文档、报告、成套代码等独立文件时"),
     ("using_image_search_tool", "需要检索或展示图片时"),
-    ("mcp_and_connectors", "建议或调用外部 MCP 工具与第三方服务时"),
+    ("mcp_and_connectors", "向彩叶推荐或接入第三方应用、连接器时（使用已提供的桌面控制等工具无需读取）"),
 ];
 
 const GUIDELINE_INDEX_HEADER: &str = "以下专项准则的正文没有随本提示词下发。对话命中某条触发场景时，先调用 read_guideline 读取对应准则全文，再行动或回复；本次对话中已读过的准则无需重复读取。";

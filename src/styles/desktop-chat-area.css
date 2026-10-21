@@ -418,3 +418,12 @@
     animation: none !important;
   }
 }
+
+/* 上游返回的失败原因：小号次要文字，长报错可换行 */
+.status-banner__detail {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}

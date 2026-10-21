@@ -79,6 +79,8 @@ pub enum LoopOutcome {
     MaxTurnsReached { usage: TokenUsage },
     /// 检测到没有进展的工具循环或输出复读，提前结束
     LoopDetected { usage: TokenUsage },
+    /// 某一轮输出因输出 token 预算耗尽被截断，提前结束并如实告知，而不是当作正常完成
+    Truncated { usage: TokenUsage },
     Cancelled,
 }
 
@@ -93,6 +95,12 @@ fn accumulate_usage(acc: &mut TokenUsage, inc: &Option<TokenUsage>) {
         }
     }
 }
+
+/// 执行器在本轮输出被输出预算截断时返回的错误标记，循环据此以“已截断”结束
+pub const OUTPUT_TRUNCATED: &str = "agent-output-truncated";
+
+/// 所选思考档位被上游拒绝、已去掉强度字段重发时下发的提示码（与前端 chat-client 的契约）
+pub const NOTICE_REASONING_EFFORT_REJECTED: &str = "REASONING_EFFORT_REJECTED";
 
 /// 取消标志的轮询周期：足够及时地断开上游，又不至于空转占用 CPU
 const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -182,6 +190,7 @@ pub async fn run_agent_loop_ext(
         };
         let outcome = match outcome {
             Err(error) if error == REPETITION_LOOP_DETECTED => return Ok(LoopOutcome::LoopDetected { usage }),
+            Err(error) if error == OUTPUT_TRUNCATED => return Ok(LoopOutcome::Truncated { usage }),
             other => other?,
         };
         accumulate_usage(&mut usage, &outcome.usage);
@@ -419,6 +428,8 @@ pub struct HttpTurnExecutor {
     pub tools_schema: Vec<serde_json::Value>,
     /// 用户所选思考档位的原生取值；None 时沿用各厂商的默认规则
     pub reasoning_effort: Option<&'static str>,
+    /// 上游拒绝过该档位后置位，本次运行（含子 Agent）后续轮次不再携带强度字段
+    pub effort_rejected: Arc<AtomicBool>,
 }
 
 impl TurnExecutor for HttpTurnExecutor {
@@ -439,7 +450,8 @@ impl TurnExecutor for HttpTurnExecutor {
         let model = self.model.clone();
         let system_prompt = self.system_prompt.clone();
         let tools_schema = self.tools_schema.clone();
-        let reasoning_effort = self.reasoning_effort;
+        let reasoning_effort = self.reasoning_effort.filter(|_| !self.effort_rejected.load(Ordering::Relaxed));
+        let effort_rejected = Arc::clone(&self.effort_rejected);
         let messages = messages.to_vec();
         let sink = Arc::clone(sink);
         Box::pin(async move {
@@ -473,9 +485,12 @@ impl TurnExecutor for HttpTurnExecutor {
                 ),
             };
 
-            if let Some(effort) = reasoning_effort {
+            // 保留不带强度字段的原始请求体：档位被上游拒绝时用它重发
+            let mut body_without_effort = reasoning_effort.map(|effort| {
+                let original = body.clone();
                 crate::gateway::providers::reasoning::apply_agent_effort(&mut body, protocol, effort);
-            }
+                original
+            });
 
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert(reqwest::header::CONTENT_TYPE, reqwest::header::HeaderValue::from_static("application/json"));
@@ -549,6 +564,18 @@ impl TurnExecutor for HttpTurnExecutor {
                         continue 'attempts;
                     }
                     let text = res.text().await.unwrap_or_default();
+                    // 档位取值或字段不被该模型接受时去掉强度字段重发，而不是让整个运行失败
+                    if matches!(status.as_u16(), 400 | 422) {
+                        if let Some(original) = body_without_effort.take() {
+                            tracing::warn!("上游拒绝了思考档位参数 ({}): {}，去掉后重发", status, text);
+                            effort_rejected.store(true, Ordering::Relaxed);
+                            body = original;
+                            sink(LoopEmit::Event(ClientStreamEvent::Notice {
+                                code: NOTICE_REASONING_EFFORT_REJECTED.to_string(),
+                            }));
+                            continue 'attempts;
+                        }
+                    }
                     return Err(format!("上游返回错误 {}: {}", status, text));
                 }
 
@@ -564,6 +591,7 @@ impl TurnExecutor for HttpTurnExecutor {
                 let mut byte_stream = res.bytes_stream();
                 // 已向前端下发过内容就不能再整轮重放，否则界面会出现重复的思考与正文
                 let mut emitted = false;
+                let mut truncated = false;
 
                 while let Some(chunk_res) = byte_stream.next().await {
                     let bytes = match chunk_res {
@@ -596,6 +624,7 @@ impl TurnExecutor for HttpTurnExecutor {
                             continue;
                         }
                         native.push(&data_str);
+                        truncated = truncated || is_output_limit_stop(protocol, &data_str);
                         let delta = match protocol {
                             WireProtocol::ChatCompletions => openai_parser.parse(&data_str),
                             WireProtocol::Responses => crate::gateway::providers::openai_responses::extract_openai_responses_delta(&data_str),
@@ -641,10 +670,57 @@ impl TurnExecutor for HttpTurnExecutor {
                     }
                 }
 
+                // 截断的轮次里工具参数可能不完整，不能照常执行，整轮按截断结束
+                if truncated {
+                    return Err(OUTPUT_TRUNCATED.to_string());
+                }
                 let (native, tool_calls) = native.finish(agg)?;
                 return Ok(TurnOutcome { text: full_text, reasoning, tool_calls, usage, native });
             }
         })
+    }
+}
+
+/// 本轮输出是否因输出 token 预算耗尽而被截断；各协议的结束原因字段不同
+pub fn is_output_limit_stop(protocol: WireProtocol, data: &str) -> bool {
+    // 绝大多数事件不含结束原因，先按子串过滤，避免逐条重复解析 JSON
+    let marker = match protocol {
+        WireProtocol::ChatCompletions => "\"length\"",
+        WireProtocol::Anthropic => "\"max_tokens\"",
+        WireProtocol::Gemini => "\"MAX_TOKENS\"",
+        WireProtocol::Responses => "max_output_tokens",
+    };
+    if !data.contains(marker) {
+        return false;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(data) else { return false };
+    let field = |pointer: &str| value.pointer(pointer).and_then(|v| v.as_str());
+    match protocol {
+        WireProtocol::ChatCompletions => field("/choices/0/finish_reason") == Some("length"),
+        WireProtocol::Anthropic => field("/delta/stop_reason") == Some("max_tokens"),
+        WireProtocol::Gemini => field("/candidates/0/finishReason") == Some("MAX_TOKENS"),
+        WireProtocol::Responses => field("/response/incomplete_details/reason") == Some("max_output_tokens"),
+    }
+}
+
+/// 把执行器错误整理成给用户看的一行说明：优先取上游 JSON 里的 error.message，限制长度
+pub fn upstream_error_summary(error: &str) -> String {
+    const LIMIT: usize = 300;
+    let readable = error
+        .find('{')
+        .and_then(|start| {
+            let body: serde_json::Value = serde_json::from_str(&error[start..]).ok()?;
+            let message = body
+                .pointer("/error/message")
+                .or_else(|| body.get("message"))
+                .or_else(|| body.get("error"))
+                .and_then(|value| value.as_str())?;
+            Some(format!("{}：{}", error[..start].trim_end_matches([':', ' ']), message))
+        })
+        .unwrap_or_else(|| error.trim().to_string());
+    match readable.char_indices().nth(LIMIT) {
+        Some((cut, _)) => format!("{}…", &readable[..cut]),
+        None => readable,
     }
 }
 
@@ -861,6 +937,7 @@ pub fn run_agent_chat_stream(
             system_prompt,
             tools_schema,
             reasoning_effort,
+            effort_rejected: Arc::new(AtomicBool::new(false)),
         };
 
         let agent_config = request.agent.as_ref()
@@ -922,6 +999,9 @@ pub fn run_agent_chat_stream(
                 LoopOutcome::MaxTurnsReached { usage } => {
                     yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: true, usage: Some(usage), reason: None }));
                 }
+                LoopOutcome::Truncated { usage } => {
+                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: true, usage: Some(usage), reason: None }));
+                }
                 LoopOutcome::LoopDetected { usage } => {
                     yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: false, usage: Some(usage), reason: Some(DONE_REASON_LOOP_DETECTED.to_string()) }));
                 }
@@ -931,7 +1011,7 @@ pub fn run_agent_chat_stream(
             },
             Ok(Err(e)) => {
                 tracing::error!("Agent loop error: {}", e);
-                yield Ok(encode_client_event(&ClientStreamEvent::Error { code: "PROVIDER_STREAM_ERROR".to_string() }));
+                yield Ok(encode_client_event(&ClientStreamEvent::UpstreamError { message: upstream_error_summary(&e) }));
             }
             Err(e) => {
                 tracing::error!("Agent loop task join error: {}", e);

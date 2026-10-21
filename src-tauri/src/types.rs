@@ -174,6 +174,12 @@ pub enum ClientStreamEvent {
     },
     #[serde(rename = "error")]
     Error { code: String },
+    /// 上游模型接口返回的错误：编码为带 message 的 error 事件，界面据此说明失败原因而不是笼统地“连不上”
+    #[serde(rename = "upstream_error")]
+    UpstreamError { message: String },
+    /// 不中断运行的提示（如所选思考档位被模型拒绝、已按默认档位继续），code 由前端本地化
+    #[serde(rename = "notice")]
+    Notice { code: String },
     #[serde(rename = "tool_call")]
     ToolCall {
         id: String,

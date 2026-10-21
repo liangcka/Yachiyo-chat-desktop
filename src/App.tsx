@@ -144,6 +144,7 @@ export function App({ services, autoAiTitle }: AppProps) {
   const backgroundRunToastRef = useRef<(conversationId: string, status: "complete" | "failed" | "stopped") => void>(
     () => undefined,
   );
+  const noticeToastRef = useRef<(code: string) => void>(() => undefined);
 
   const controller = useChatController({
     repository: activeServices.repository,
@@ -157,6 +158,7 @@ export function App({ services, autoAiTitle }: AppProps) {
       void refreshHistoryRef.current();
     },
     onBackgroundRunFinished: (conversationId, status) => backgroundRunToastRef.current(conversationId, status),
+    onNotice: (code) => noticeToastRef.current(code),
   });
   const setControllerOnline = controller.setOnline;
   const copy = copyFor(controller.locale);
@@ -307,6 +309,18 @@ export function App({ services, autoAiTitle }: AppProps) {
       }
     };
   }, [controller.locale, copy.newChat, showToast]);
+
+  useEffect(() => {
+    noticeToastRef.current = (code) => {
+      if (code !== "REASONING_EFFORT_REJECTED") return;
+      showToast(
+        controller.locale === "ja-JP"
+          ? "このモデルは選択した推論の強さに対応していないため、既定の強さで続行しました"
+          : "当前模型不接受所选推理强度，已按默认档位继续",
+        "info",
+      );
+    };
+  }, [controller.locale, showToast]);
 
   const refreshLlm = useCallback(async () => {
     try {

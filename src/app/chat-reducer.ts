@@ -9,6 +9,8 @@ export interface ChatState {
   locale: Locale;
   pendingImage?: StoredImage;
   errorCode?: string;
+  /** 失败时上游给出的原因（如模型接口返回的错误信息），横幅据此说明失败原因而不是笼统地提示连不上 */
+  errorDetail?: string;
   /** 跨会话共享的用户长期记忆（压缩时从对话中提炼，新对话也可见） */
   userMemory?: string;
   /**
@@ -43,7 +45,7 @@ export type ChatAction =
   | { type: "sources-received"; messageId: string; sources: ReadonlyArray<ChatSource> }
   | { type: "completed"; messageId: string; usage?: TokenUsage; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment>; contentStartedAtMs?: number; loopStopped?: boolean }
   | { type: "stopped"; messageId: string; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment> }
-  | { type: "failed"; messageId: string; errorCode: string; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment> }
+  | { type: "failed"; messageId: string; errorCode: string; errorDetail?: string; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment> }
   | { type: "connectivity-changed"; online: boolean }
   | {
       type: "conversation-selected";
@@ -175,11 +177,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         hasMoreHistory: action.hasMoreHistory,
       };
     case "load-failed":
-      return { ...state, errorCode: action.errorCode, phase: "error" };
+      return { ...state, errorCode: action.errorCode, errorDetail: undefined, phase: "error" };
     case "send-started":
       return {
         ...state,
         errorCode: undefined,
+        errorDetail: undefined,
         messages: [...state.messages, ...(action.user === undefined ? [] : [action.user]), action.assistant],
         pendingImage: undefined,
         pendingPermission: undefined,
@@ -240,6 +243,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return {
         ...state,
         errorCode: action.errorCode,
+        errorDetail: action.errorDetail,
         // 运行失败即终态，权限审批不可能再有回填，卡片随之失效须清除
         pendingPermission: undefined,
         messages: updateMessage(state.messages, action.messageId, (message) => ({
@@ -263,6 +267,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return {
         activeConversation: action.conversation,
         errorCode: undefined,
+        errorDetail: undefined,
         locale: action.conversation.locale,
         messages: action.messages,
         pendingImage: undefined,
@@ -302,10 +307,11 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return {
         ...state,
         errorCode: undefined,
+        errorDetail: undefined,
         phase: state.phase === "error" || state.phase === "compressing" ? "idle" : state.phase,
       };
     case "compress-started":
-      return { ...state, phase: "compressing", errorCode: undefined };
+      return { ...state, phase: "compressing", errorCode: undefined, errorDetail: undefined };
     case "context-compressed":
       return {
         ...state,
@@ -331,6 +337,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return {
         ...state,
         errorCode: undefined,
+        errorDetail: undefined,
         messages: action.messages,
         phase: state.phase === "offline" ? "offline" : "idle",
         streaming: undefined,
