@@ -36,9 +36,11 @@ describe("ReasoningEffortSelect", () => {
     expect(slider).toHaveAttribute("aria-valuetext", "中");
     expect(screen.getByRole("button", { name: "恢复模型默认档位" })).toBeDisabled();
 
+    expect(document.querySelector(".dsh-reasoning-select__meteors")).toBeNull();
     fireEvent.keyDown(slider, { key: "End" });
     expect(slider).toHaveAttribute("aria-valuetext", "Ultra");
     expect(screen.getByRole("dialog")).toHaveClass("dsh-reasoning-select__panel--ultra");
+    expect(document.querySelectorAll(".dsh-reasoning-select__meteors i")).toHaveLength(4);
     expect(readReasoningEffort(model)).toBe("max");
     expect(screen.getByRole("button", { name: /推理强度 · Ultra/ })).toBeInTheDocument();
 

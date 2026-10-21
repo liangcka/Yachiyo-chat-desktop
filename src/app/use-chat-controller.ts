@@ -100,6 +100,8 @@ export interface ChatControllerOptions {
   onConversationUpdated?: () => void;
   /** 非当前会话的运行结束时通知（后台任务完成提醒） */
   onBackgroundRunFinished?: (conversationId: string, status: "complete" | "failed" | "stopped") => void;
+  /** 运行中网关下发的提示码（如 REASONING_EFFORT_REJECTED），由界面本地化后提示 */
+  onNotice?: (code: string) => void;
   now?: () => number;
   id?: () => string;
 }
@@ -281,6 +283,10 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   useEffect(() => {
     onConversationUpdatedRef.current = options.onConversationUpdated;
   }, [options.onConversationUpdated]);
+  const onNoticeRef = useRef(options.onNotice);
+  useEffect(() => {
+    onNoticeRef.current = options.onNotice;
+  }, [options.onNotice]);
   const onBackgroundRunFinishedRef = useRef(options.onBackgroundRunFinished);
   useEffect(() => {
     onBackgroundRunFinishedRef.current = options.onBackgroundRunFinished;
@@ -714,6 +720,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       truncated?: boolean,
       usage?: TokenUsage,
       loopStopped?: boolean,
+      errorDetail?: string,
     ): Promise<void> => {
       if (run.finishing !== undefined) return run.finishing;
       run.finishing = (async () => {
@@ -763,6 +770,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           } else {
             emit({
               errorCode: errorCode ?? "SERVICE_UNAVAILABLE",
+              ...(errorDetail !== undefined ? { errorDetail } : {}),
               messageId: run.assistant.id,
               type: "failed",
               latencyMs,
@@ -983,6 +991,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
               }
               schedulePartialPersistence();
             },
+            onNotice(code) {
+              if (isRunAlive(run)) onNoticeRef.current?.(code);
+            },
             onThought(text) {
               if (!isRunAlive(run) || text.length === 0) return;
               const start = run.thought?.length ?? 0;
@@ -1097,8 +1108,10 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             : run.controller.signal.aborted
               ? "ABORTED"
               : "SERVICE_UNAVAILABLE";
+        // 网关透传的上游错误原因只随 PROVIDER_ERROR 展示，其余错误码已有专门文案
+        const detail = error instanceof ChatClientError && error.code === "PROVIDER_ERROR" ? error.detail : undefined;
         if (code === "ABORTED") await finishRun(run, "stopped");
-        else await finishRun(run, "failed", code);
+        else await finishRun(run, "failed", code, undefined, undefined, undefined, detail);
       }
     },
     [emit, finishRun, isForeground, isRunAlive, makeRequestMessages, nextTimestamp, queueMessage, syncRunActivity],

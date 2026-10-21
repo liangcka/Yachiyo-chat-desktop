@@ -103,6 +103,8 @@ export interface StreamChatOptions {
   onDelta: (text: string) => void;
   /** 深度思考/思维链流式增量回调 */
   onThought?: (text: string) => void;
+  /** 不中断运行的提示（如所选思考档位被模型拒绝、已按默认档位继续） */
+  onNotice?: (code: string) => void;
   /** sources 事件（先于首个 delta 到达）合法时回调一次 */
   onSources?: (sources: ChatSource[]) => void;
   /** Agent 工具调用下发（载荷校验失败视为流损坏） */
@@ -319,6 +321,8 @@ export async function streamChat(
           ...(usage !== undefined ? { usage } : {}),
           ...(payload.reason === "loop_detected" ? { stopReason: "loop_detected" as const } : {}),
         };
+      } else if (fields.event === "notice" && typeof payload.code === "string") {
+        options.onNotice?.(payload.code);
       } else if (fields.event === "error" && typeof payload.code === "string") {
         throw streamErrorEvent(payload.code, typeof payload.message === "string" ? payload.message : undefined);
       } else {

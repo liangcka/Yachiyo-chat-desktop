@@ -441,7 +441,10 @@ export function DesktopChatArea({
       controller.errorCode !== "DAILY_QUOTA_EXCEEDED" &&
       controller.errorCode !== "SESSION_REQUIRED" ? (
         <div className="status-banner status-banner--error">
-          <span>{controllerErrorMessage(controller.errorCode ?? "", copy)}</span>
+          <span>
+            {controllerErrorMessage(controller.errorCode ?? "", copy)}
+            {controller.errorDetail !== undefined ? <span className="status-banner__detail">{controller.errorDetail}</span> : null}
+          </span>
           {isRetryableChatErrorCode(controller.errorCode) ? (
             <button onClick={() => void controller.retry()} type="button">
               {copy.retry}

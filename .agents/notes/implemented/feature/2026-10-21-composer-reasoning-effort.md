@@ -13,6 +13,8 @@ Status: implemented
 - 前端经 `POST /api/reasoning/levels` 查询档位渲染滑杆；不支持时按钮禁用并提示“当前模型不支持调节推理强度”。选择按 `厂商|端点|型号` 记在 localStorage，未选择或重置时请求不带 `reasoningEffort`，各厂商默认规则保持不变。
 - 网关收到 `reasoningEffort` 后用 `native_effort` 换算原生取值（模型不提供该档时忽略），`HttpTurnExecutor` 构造请求体后由 `apply_agent_effort` 写入：Chat Completions 的 `reasoning_effort`、Responses 的 `reasoning.effort`、Anthropic 的 `output_config.effort`、Gemini 的 `thinkingConfig.thinkingLevel`，覆盖厂商规则给出的默认档。子 Agent 继承同一档位。
 - 选择器只在桌面端显示：Web 端 Functions 不识别该字段。
+- 能力表之外的兜底：上游以 400 / 422 拒绝档位时去掉强度字段重发并提示，详见 `bug-fix/2026-10-21-agent-silent-stop-and-upstream-errors.md`。
+- Ultra 档的轨道带星点闪烁与流星划过动画，只动 `opacity` / `transform`，仅在弹层打开时运行，减少动效偏好下关闭。
 
 ## Alternatives considered
 

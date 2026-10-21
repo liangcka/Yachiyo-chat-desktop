@@ -186,6 +186,14 @@ export function ReasoningEffortSelect({ model, onOpenModelSettings, disabled = f
           >
             {/* 填充从轨道左端一直盖到拇指右缘；首档不填充 */}
             <span className="dsh-reasoning-select__fill" style={{ width: progress === 0 ? 0 : `calc(28px + (100% - 28px) * ${progress / 100})` }} />
+            {ultra ? (
+              <span className="dsh-reasoning-select__meteors" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+                <i />
+              </span>
+            ) : null}
             <span ref={railRef} className="dsh-reasoning-select__rail" aria-hidden="true">
               {levels.map((level, index) => (
                 <span
