@@ -1243,6 +1243,66 @@ async fn test_stream_repetition_ends_the_run_as_loop_detected() {
     assert!(matches!(outcome, LoopOutcome::LoopDetected { .. }));
 }
 
+/// 模拟一轮迟迟不结束的上游请求（长时间思考或超长输出），记录其 Future 是否被丢弃
+struct HangingExecutor {
+    dropped: Arc<AtomicBool>,
+}
+
+struct DropFlag(Arc<AtomicBool>);
+
+impl Drop for DropFlag {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl TurnExecutor for HangingExecutor {
+    fn execute(
+        &self,
+        _messages: &[AgentMessage],
+        _sink: &yachiyo_desktop_lib::gateway::agent::runtime::EventSink,
+    ) -> futures::future::BoxFuture<'_, Result<TurnOutcome, String>> {
+        let flag = DropFlag(Arc::clone(&self.dropped));
+        Box::pin(async move {
+            let _flag = flag;
+            futures::future::pending::<Result<TurnOutcome, String>>().await
+        })
+    }
+}
+
+#[tokio::test]
+async fn test_cancel_drops_in_flight_upstream_turn() {
+    let (sink, _events) = collector();
+    let dropped = Arc::new(AtomicBool::new(false));
+    let executor = HangingExecutor { dropped: Arc::clone(&dropped) };
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let trigger = Arc::clone(&cancelled);
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        trigger.store(true, std::sync::atomic::Ordering::SeqCst);
+    });
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        run_agent_loop(
+            vec![AgentMessage::User { text: "hi".to_string(), image_data_url: None }],
+            get_agent_tools_schema(),
+            AgentLoopConfig::default(),
+            &executor,
+            &ApprovalRegistry::new(),
+            &mut None,
+            &cancelled,
+            &sink,
+            None,
+            &reqwest::Client::new(),
+        ),
+    )
+    .await
+    .expect("取消后应立即结束，而不是等上游这一轮跑完")
+    .unwrap();
+    assert!(matches!(outcome, LoopOutcome::Cancelled));
+    assert!(dropped.load(std::sync::atomic::Ordering::SeqCst), "进行中的上游请求 Future 必须被丢弃以断开连接");
+}
+
 #[test]
 fn test_tool_loop_detector_catches_short_cycles_only() {
     use yachiyo_desktop_lib::gateway::agent::loop_guard::{ToolLoopDetector, ToolLoopVerdict};

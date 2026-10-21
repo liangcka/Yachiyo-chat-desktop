@@ -94,6 +94,15 @@ fn accumulate_usage(acc: &mut TokenUsage, inc: &Option<TokenUsage>) {
     }
 }
 
+/// 取消标志的轮询周期：足够及时地断开上游，又不至于空转占用 CPU
+const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+async fn wait_cancelled(cancelled: &AtomicBool) {
+    while !cancelled.load(Ordering::Relaxed) {
+        tokio::time::sleep(CANCEL_POLL_INTERVAL).await;
+    }
+}
+
 /// 工具被用户拒绝时回填给模型的说明
 const DENIED_TOOL_RESULT: &str = "用户拒绝了本次操作。不要立即重试同一动作；请改用其他方案，或向用户说明需要该操作的理由。";
 
@@ -165,7 +174,13 @@ pub async fn run_agent_loop_ext(
             DEFAULT_PRUNE_HEAD_CHARS,
             DEFAULT_PRUNE_TAIL_CHARS,
         );
-        let outcome = match executor.execute(&pruned_messages, sink).await {
+        // 用户停止时丢弃进行中的上游请求 Future 即断开 HTTP 连接，厂商随之停止生成与计费，
+        // 而不是等这一轮（可能是长时间思考或数万 token 的输出）完整跑完
+        let outcome = tokio::select! {
+            outcome = executor.execute(&pruned_messages, sink) => outcome,
+            _ = wait_cancelled(cancelled) => return Ok(LoopOutcome::Cancelled),
+        };
+        let outcome = match outcome {
             Err(error) if error == REPETITION_LOOP_DETECTED => return Ok(LoopOutcome::LoopDetected { usage }),
             other => other?,
         };
