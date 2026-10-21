@@ -245,9 +245,53 @@ fn test_agent_system_prompt_is_cache_friendly() {
     assert!(!zh.contains("2026-08-30"), "系统提示词不应再带时间戳");
     assert!(!zh.contains("# 完整工具定义与交互契约"));
     assert!(!zh.contains("weather_fetch"));
-    assert!(zh.contains("# 网络检索行为规范"));
-    assert!(zh.contains("# 引用标记与溯源指令"));
     assert_eq!(build_time_note(ChatLocale::ZhCn, "2026-10-20 08:00:00 星期二"), "【当前时间：2026-10-20 08:00:00 星期二】\n");
+}
+
+#[test]
+fn test_agent_system_prompt_keeps_core_and_indexes_on_demand_guidelines() {
+    use yachiyo_desktop_lib::gateway::prompt::{build_agent_system_prompt, build_system_prompt};
+
+    let zh = build_agent_system_prompt(ChatLocale::ZhCn, None, false, true);
+    for core in ["# 角色设定", "# 拒绝处理与底线防守规范", "# 严苛未成年人保护铁律", "# 全局限制与最高防线"] {
+        assert!(zh.contains(core), "常驻章节缺失：{core}");
+    }
+    for on_demand in ["# 网络检索行为规范", "# 用户身心健康与认知审慎守则", "# 引用标记与溯源指令"] {
+        assert!(!zh.contains(on_demand), "按需章节不应常驻：{on_demand}");
+    }
+    assert!(zh.contains("<guidelines>"));
+    assert!(zh.contains("- search_instructions（网络检索行为规范）："));
+    assert!(zh.contains("- user_wellbeing（用户身心健康与认知审慎守则）："));
+    // 索引属于静态前缀，必须落在 Anthropic 缓存断点之前
+    assert!(zh.find("</guidelines>").unwrap() < zh.find("\n\n<runtime>").unwrap());
+
+    // 没有工具循环的纯聊天路径无法按需读取，仍发送完整人设
+    let plain = build_system_prompt(ChatLocale::ZhCn, None, false, Some("2026-10-21"));
+    assert!(plain.contains("# 网络检索行为规范"));
+    assert!(!plain.contains("<guidelines>"));
+    assert!(!plain.contains("# 完整工具定义与交互契约"));
+}
+
+#[test]
+fn test_read_guideline_returns_section_and_lists_names_on_unknown() {
+    use yachiyo_desktop_lib::gateway::prompt::{read_guideline, read_guideline_schema};
+
+    let search = read_guideline("search_instructions").unwrap();
+    assert!(search.starts_with("# 网络检索行为规范 (search_instructions)"));
+    assert!(search.contains("未识别实体铁律"));
+    assert!(!search.contains("# 图像检索"));
+    assert!(!search.ends_with("---"));
+
+    let error = read_guideline("refusal_handling").unwrap_err();
+    assert!(error.contains("search_instructions"));
+
+    let schema = read_guideline_schema().expect("角色提示词含按需章节时下发工具");
+    assert_eq!(schema["function"]["name"], "read_guideline");
+    let names = schema["function"]["parameters"]["properties"]["name"]["enum"].as_array().unwrap();
+    assert_eq!(names.len(), 9);
+    for name in names {
+        assert!(read_guideline(name.as_str().unwrap()).is_ok());
+    }
 }
 
 #[test]

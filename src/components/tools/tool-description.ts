@@ -29,6 +29,7 @@ function extractDomain(rawUrl: string): string {
  * - git_diff → "查看 Git 差异" / "Git 差分を確認"
  * - todo_write → "更新任务清单" / "タスク一覧を更新"
  * - task → "子 Agent · <简称>" / "サブエージェント · <简称>"
+ * - read_guideline → "查阅准则 <id>" / "ガイドライン <id> を確認"
  * - mcp__<服务>__<操作> → "<服务> · <操作>"
  */
 export function formatToolDescription(
@@ -125,6 +126,14 @@ export function formatToolDescription(
       const label = typeof args?.description === "string" ? args.description.trim() : "";
       const prefix = isJa ? "サブエージェント" : "子 Agent";
       return label ? `${prefix} · ${label}` : prefix;
+    }
+
+    case "read_guideline": {
+      const name = typeof args?.name === "string" ? args.name : "";
+      if (name) {
+        return isJa ? `ガイドライン ${name} を確認` : `查阅准则 ${name}`;
+      }
+      return isJa ? "ガイドラインを確認" : "查阅准则";
     }
 
     default:

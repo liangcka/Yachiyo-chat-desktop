@@ -51,6 +51,11 @@ describe("formatToolDescription", () => {
       expect(formatToolDescription("task", {}, "ja-JP")).toBe("サブエージェント");
     });
 
+    it("正确映射 read_guideline 并展示准则 id", () => {
+      expect(formatToolDescription("read_guideline", { name: "search_instructions" }, "zh-CN")).toBe("查阅准则 search_instructions");
+      expect(formatToolDescription("read_guideline", {}, "ja-JP")).toBe("ガイドラインを確認");
+    });
+
     it("正确映射 git_status 和 git_diff", () => {
       expect(formatToolDescription("git_status", {}, "zh-CN")).toBe("查看 Git 状态");
       expect(formatToolDescription("git_diff", {}, "zh-CN")).toBe("查看 Git 差异");
