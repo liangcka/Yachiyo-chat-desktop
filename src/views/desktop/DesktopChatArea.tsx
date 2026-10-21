@@ -16,6 +16,7 @@ import { ConversationView } from "../../components/ConversationView";
 import { ModelSelect } from "../../components/desktop/ModelSelect";
 import { ModeSelect } from "../../components/desktop/ModeSelect";
 import { PlanStrip } from "../../components/desktop/PlanStrip";
+import { ReasoningEffortSelect } from "../../components/desktop/ReasoningEffortSelect";
 import { ProjectSelector } from "../../components/desktop/ProjectSelector";
 import { PermissionCard } from "../../components/tools/PermissionCard";
 import { appendAttachments, COMPOSER_CHARACTER_LIMIT, readTextAttachment, type TextAttachment } from "../../features/file-reference/attachments";
@@ -85,6 +86,7 @@ export function DesktopChatArea({
   const isBlank = controller.messages.length === 0 && !controller.activeConversation?.summary;
   // 桌面端没有服务端兜底模型：未配置时直接引导到设置，而不是发出必然失败的请求
   const needsModelSetup = isDesktopApp() && llmActiveProvider === undefined;
+  const activeLlmEntry = llmEntries.find((entry) => entry.provider === llmActiveProvider);
 
   const latestTodos = useMemo(
     () => extractLatestTodos(controller.messages),
@@ -684,6 +686,19 @@ export function DesktopChatArea({
           </div>
 
           <div className="dsh-composer-card__tools-right">
+            {/* 思考档位只由桌面网关映射到各厂商参数，Web 端不显示 */}
+            {isDesktopApp() && activeLlmEntry !== undefined ? (
+              <ReasoningEffortSelect
+                model={{
+                  provider: activeLlmEntry.provider,
+                  model: activeLlmEntry.model,
+                  ...(activeLlmEntry.baseUrl !== undefined ? { baseUrl: activeLlmEntry.baseUrl } : {}),
+                }}
+                onOpenModelSettings={() => onOpenSettings?.("models")}
+                disabled={composerUnavailable}
+              />
+            ) : null}
+
             {/* 上下文用量指示器 */}
             <ContextMeter
               messages={controller.messages}

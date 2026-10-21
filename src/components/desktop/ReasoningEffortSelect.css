@@ -1,0 +1,210 @@
+.dsh-reasoning-select {
+  position: relative;
+}
+
+.dsh-reasoning-select__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--interactive-hover);
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dsh-reasoning-select__trigger:hover:not(:disabled),
+.dsh-reasoning-select__trigger--active {
+  background: var(--interactive-active);
+  color: var(--text-primary);
+}
+
+.dsh-reasoning-select__trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.dsh-reasoning-select__chevron {
+  flex-shrink: 0;
+}
+
+.dsh-reasoning-select__panel {
+  --reasoning-accent: var(--dsw-alias-state-business-primary, #4b8bf5);
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 100;
+  width: 260px;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--dsw-alias-border-inverted);
+  border-radius: 16px;
+  background: var(--dsw-specific-menu);
+  box-shadow: var(--dsw-shadow-lv3);
+}
+
+.dsh-reasoning-select__panel--ultra {
+  --reasoning-accent: #8b5cf6;
+}
+
+.dsh-reasoning-select__header {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 12px;
+}
+
+.dsh-reasoning-select__level {
+  color: var(--reasoning-accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dsh-reasoning-select__model {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 180px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.dsh-reasoning-select__model span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dsh-reasoning-select__model:hover {
+  color: var(--text-primary);
+}
+
+.dsh-reasoning-select__reset {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.dsh-reasoning-select__reset:hover:not(:disabled) {
+  background: var(--interactive-hover);
+  color: var(--text-primary);
+}
+
+.dsh-reasoning-select__reset:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+/* 滑杆：圆点与拇指放在两端各内缩一个拇指半径的定位层里，left 百分比即档位位置 */
+.dsh-reasoning-select__track {
+  position: relative;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--interactive-active);
+  cursor: pointer;
+  touch-action: none;
+  outline: none;
+  overflow: hidden;
+}
+
+.dsh-reasoning-select__track:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--reasoning-accent) 45%, transparent);
+}
+
+.dsh-reasoning-select__fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: inherit;
+  background: var(--reasoning-accent);
+  transition: width 0.15s ease;
+}
+
+.dsh-reasoning-select__rail {
+  position: absolute;
+  inset: 0 14px;
+}
+
+.dsh-reasoning-select__stop,
+.dsh-reasoning-select__thumb {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.dsh-reasoning-select__stop {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  opacity: 0.7;
+}
+
+.dsh-reasoning-select__stop--passed {
+  background: #ffffff;
+  opacity: 0.6;
+}
+
+.dsh-reasoning-select__thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  transition: left 0.15s ease;
+}
+
+/* Ultra：整条轨道换成紫色渐变星空 */
+.dsh-reasoning-select__panel--ultra .dsh-reasoning-select__track {
+  background: linear-gradient(90deg, #3b3fd8 0%, #7c5cf5 55%, #b79cfb 100%);
+}
+
+.dsh-reasoning-select__panel--ultra .dsh-reasoning-select__fill {
+  background: transparent;
+}
+
+.dsh-reasoning-select__panel--ultra .dsh-reasoning-select__track::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-image:
+    radial-gradient(1px 1px at 12% 40%, rgba(255, 255, 255, 0.9), transparent),
+    radial-gradient(1.5px 1.5px at 24% 70%, rgba(255, 255, 255, 0.8), transparent),
+    radial-gradient(1px 1px at 38% 30%, rgba(255, 255, 255, 0.9), transparent),
+    radial-gradient(1.5px 1.5px at 52% 62%, rgba(255, 255, 255, 0.7), transparent),
+    radial-gradient(1px 1px at 66% 36%, rgba(255, 255, 255, 0.9), transparent),
+    radial-gradient(1.5px 1.5px at 78% 68%, rgba(255, 255, 255, 0.8), transparent);
+  pointer-events: none;
+}
+
+.dsh-reasoning-select__panel--ultra .dsh-reasoning-select__stop {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dsh-reasoning-select__fill,
+  .dsh-reasoning-select__thumb {
+    transition: none;
+  }
+}

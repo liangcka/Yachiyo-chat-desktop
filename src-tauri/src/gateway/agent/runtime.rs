@@ -417,6 +417,8 @@ pub struct HttpTurnExecutor {
     pub model: String,
     pub system_prompt: String,
     pub tools_schema: Vec<serde_json::Value>,
+    /// 用户所选思考档位的原生取值；None 时沿用各厂商的默认规则
+    pub reasoning_effort: Option<&'static str>,
 }
 
 impl TurnExecutor for HttpTurnExecutor {
@@ -437,13 +439,14 @@ impl TurnExecutor for HttpTurnExecutor {
         let model = self.model.clone();
         let system_prompt = self.system_prompt.clone();
         let tools_schema = self.tools_schema.clone();
+        let reasoning_effort = self.reasoning_effort;
         let messages = messages.to_vec();
         let sink = Arc::clone(sink);
         Box::pin(async move {
             let config = get_provider_config(provider_id);
             let protocol = WireProtocol::resolve(provider_id, base_url.as_deref());
 
-            let (url, body) = match protocol {
+            let (url, mut body) = match protocol {
                 WireProtocol::ChatCompletions => (
                     crate::gateway::providers::openai_compat::resolve_chat_endpoint(base_url.as_deref(), config.endpoint),
                     crate::gateway::providers::openai_compat::build_openai_agent_body(
@@ -469,6 +472,10 @@ impl TurnExecutor for HttpTurnExecutor {
                     ),
                 ),
             };
+
+            if let Some(effort) = reasoning_effort {
+                crate::gateway::providers::reasoning::apply_agent_effort(&mut body, protocol, effort);
+            }
 
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert(reqwest::header::CONTENT_TYPE, reqwest::header::HeaderValue::from_static("application/json"));
@@ -841,6 +848,9 @@ pub fn run_agent_chat_stream(
                 .is_some_and(|name| name.starts_with(crate::computer::TOOL_PREFIX))
         });
         let system_prompt = build_agent_system_prompt(request.locale, root.as_deref(), desktop_control, web_search);
+        let reasoning_effort = request.reasoning_effort.and_then(|level| {
+            crate::gateway::providers::reasoning::native_effort(provider_id, base_url.as_deref(), &model, level)
+        });
         let executor = HttpTurnExecutor {
             client: client.clone(),
             fallback_client,
@@ -850,6 +860,7 @@ pub fn run_agent_chat_stream(
             model,
             system_prompt,
             tools_schema,
+            reasoning_effort,
         };
 
         let agent_config = request.agent.as_ref()

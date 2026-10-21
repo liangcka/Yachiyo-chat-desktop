@@ -9,6 +9,7 @@ import { desktopFileReader, expandFileReferences, hasFileReferences } from "../f
 
 import { isDesktopApp } from "../services/app-platform";
 import { projectManager } from "../services/project-manager";
+import { readReasoningEffort } from "../services/reasoning-effort";
 import {
   ChatClientError,
   isRetryableChatErrorCode,
@@ -934,6 +935,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         // 避免空气泡被静默隐藏
         const currentTime = formatClientTimestamp(servicesRef.current.now(), locale);
         const conversationId = run.assistant.conversationId;
+        // 思考档位只由桌面网关映射到各厂商参数；Web 端 Functions 不识别该字段
+        const reasoningEffort = isDesktopApp() && activeConfig !== undefined ? readReasoningEffort(activeConfig) : undefined;
         const result = await servicesRef.current.streamChat(
           {
             locale,
@@ -953,6 +956,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             ...(webSearchEnabledRef.current === true && webSearchSmartRef.current === true
               ? { smartSearch: true }
               : {}),
+            ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
             ...(isDesktopApp()
               ? {
                   agent: {

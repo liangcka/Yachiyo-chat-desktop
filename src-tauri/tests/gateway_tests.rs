@@ -763,3 +763,121 @@ async fn test_deepseek_balance_requires_a_native_endpoint_key() {
     let body: serde_json::Value = signed.json().await.expect("problem json");
     assert_eq!(body, serde_json::json!({ "error": { "code": "API_KEY_MISSING" } }));
 }
+
+#[test]
+fn test_reasoning_support_lists_only_verified_levels() {
+    use yachiyo_desktop_lib::gateway::providers::reasoning::{native_effort, reasoning_support};
+    use yachiyo_desktop_lib::types::{ProviderId, ReasoningLevel};
+
+    let levels = |provider, base_url, model| {
+        reasoning_support(provider, base_url, model).map(|support| {
+            (support.levels.iter().map(|(level, _)| *level).collect::<Vec<_>>(), support.default)
+        })
+    };
+    let five = vec![ReasoningLevel::Low, ReasoningLevel::Medium, ReasoningLevel::High, ReasoningLevel::Xhigh, ReasoningLevel::Max];
+
+    assert_eq!(levels(ProviderId::Claude, None, "claude-opus-5-5"), Some((five.clone(), ReasoningLevel::Medium)));
+    assert_eq!(levels(ProviderId::Claude, None, "claude-sonnet-5-5"), Some((five.clone(), ReasoningLevel::High)));
+    assert_eq!(native_effort(ProviderId::Claude, None, "claude-sonnet-4-6", ReasoningLevel::Xhigh), None);
+    assert_eq!(levels(ProviderId::Claude, None, "claude-haiku-4-5"), None, "Haiku 4.5 不接受 effort");
+    assert_eq!(levels(ProviderId::Openai, None, "gpt-6-astra"), Some((five, ReasoningLevel::Medium)));
+    assert_eq!(levels(ProviderId::Openai, None, "gpt-4.1"), None);
+    assert_eq!(native_effort(ProviderId::Deepseek, None, "deepseek-v4-pro", ReasoningLevel::Max), Some("max"));
+    assert_eq!(native_effort(ProviderId::Deepseek, None, "deepseek-v4-pro", ReasoningLevel::Medium), None);
+    assert_eq!(
+        native_effort(ProviderId::Openai, Some("https://api.moonshot.cn/v1"), "kimi-k3", ReasoningLevel::High),
+        Some("high"),
+    );
+    assert_eq!(levels(ProviderId::Openai, Some("https://api.moonshot.cn/v1"), "kimi-k2.6"), None);
+    assert_eq!(levels(ProviderId::Openai, Some("https://api.xiaomimimo.com/v1"), "mimo-v2.6-flash"), None);
+    assert_eq!(native_effort(ProviderId::Glm, None, "glm-5.3", ReasoningLevel::Low), Some("low"));
+    assert_eq!(levels(ProviderId::Gemini, None, "gemini-3.8-flash").map(|(_, default)| default), Some(ReasoningLevel::Low));
+}
+
+#[test]
+fn test_agent_effort_lands_where_each_protocol_expects() {
+    use yachiyo_desktop_lib::gateway::agent::messages::AgentMessage;
+    use yachiyo_desktop_lib::gateway::agent::runtime::WireProtocol;
+    use yachiyo_desktop_lib::gateway::providers::reasoning::apply_agent_effort;
+    use yachiyo_desktop_lib::gateway::providers::{anthropic, gemini, openai_compat, openai_responses};
+    use yachiyo_desktop_lib::types::ProviderId;
+
+    let messages = vec![AgentMessage::User { text: "你好".to_string(), image_data_url: None }];
+
+    let mut claude = anthropic::build_anthropic_agent_body("claude-opus-5-5", &messages, "system", &[]);
+    apply_agent_effort(&mut claude, WireProtocol::Anthropic, "xhigh");
+    assert_eq!(claude["output_config"]["effort"], "xhigh");
+    assert_eq!(claude["thinking"]["type"], "adaptive");
+
+    let mut responses = openai_responses::build_openai_responses_agent_body("gpt-6-astra", &messages, "system", &[]);
+    apply_agent_effort(&mut responses, WireProtocol::Responses, "max");
+    assert_eq!(responses["reasoning"]["effort"], "max");
+
+    let mut google = gemini::build_gemini_agent_body("gemini-3.8-flash", &messages, "system", &[]);
+    apply_agent_effort(&mut google, WireProtocol::Gemini, "high");
+    assert_eq!(google["generationConfig"]["thinkingConfig"]["thinkingLevel"], "high");
+    assert_eq!(google["generationConfig"]["thinkingConfig"]["includeThoughts"], true);
+
+    // 用户所选档位覆盖厂商规则给出的默认档
+    let mut minimax = openai_compat::build_openai_agent_body(
+        ProviderId::Openai, Some("https://api.minimax.io/v1"), "MiniMax-M3.1-Flash", &messages, "system", &[],
+    );
+    assert_eq!(minimax["reasoning_effort"], "low");
+    apply_agent_effort(&mut minimax, WireProtocol::ChatCompletions, "max");
+    assert_eq!(minimax["reasoning_effort"], "max");
+}
+
+#[test]
+fn test_chat_request_accepts_reasoning_effort() {
+    use yachiyo_desktop_lib::types::{ClientChatRequest, ReasoningLevel};
+
+    let request: ClientChatRequest = serde_json::from_str(
+        r#"{"locale":"zh-CN","messages":[{"role":"user","text":"你好"}],"reasoningEffort":"xhigh"}"#,
+    )
+    .unwrap();
+    assert_eq!(request.reasoning_effort, Some(ReasoningLevel::Xhigh));
+    let legacy: ClientChatRequest =
+        serde_json::from_str(r#"{"locale":"zh-CN","messages":[{"role":"user","text":"你好"}]}"#).unwrap();
+    assert_eq!(legacy.reasoning_effort, None);
+}
+
+#[tokio::test]
+async fn test_gateway_reports_reasoning_levels() {
+    use std::sync::Arc;
+    use yachiyo_desktop_lib::crypto::keys::KeyStore;
+    use yachiyo_desktop_lib::mcp::McpManager;
+    use yachiyo_desktop_lib::server::http::{generate_gateway_token, start_local_server, GATEWAY_TOKEN_HEADER};
+    use yachiyo_desktop_lib::tools::WorkspaceManager;
+
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let token = generate_gateway_token();
+    let (port, _server) = start_local_server(
+        Arc::new(KeyStore::new()),
+        Arc::new(WorkspaceManager::new(None)),
+        Arc::new(McpManager::new(Some(temp_dir.path().join("mcp_servers.json")), reqwest::Client::new())),
+        token.clone(),
+        38988,
+    )
+    .await
+    .expect("local gateway should start");
+
+    let query = |body: serde_json::Value| {
+        let token = token.clone();
+        async move {
+            reqwest::Client::new()
+                .post(format!("http://127.0.0.1:{port}/api/reasoning/levels"))
+                .header(GATEWAY_TOKEN_HEADER, token)
+                .json(&body)
+                .send()
+                .await
+                .expect("reasoning levels request")
+                .json::<serde_json::Value>()
+                .await
+                .expect("json body")
+        }
+    };
+    let deepseek = query(serde_json::json!({ "provider": "deepseek", "model": "deepseek-v4-pro" })).await;
+    assert_eq!(deepseek, serde_json::json!({ "levels": ["low", "high", "max"], "defaultLevel": "high" }));
+    let unsupported = query(serde_json::json!({ "provider": "claude", "model": "claude-haiku-4-5" })).await;
+    assert_eq!(unsupported, serde_json::json!({ "levels": [] }));
+}
