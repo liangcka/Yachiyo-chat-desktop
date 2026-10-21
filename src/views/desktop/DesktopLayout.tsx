@@ -117,7 +117,7 @@ export function DesktopLayout(props: SharedViewProps) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTabKey>("general");
-  const { resolved, setTheme } = useTheme();
+  const { resolved, glass, setTheme, setGlass } = useTheme();
 
   // 中栏视图切换（对话 ↔ 编辑器）：editor 一旦挂载即常驻（隐藏不卸载），保留 Monaco 实例与 model
   const [centerView, setCenterView] = useState<CenterView>(readStoredCenterView);
@@ -298,6 +298,10 @@ export function DesktopLayout(props: SharedViewProps) {
     setTheme(resolved === "dark" ? "light" : "dark");
   }, [resolved, setTheme]);
 
+  const handleToggleGlass = useCallback(() => {
+    setGlass(!glass);
+  }, [glass, setGlass]);
+
   const handleCompress = useCallback(async () => {
     if (props.controller.messages.length <= 1 && !props.controller.activeConversation?.summary) {
       props.showToast(props.copy.noNeedToCompress, "info");
@@ -469,6 +473,8 @@ export function DesktopLayout(props: SharedViewProps) {
             onClose={() => setSettingsOpen(false)}
             onCompress={handleCompress}
             onToggleTheme={handleToggleTheme}
+            darkGlass={glass}
+            onToggleDarkGlass={handleToggleGlass}
             resolvedTheme={resolved}
             shared={props}
           />

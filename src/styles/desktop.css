@@ -301,6 +301,7 @@
   border-radius: 6px;
   border: 1px solid var(--dsw-alias-border-inverted);
   background: var(--dsw-specific-menu);
+  backdrop-filter: var(--dsw-menu-blur);
   box-shadow: var(--dsw-shadow-lv3);
   color: var(--dsw-alias-label-primary);
   font-size: 12px;
@@ -899,6 +900,7 @@
   border-radius: 12px;
   border: 1px solid var(--dsw-alias-border-inverted);
   background: var(--dsw-specific-menu);
+  backdrop-filter: var(--dsw-menu-blur);
   box-shadow: var(--dsw-shadow-lv3);
   color: var(--dsw-alias-label-primary);
   animation: fadeIn 120ms ease;
@@ -1158,6 +1160,7 @@
   border-radius: 8px;
   box-sizing: border-box;
   background: var(--dsw-alias-bg-layer-1);
+  backdrop-filter: var(--dsw-menu-blur);
   border: 1px solid var(--dsw-alias-border-l2);
   box-shadow:
     0 4px 12px rgba(0, 0, 0, 0.08);
@@ -1177,6 +1180,10 @@
   border-color: rgba(255, 255, 255, 0.1);
   box-shadow:
     0 4px 12px rgba(0, 0, 0, 0.18);
+}
+
+[data-theme="dark"][data-glass="on"] .desktop-sidebar__user-popover {
+  background: rgba(24, 27, 33, 0.72);
 }
 
 /* 顶部用户资料头部 */
@@ -2100,6 +2107,7 @@
   width: 290px;
   border-radius: 14px;
   background: var(--dsw-specific-menu);
+  backdrop-filter: var(--dsw-menu-blur);
   border: 1px solid var(--dsw-alias-border-l2);
   box-shadow: var(--dsw-shadow-lv3);
   z-index: 1000;
@@ -2345,7 +2353,8 @@
   width: 240px;
   padding: 12px;
   border-radius: 8px;
-  background: var(--surface-card);
+  background: var(--dsw-specific-menu);
+  backdrop-filter: var(--dsw-menu-blur);
   border: 1px solid var(--border-l1);
   box-shadow: var(--shadow-elevated);
   color: var(--text-primary);
@@ -2519,6 +2528,7 @@
   padding: 6px;
   border-radius: 14px;
   background: var(--dsw-specific-menu);
+  backdrop-filter: var(--dsw-menu-blur);
   border: 1px solid var(--dsw-alias-border-inverted);
   box-shadow: var(--dsw-shadow-lv3);
   color: var(--dsw-alias-label-primary);
@@ -3703,6 +3713,7 @@
   align-items: center;
   justify-content: center;
   background: var(--yx-alias-bg-mask);
+  backdrop-filter: var(--dsw-mask-blur);
   animation: modal-fade-in 180ms var(--ease-out);
 }
 
@@ -4214,6 +4225,7 @@
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: var(--dsw-mask-blur);
   border: none;
   cursor: pointer;
 }
@@ -5624,6 +5636,7 @@
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: var(--dsw-mask-blur);
   animation: fadeIn 180ms var(--ease-out);
 }
 
@@ -6053,6 +6066,7 @@
   width: 100%;
   box-sizing: border-box;
   background: var(--dsw-specific-menu);
+  backdrop-filter: var(--dsw-menu-blur);
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 14px;
   box-shadow: var(--dsw-shadow-lv3);
@@ -6424,6 +6438,7 @@
   display: flex;
   flex-direction: column;
   background: var(--dsw-specific-menu);
+  backdrop-filter: var(--dsw-menu-blur);
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 14px;
   box-shadow: var(--dsw-shadow-lv3);
@@ -6596,6 +6611,7 @@
   width: 100%;
   max-width: 480px;
   background: var(--dsw-specific-menu);
+  backdrop-filter: var(--dsw-menu-blur);
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 14px;
   box-shadow: var(--dsw-shadow-lv3);

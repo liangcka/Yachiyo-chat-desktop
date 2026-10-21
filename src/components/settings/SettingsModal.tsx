@@ -49,9 +49,11 @@ export type SettingsTabKey =
   | "user";
 
 export interface SettingsModalProps {
+  darkGlass?: boolean;
   initialTab?: SettingsTabKey;
   onClose: () => void;
   onCompress?: () => void;
+  onToggleDarkGlass?: () => void;
   onToggleTheme?: () => void;
   open: boolean;
   resolvedTheme?: "light" | "dark";
@@ -119,6 +121,9 @@ const zhCopy = {
   themeCurrent: (dark: boolean) => `当前主题：${dark ? "星空深色 (Dark)" : "皓月浅色 (Light)"}`,
   toLight: "切换为浅色",
   toDark: "切换为深色",
+  glassName: "夜间毛玻璃效果",
+  glassDesc: "深色主题下，菜单、弹出框与弹窗遮罩使用半透明背景模糊。浅色主题不受影响。",
+  glassToggle: "切换夜间毛玻璃效果",
   languageName: "界面多语言",
   languageCurrent: "当前语言：简体中文",
   switchLanguage: "日本語に切替",
@@ -254,6 +259,9 @@ const jaCopy: SettingsCopy = {
   themeCurrent: (dark) => `現在のテーマ：${dark ? "星空ダーク (Dark)" : "月光ライト (Light)"}`,
   toLight: "ライトに切り替え",
   toDark: "ダークに切り替え",
+  glassName: "ダークモードのすりガラス効果",
+  glassDesc: "ダークテーマで、メニュー・ポップオーバー・ダイアログの背景を半透明にしてぼかします。ライトテーマには影響しません。",
+  glassToggle: "すりガラス効果を切り替え",
   languageName: "表示言語",
   languageCurrent: "現在の言語：日本語",
   switchLanguage: "切换为中文",
@@ -331,9 +339,11 @@ const jaCopy: SettingsCopy = {
 const SETTINGS_COPY: Readonly<Record<Locale, SettingsCopy>> = { "zh-CN": zhCopy, "ja-JP": jaCopy };
 
 export function SettingsModal({
+  darkGlass = true,
   initialTab = "general",
   onClose,
   onCompress,
+  onToggleDarkGlass,
   onToggleTheme,
   open,
   resolvedTheme = "dark",
@@ -801,6 +811,27 @@ export function SettingsModal({
                     ) : null}
                   </div>
                 </div>
+
+                {onToggleDarkGlass ? (
+                  <div className="settings-item-card">
+                    <div className="settings-item-card__lead">
+                      <strong className="settings-item-card__name">{t.glassName}</strong>
+                      <span className="settings-item-card__desc">{t.glassDesc}</span>
+                    </div>
+                    <div className="settings-item-card__action">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={darkGlass}
+                        className={`settings-toggle-switch ${darkGlass ? "settings-toggle-switch--active" : ""}`}
+                        onClick={onToggleDarkGlass}
+                        aria-label={t.glassToggle}
+                      >
+                        <span className="settings-toggle-knob" />
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="settings-item-card">
                   <div className="settings-item-card__lead">

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
 export type Theme = "light" | "dark" | "system";
 
 const STORAGE_KEY = "yachiyo-theme";
+const GLASS_STORAGE_KEY = "yachiyo-dark-glass";
 const DARK_MEDIA_QUERY = "(prefers-color-scheme: dark)";
 const VALID_THEMES: readonly Theme[] = ["light", "dark", "system"];
 
@@ -23,6 +24,23 @@ function readStoredTheme(): Theme {
 function writeStoredTheme(theme: Theme): void {
   try {
     localStorage.setItem(STORAGE_KEY, theme);
+  } catch {
+    // 写入失败时静默降级
+  }
+}
+
+/** 深色毛玻璃默认开启，仅显式关闭时才落盘为 "false" */
+function readStoredGlass(): boolean {
+  try {
+    return localStorage.getItem(GLASS_STORAGE_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+function writeStoredGlass(enabled: boolean): void {
+  try {
+    localStorage.setItem(GLASS_STORAGE_KEY, String(enabled));
   } catch {
     // 写入失败时静默降级
   }
@@ -63,6 +81,7 @@ function resolveTheme(theme: Theme): "light" | "dark" {
 interface ThemeSnapshot {
   theme: Theme;
   resolved: "light" | "dark";
+  glass: boolean;
 }
 
 /**
@@ -74,21 +93,29 @@ let cachedSnapshot: ThemeSnapshot | null = null;
 function getSnapshot(): ThemeSnapshot {
   const theme = readStoredTheme();
   const resolved = resolveTheme(theme);
+  const glass = readStoredGlass();
 
   if (
     cachedSnapshot &&
     cachedSnapshot.theme === theme &&
-    cachedSnapshot.resolved === resolved
+    cachedSnapshot.resolved === resolved &&
+    cachedSnapshot.glass === glass
   ) {
     return cachedSnapshot;
   }
 
-  cachedSnapshot = { theme, resolved };
+  cachedSnapshot = { theme, resolved, glass };
   return cachedSnapshot;
 }
 
 function getServerSnapshot(): ThemeSnapshot {
-  return { theme: "system", resolved: "light" };
+  return { theme: "system", resolved: "light", glass: true };
+}
+
+/** 偏好写入后清除快照缓存并通知所有订阅者重渲染 */
+function notifyListeners(): void {
+  cachedSnapshot = null;
+  listeners.forEach((cb) => cb());
 }
 
 // ── Hook ───────────────────────────────────────────────────────
@@ -97,14 +124,17 @@ function getServerSnapshot(): ThemeSnapshot {
  * 主题管理 Hook（基于 useSyncExternalStore）：
  * 1. 从 localStorage 读取用户偏好（light / dark / system），无值时默认 system；
  * 2. system 模式实时跟随系统配色方案（prefers-color-scheme）；
- * 3. 将解析后的主题写入 document.documentElement.dataset.theme 供 CSS 消费。
+ * 3. 将解析后的主题写入 document.documentElement.dataset.theme 供 CSS 消费；
+ * 4. 深色毛玻璃偏好写入 dataset.glass（"on" / "off"），由 tokens.css 在深色主题下切换浮层材质。
  */
 export function useTheme(): {
   theme: Theme;
   resolved: "light" | "dark";
+  glass: boolean;
   setTheme: (t: Theme) => void;
+  setGlass: (enabled: boolean) => void;
 } {
-  const { theme, resolved } = useSyncExternalStore(
+  const { theme, resolved, glass } = useSyncExternalStore(
     subscribe,
     getSnapshot,
     getServerSnapshot,
@@ -115,13 +145,19 @@ export function useTheme(): {
     document.documentElement.dataset.theme = resolved;
   }, [resolved]);
 
+  useEffect(() => {
+    document.documentElement.dataset.glass = glass ? "on" : "off";
+  }, [glass]);
+
   const setTheme = useCallback((t: Theme) => {
     writeStoredTheme(t);
-    // 清除快照缓存，确保下次 getSnapshot 重新计算
-    cachedSnapshot = null;
-    // 通知所有订阅者触发重渲染
-    listeners.forEach((cb) => cb());
+    notifyListeners();
   }, []);
 
-  return { theme, resolved, setTheme };
+  const setGlass = useCallback((enabled: boolean) => {
+    writeStoredGlass(enabled);
+    notifyListeners();
+  }, []);
+
+  return { theme, resolved, glass, setTheme, setGlass };
 }

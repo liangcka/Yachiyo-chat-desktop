@@ -243,4 +243,23 @@ describe("SettingsModal", () => {
     expect(screen.queryByRole("textbox", { name: "八千代对您的称呼" })).not.toBeInTheDocument();
     expect(screen.queryByText(/八千代语气预览/)).not.toBeInTheDocument();
   });
+
+  it("外观面板的夜间毛玻璃开关反映当前状态并回调切换", () => {
+    const onToggleDarkGlass = vi.fn();
+    render(
+      <SettingsModal
+        open
+        onClose={vi.fn()}
+        shared={createMockSharedProps()}
+        initialTab="appearance"
+        darkGlass={false}
+        onToggleDarkGlass={onToggleDarkGlass}
+      />
+    );
+
+    const glassSwitch = screen.getByRole("switch", { name: "切换夜间毛玻璃效果" });
+    expect(glassSwitch).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(glassSwitch);
+    expect(onToggleDarkGlass).toHaveBeenCalledTimes(1);
+  });
 });
