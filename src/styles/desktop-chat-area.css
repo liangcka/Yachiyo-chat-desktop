@@ -283,6 +283,14 @@
   background: var(--surface-card);
 }
 
+[data-theme="dark"] .desktop-shell-root .settings-toggle-switch--active {
+  background: var(--accent-gradient);
+}
+
+[data-theme="dark"] .desktop-shell-root .settings-toggle-switch--active .settings-toggle-knob {
+  background: #ffffff;
+}
+
 .desktop-shell-root .desktop-sidebar__popover-badge {
   color: var(--text-muted);
   background: var(--interactive-hover);
