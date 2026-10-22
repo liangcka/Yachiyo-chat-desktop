@@ -38,6 +38,8 @@ import {
   isHistoryMessage,
   maximumRequestMessages,
   requestHistory,
+  selectRequestImages,
+  withOmittedImageNote,
 } from "./request-history";
 import { createStreamBatcher, type StreamBatcher } from "./stream-batcher";
 import {
@@ -557,7 +559,11 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         conversation?.compressedUpTo,
       );
       if (history.length === 0 && messages.some(isHistoryMessage)) throw new ChatClientError("INVALID_REQUEST");
-      const lastIndex = history.length - 1;
+      const images = await selectRequestImages(history, async (imageId) => {
+        const image =
+          pendingImage?.id === imageId ? pendingImage : await servicesRef.current.repository.getImage(imageId);
+        return image === undefined ? undefined : blobToDataUrl(image);
+      });
 
       // 每条历史消息可能展开为多条请求消息（agent 工具步骤序列），故 map 后 flat 展平
       const chatMessages = (
@@ -595,21 +601,20 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
               }
               return requestMessages;
             }
+            const expandedText =
+              // desktop 端 user 消息中的 @文件引用 在请求侧展开为文件内容块（存储与 UI 保留原文）
+              message.role === "user" && isDesktopApp() && hasFileReferences(text)
+                ? await expandFileReferences(text, desktopFileReader)
+                : text;
+            const imageDataUrl = images.get(index);
             const requestMessage: StreamChatMessage = {
               role: message.role,
-              // desktop 端 user 消息中的 @文件引用 在请求侧展开为文件内容块（存储与 UI 保留原文）
-            text:
-                message.role === "user" && isDesktopApp() && hasFileReferences(text)
-                  ? await expandFileReferences(text, desktopFileReader)
-                  : text,
+              text:
+                message.imageId !== undefined && imageDataUrl === undefined
+                  ? withOmittedImageNote(expandedText, locale)
+                  : expandedText,
             };
-            if (index === lastIndex && message.role === "user" && message.imageId !== undefined) {
-              const image =
-                pendingImage?.id === message.imageId
-                  ? pendingImage
-                  : await servicesRef.current.repository.getImage(message.imageId);
-              if (image !== undefined) requestMessage.imageDataUrl = await blobToDataUrl(image);
-            }
+            if (imageDataUrl !== undefined) requestMessage.imageDataUrl = imageDataUrl;
             return [requestMessage];
           }),
         )
@@ -1217,7 +1222,10 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         }
 
         for (const { message, text } of history) {
-          requestMessages.push({ role: message.role, text });
+          requestMessages.push({
+            role: message.role,
+            text: message.imageId === undefined ? text : withOmittedImageNote(text, snapshot.locale),
+          });
         }
 
         requestMessages.push({ role: "user", text: summaryPrompt });

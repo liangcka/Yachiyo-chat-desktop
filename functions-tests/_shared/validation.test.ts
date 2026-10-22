@@ -163,14 +163,32 @@ describe("validateChatRequest", () => {
     ).toThrow(ChatValidationError);
   });
 
-  it("rejects misplaced, unsupported, and oversized images", () => {
+  it("accepts earlier images in history so the model can look back at them", () => {
+    const request = validateChatRequest({
+      locale: "zh-CN",
+      messages: [
+        { role: "user", text: "", imageDataUrl: smallPng },
+        { role: "assistant", text: "看到了" },
+        { role: "user", text: "刚才那张图左上角是什么" },
+      ],
+    });
+    expect(request.messages[0]).toEqual({ role: "user", text: "", imageDataUrl: smallPng });
+  });
+
+  it("rejects misplaced, too many, unsupported, and oversized images", () => {
     expect(() =>
       validateChatRequest({
         locale: "zh-CN",
         messages: [
-          { role: "user", text: "旧图", imageDataUrl: smallPng },
+          { role: "assistant", text: "旧图", imageDataUrl: smallPng },
           { role: "user", text: "现在" },
         ],
+      }),
+    ).toThrow(ChatValidationError);
+    expect(() =>
+      validateChatRequest({
+        locale: "zh-CN",
+        messages: Array.from({ length: 5 }, () => ({ role: "user", text: "图", imageDataUrl: smallPng })),
       }),
     ).toThrow(ChatValidationError);
     expect(() =>

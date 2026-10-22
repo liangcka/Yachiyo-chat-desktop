@@ -4,6 +4,10 @@ import type { ChatMessage, Locale, StoredImage } from "../domain/chat";
 const maximumRequestCharacters = REQUEST_CHARACTER_BUDGET;
 const maximumRequestMessageCharacters = REQUEST_CHARACTER_BUDGET;
 export const maximumRequestMessages = 20;
+/** 一次请求最多带的图片张数，与网关校验一致 */
+export const maximumRequestImages = 4;
+/** 上文图片的编码体积预算：桌面网关请求体上限 2MB，留出文字余量；本轮新发的图不受此限 */
+const historyImageCharacterBudget = 1_500_000;
 
 export function blobToDataUrl(image: StoredImage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -82,7 +86,8 @@ export function requestHistory(
     if (message === undefined) continue;
     const text = truncateUnicode(message.text, maximumRequestMessageCharacters);
     const isLastMessage = index === eligible.length - 1;
-    if (!isLastMessage && text.trim().length === 0) continue;
+    // 只发了图的消息正文为空，仍要留在上下文里，否则模型回看不到这张图
+    if (!isLastMessage && text.trim().length === 0 && message.imageId === undefined) continue;
     const characterLength = [...text].length;
     if (totalCharacters + characterLength > maximumRequestCharacters) break;
     if (oldestFirst) selected.push({ message, text });
@@ -91,4 +96,34 @@ export function requestHistory(
   }
 
   return selected;
+}
+
+/**
+ * 从最新往前给带图的用户消息取图（键为 history 下标）：最后一条的图必带，
+ * 更早的图在张数与体积预算内随上下文重发，模型才能联系上文看图；超出的由调用方换成文字说明。
+ */
+export async function selectRequestImages(
+  history: ReadonlyArray<{ message: ChatMessage }>,
+  load: (imageId: string) => Promise<string | undefined>,
+): Promise<Map<number, string>> {
+  const selected = new Map<number, string>();
+  let historyCharacters = 0;
+  for (let index = history.length - 1; index >= 0 && selected.size < maximumRequestImages; index -= 1) {
+    const message = history[index]?.message;
+    if (message?.role !== "user" || message.imageId === undefined) continue;
+    const dataUrl = await load(message.imageId);
+    if (dataUrl === undefined) continue;
+    if (index !== history.length - 1) {
+      if (historyCharacters + dataUrl.length > historyImageCharacterBudget) break;
+      historyCharacters += dataUrl.length;
+    }
+    selected.set(index, dataUrl);
+  }
+  return selected;
+}
+
+/** 图片没能随请求发送时补在正文前，让模型知道这里曾有一张图 */
+export function withOmittedImageNote(text: string, locale: Locale): string {
+  const note = locale === "ja-JP" ? "（画像が添付されていましたが、このリクエストには含まれていません）" : "（这里附过一张图片，本次请求未附带）";
+  return text.trim().length === 0 ? note : `${note}\n${text}`;
 }

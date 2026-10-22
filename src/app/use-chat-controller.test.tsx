@@ -1251,6 +1251,46 @@ describe("useChatController", () => {
     expect(stream.mock.calls[1]?.[0].messages.at(-1)?.imageDataUrl).toBeDefined();
   });
 
+  it("resends earlier images with later turns so the model can look back at them", async () => {
+    const image: StoredImage = {
+      blob: new Blob(["image-content"], { type: "image/jpeg" }),
+      conversationId: conversation.id,
+      height: 10,
+      id: "image-1",
+      mimeType: "image/jpeg",
+      width: 10,
+    };
+    let storedImage: StoredImage | undefined;
+    const repository = repositoryWith({
+      getImage: vi.fn(async (id: string) => (id === "image-1" ? storedImage : undefined)),
+      putImage: vi.fn(async (img: StoredImage) => {
+        storedImage = img;
+      }),
+    });
+    const stream = vi.fn<StreamChatFunction>(async (_req, options) => {
+      options.onDelta("回复");
+      return { truncated: false };
+    });
+    const { result } = renderHook(() =>
+      useChatController({
+        autoAiTitle: false,
+        id: ids("user-1", "assistant-1", "user-2", "assistant-2"),
+        repository,
+        streamChat: stream,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    act(() => result.current.setPendingImage(image));
+    await act(async () => result.current.send(""));
+    await act(async () => result.current.send("刚才那张图里有什么"));
+
+    const messages = stream.mock.calls[1]?.[0].messages ?? [];
+    expect(messages.find((message) => message.imageDataUrl !== undefined)).toMatchObject({ role: "user", text: "" });
+    expect(messages.at(-1)).toMatchObject({ role: "user", text: "刚才那张图里有什么" });
+    expect(messages.at(-1)?.imageDataUrl).toBeUndefined();
+  });
+
 
   it("regenerates a specific assistant message by messageId and trims following messages", async () => {
     const repository = repositoryWith();
