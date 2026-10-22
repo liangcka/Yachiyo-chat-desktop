@@ -4,7 +4,7 @@ import { PluginsPanel } from "../../components/settings/PluginsPanel";
 import { getPluginSettings } from "../../services/plugin-settings";
 import { WhaleWidget } from "./WhaleWidget";
 
-const deepseekEntry = { provider: "deepseek" as const, apiKey: "sk-" + "w".repeat(40), model: "deepseek-flash" };
+const deepseekEntry = { id: "deepseek", provider: "deepseek" as const, apiKey: "sk-" + "w".repeat(40), model: "deepseek-flash" };
 
 describe("WhaleWidget", () => {
   it("加载上游脚本，由本机宿主接管 /dsh-whale/* 请求，卸载时隐藏挂件", async () => {

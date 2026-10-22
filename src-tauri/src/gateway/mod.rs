@@ -21,12 +21,18 @@ pub struct BuiltRequest {
     pub provider_id: ProviderId,
 }
 
-/// 请求自带的 Key 优先；否则取系统加密存储里的 Key，并要求请求的端点与保存时绑定的端点一致
+/// 请求自带的 Key 优先；否则取系统加密存储里的 Key，并要求请求的端点与保存时绑定的端点一致。
+/// 指定的密钥槽必须属于本次请求的厂商，避免把别家厂商的 Key 发给这家的端点
 pub fn resolve_api_key(request: &ClientChatRequest, provider_id: ProviderId, key_store: &KeyStore) -> Option<String> {
+    let slot = match request.key_slot.as_deref() {
+        Some(slot) if crate::crypto::keys::slot_belongs_to(slot, provider_id.slug()) => slot,
+        Some(_) => return request.api_key.clone(),
+        None => provider_id.slug(),
+    };
     request
         .api_key
         .clone()
-        .or_else(|| key_store.get_key_for_endpoint(provider_id.slug(), request.base_url.as_deref()))
+        .or_else(|| key_store.get_key_for_endpoint(slot, request.base_url.as_deref()))
 }
 
 /// 自定义端点只对 OpenAI 兼容厂商开放（Claude/Gemini 为原生协议），与 Web 端 /api/chat 的校验一致

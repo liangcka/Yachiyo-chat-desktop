@@ -5,7 +5,8 @@ import { DesktopUpdateNotice } from "./components/desktop/DesktopUpdateNotice";
 import { ConversationRepository } from "./data/conversation-repository";
 import { YachiyoDatabase } from "./data/db";
 import type { Conversation, Locale, StoredImage } from "./domain/chat";
-import { supportsImageInput, type ActiveLlmConfig, type ProviderId } from "./domain/llm";
+import { KEYSTORE_MANAGED_API_KEY, supportsImageInput, type ActiveLlmConfig } from "./domain/llm";
+import type { LlmEntryDraft, LlmProviderEntry } from "./components/LlmSettingsPanel";
 import {
   ImageProcessingError,
   processImage,
@@ -113,10 +114,8 @@ export function App({ services, autoAiTitle }: AppProps) {
   const [composerValue, setComposerValue] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [imageUrls, setImageUrls] = useState<ReadonlyMap<string, string>>(new Map());
-  const [llmActiveProvider, setLlmActiveProvider] = useState<ProviderId>();
-  const [llmEntries, setLlmEntries] = useState<
-    readonly { provider: ProviderId; apiKey: string; model: string; baseUrl?: string; disabled?: boolean }[]
-  >([]);
+  const [llmActiveEntryId, setLlmActiveEntryId] = useState<string>();
+  const [llmEntries, setLlmEntries] = useState<readonly LlmProviderEntry[]>([]);
   const [pendingImageDataUrl, setPendingImageDataUrl] = useState<string>();
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [webSearchSettings, setWebSearchSettings] = useState<WebSearchSettings>(defaultWebSearchSettings);
@@ -124,16 +123,17 @@ export function App({ services, autoAiTitle }: AppProps) {
   const [desktopUpdate, setDesktopUpdate] = useState<AvailableUpdate>();
 
   const activeLlmConfig = useMemo<ActiveLlmConfig | undefined>(() => {
-    if (llmActiveProvider === undefined) return undefined;
-    const entry = llmEntries.find((item) => item.provider === llmActiveProvider);
+    if (llmActiveEntryId === undefined) return undefined;
+    const entry = llmEntries.find((item) => item.id === llmActiveEntryId);
     if (entry === undefined) return undefined;
     return {
       provider: entry.provider,
       apiKey: entry.apiKey,
       model: entry.model,
+      ...(entry.apiKey === KEYSTORE_MANAGED_API_KEY ? { keySlot: entry.id } : {}),
       ...(entry.baseUrl !== undefined ? { baseUrl: entry.baseUrl } : {}),
     };
-  }, [llmActiveProvider, llmEntries]);
+  }, [llmActiveEntryId, llmEntries]);
 
   const activeSkills = useMemo(
     () => SKILLS.filter((skill) => activeSkillIds.includes(skill.id)),
@@ -192,11 +192,12 @@ export function App({ services, autoAiTitle }: AppProps) {
     await llmService.migrateKeysToKeystore().catch(() => undefined);
     const [records, active] = await Promise.all([
       llmService.list(),
-      llmService.getActiveProvider(),
+      llmService.getActiveId(),
     ]);
     return {
       active,
       entries: records.map((record) => ({
+        id: record.id,
         provider: record.provider,
         apiKey: record.apiKey,
         model: record.model,
@@ -221,7 +222,7 @@ export function App({ services, autoAiTitle }: AppProps) {
         const llmSettings = await readLlmSettings();
         if (!cancelled) {
           setLlmEntries(llmSettings.entries);
-          setLlmActiveProvider(llmSettings.active);
+          setLlmActiveEntryId(llmSettings.active);
           setActiveSkillIds(await skillService.getActiveSkillIds().catch(() => []));
           await syncWebSearchSettings();
         }
@@ -327,39 +328,40 @@ export function App({ services, autoAiTitle }: AppProps) {
     try {
       const llmSettings = await readLlmSettings();
       setLlmEntries(llmSettings.entries);
-      setLlmActiveProvider(llmSettings.active);
+      setLlmActiveEntryId(llmSettings.active);
     } catch {
       showToast(copy.genericFailure, "error");
     }
   }, [copy.genericFailure, readLlmSettings, showToast]);
 
   const handleLlmSave = useCallback(
-    async (provider: ProviderId, apiKey: string, model: string, baseUrl?: string) => {
-      await llmService.saveProvider(provider, apiKey, model, baseUrl !== undefined ? { baseUrl } : {});
+    async (draft: LlmEntryDraft): Promise<string> => {
+      const record = await llmService.saveEntry(draft);
       await refreshLlm();
+      return record.id;
     },
     [llmService, refreshLlm],
   );
 
   const handleLlmClear = useCallback(
-    async (provider: ProviderId) => {
-      await llmService.clear(provider);
+    async (id: string) => {
+      await llmService.clear(id);
       await refreshLlm();
     },
     [llmService, refreshLlm],
   );
 
   const handleLlmActivate = useCallback(
-    async (provider: ProviderId) => {
-      await llmService.setActiveProvider(provider);
-      setLlmActiveProvider(provider);
+    async (id: string) => {
+      await llmService.setActive(id);
+      setLlmActiveEntryId(id);
     },
     [llmService],
   );
 
   const handleLlmSetEnabled = useCallback(
-    async (provider: ProviderId, enabled: boolean) => {
-      await llmService.setEnabled(provider, enabled);
+    async (id: string, enabled: boolean) => {
+      await llmService.setEnabled(id, enabled);
       await refreshLlm();
     },
     [llmService, refreshLlm],
@@ -608,7 +610,7 @@ export function App({ services, autoAiTitle }: AppProps) {
     setWebSearchSettings(defaultWebSearchSettings);
     await webSearchService.clear().catch(() => undefined);
     setLlmEntries([]);
-    setLlmActiveProvider(undefined);
+    setLlmActiveEntryId(undefined);
     await projectManager.clear().catch(() => undefined);
     await controller.newConversation();
     setComposerValue("");
@@ -697,7 +699,7 @@ export function App({ services, autoAiTitle }: AppProps) {
     copy,
     imageUrls,
     isOnline,
-    llmActiveProvider,
+    llmActiveEntryId,
     llmEntries,
     onArchive: handleArchive,
     onClearData: handleClearData,

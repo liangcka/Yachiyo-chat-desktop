@@ -167,8 +167,16 @@ export function getProviderMeta(id: ProviderId): LlmProviderMeta {
  */
 export const KEYSTORE_MANAGED_API_KEY = "yachiyo-desktop-keystore-managed";
 
-/** IndexedDB llmSettings 表中每家厂商的配置记录 */
+/** 为新配置生成 id（同时是桌面端密钥槽名），格式须与网关 is_valid_slot 一致 */
+export function newLlmEntryId(provider: ProviderId): string {
+  const suffix = Math.random().toString(36).slice(2, 10).padEnd(8, "0");
+  return `${provider}~${suffix}`;
+}
+
+/** IndexedDB llmEntries 表中的一条模型配置；同一厂商可有多条，各用各的 Key */
 export interface LlmSettingsRecord {
+  /** 配置 id，兼作桌面端密钥槽名：旧版迁移来的记录为厂商名，新建的为“厂商名~随机后缀” */
+  readonly id: string;
   readonly provider: ProviderId;
   readonly apiKey: string;
   readonly model: string;
@@ -182,6 +190,8 @@ export interface LlmSettingsRecord {
 /** 发送聊天请求时携带的激活配置（未配置 Key 时为 undefined，走服务端 fallback） */
 export interface ActiveLlmConfig {
   readonly provider: ProviderId;
+  /** 桌面端网关据此从加密存储取对应配置的 Key */
+  readonly keySlot?: string;
   readonly apiKey: string;
   readonly model: string;
   readonly baseUrl?: string;

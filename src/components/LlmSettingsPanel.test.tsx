@@ -14,7 +14,7 @@ function mount(overrides: Partial<Parameters<typeof LlmSettingsPanel>[0]> = {}) 
     open: true,
     entries: [] as const,
     onClose: vi.fn(),
-    onSave: vi.fn(async () => undefined),
+    onSave: vi.fn(async () => "new-id"),
     onClear: vi.fn(async () => undefined),
     onActivate: vi.fn(async () => undefined),
     onSetEnabled: vi.fn(async () => undefined),
@@ -22,6 +22,14 @@ function mount(overrides: Partial<Parameters<typeof LlmSettingsPanel>[0]> = {}) 
   };
   return render(<LlmSettingsPanel {...props} />);
 }
+
+const KIMI_ENTRY = {
+  id: "openai~kimi0001",
+  provider: "openai" as const,
+  apiKey: KEYSTORE_MANAGED_API_KEY,
+  model: "kimi-k3",
+  baseUrl: "https://api.moonshot.cn/v1",
+};
 
 describe("LlmSettingsPanel", () => {
   it("renders nothing when closed", () => {
@@ -35,7 +43,10 @@ describe("LlmSettingsPanel", () => {
   });
 
   it("shows the active provider label when one is active", () => {
-    mount({ activeProvider: "claude" });
+    mount({
+      activeEntryId: "claude",
+      entries: [{ id: "claude", provider: "claude", apiKey: VALID_KEY, model: "claude-sonnet-5" }],
+    });
     expect(screen.getByText("当前使用: Anthropic (Claude)")).toBeInTheDocument();
   });
 
@@ -50,8 +61,9 @@ describe("LlmSettingsPanel", () => {
   it("renders the management table from stored entries", () => {
     mount({
       entries: [
-        { provider: "deepseek", apiKey: VALID_KEY, model: "deepseek-v4-flash" },
+        { id: "deepseek", provider: "deepseek", apiKey: VALID_KEY, model: "deepseek-v4-flash" },
         {
+          id: "openai~doubao01",
           provider: "openai",
           apiKey: VALID_KEY,
           model: "doubao-pro-32k",
@@ -64,6 +76,26 @@ describe("LlmSettingsPanel", () => {
     expect(screen.getByText("doubao-pro-32k")).toBeInTheDocument();
     expect(screen.getByText("自定义端点")).toBeInTheDocument();
     expect(screen.queryByText(/尚未配置模型/i)).not.toBeInTheDocument();
+  });
+
+  it("lists several configs of one provider as separate rows with their own vendor names", () => {
+    mount({
+      entries: [
+        KIMI_ENTRY,
+        {
+          id: "openai~qwen0001",
+          provider: "openai",
+          apiKey: KEYSTORE_MANAGED_API_KEY,
+          model: "qwen-max",
+          baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        },
+      ],
+    });
+
+    expect(screen.getByText("kimi-k3")).toBeInTheDocument();
+    expect(screen.getByText("qwen-max")).toBeInTheDocument();
+    expect(screen.getByText("Kimi CN")).toBeInTheDocument();
+    expect(screen.getByText("阿里云百炼")).toBeInTheDocument();
   });
 
   it("opens add model modal with custom model and provider vendors", async () => {
@@ -81,9 +113,9 @@ describe("LlmSettingsPanel", () => {
     expect(screen.getByText("硅基流动")).toBeInTheDocument();
   });
 
-  it("opens vendor config modal and saves API key and model", async () => {
+  it("opens vendor config modal and saves a new config, then activates the saved id", async () => {
     const user = userEvent.setup();
-    const onSave = vi.fn(async () => undefined);
+    const onSave = vi.fn(async () => "openai~volc0001");
     const onActivate = vi.fn(async () => undefined);
     mount({ onSave, onActivate });
 
@@ -97,29 +129,19 @@ describe("LlmSettingsPanel", () => {
     await user.type(keyInput, VALID_KEY);
     await user.click(screen.getByRole("button", { name: "保存并启用" }));
 
-    expect(onSave).toHaveBeenCalledWith(
-      "openai",
-      VALID_KEY,
-      "doubao-seed-2-1-turbo-260628",
-      "https://ark.cn-beijing.volces.com/api/v3",
-    );
-    expect(onActivate).toHaveBeenCalledWith("openai");
+    expect(onSave).toHaveBeenCalledWith({
+      provider: "openai",
+      apiKey: VALID_KEY,
+      model: "doubao-seed-2-1-turbo-260628",
+      baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    });
+    expect(onActivate).toHaveBeenCalledWith("openai~volc0001");
   });
 
-  it("does not carry another vendor's model, endpoint or stored key into a shared slot", async () => {
+  it("adds another vendor of the same provider as a new config instead of overwriting", async () => {
     const user = userEvent.setup();
-    const onSave = vi.fn(async () => undefined);
-    mount({
-      onSave,
-      entries: [
-        {
-          provider: "openai",
-          apiKey: KEYSTORE_MANAGED_API_KEY,
-          model: "kimi-k3",
-          baseUrl: "https://api.moonshot.cn/v1",
-        },
-      ],
-    });
+    const onSave = vi.fn(async () => "openai~qwen0001");
+    mount({ onSave, entries: [KIMI_ENTRY] });
 
     await user.click(screen.getByRole("button", { name: "添加模型" }));
     await user.click(screen.getByText("阿里云百炼"));
@@ -131,66 +153,47 @@ describe("LlmSettingsPanel", () => {
     await user.type(screen.getByPlaceholderText("请输入服务商 API Key"), VALID_KEY);
     await user.click(save);
 
-    expect(onSave).toHaveBeenCalledWith(
-      "openai",
-      VALID_KEY,
-      "qwen3.8-flash",
-      "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    );
+    expect(onSave).toHaveBeenCalledWith({
+      provider: "openai",
+      apiKey: VALID_KEY,
+      model: "qwen3.8-flash",
+      baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    });
   });
 
-  it("keeps the stored key when reopening the card that owns the slot", async () => {
+  it("asks for a key when adding the same vendor again, even if one config already exists", async () => {
     const user = userEvent.setup();
-    const onSave = vi.fn(async () => undefined);
-    mount({
-      onSave,
-      entries: [
-        {
-          provider: "openai",
-          apiKey: KEYSTORE_MANAGED_API_KEY,
-          model: "kimi-k3",
-          baseUrl: "https://api.moonshot.cn/v1",
-        },
-      ],
-    });
+    mount({ entries: [KIMI_ENTRY] });
 
     await user.click(screen.getByRole("button", { name: "添加模型" }));
-    await user.click(screen.getByText("Kimi CN"));
-    await user.click(screen.getByRole("button", { name: "保存并启用" }));
+    await user.click(within(screen.getByRole("dialog", { name: "添加模型" })).getByText("Kimi CN"));
 
-    expect(onSave).toHaveBeenCalledWith("openai", KEYSTORE_MANAGED_API_KEY, "kimi-k3", "https://api.moonshot.cn/v1");
+    expect(screen.getByRole("button", { name: "保存并启用" })).toBeDisabled();
   });
 
-  it("lets a native card reuse its own stored key even when another card shares the provider", async () => {
+  it("keeps the stored key when editing an existing config", async () => {
     const user = userEvent.setup();
-    const onSave = vi.fn(async () => undefined);
-    mount({
-      onSave,
-      entries: [{ provider: "claude", apiKey: KEYSTORE_MANAGED_API_KEY, model: "claude-opus-5-5" }],
+    const onSave = vi.fn(async () => KIMI_ENTRY.id);
+    const onActivate = vi.fn(async () => undefined);
+    mount({ onSave, onActivate, entries: [KIMI_ENTRY] });
+
+    await user.click(screen.getByLabelText("编辑 kimi-k3"));
+    await user.click(within(screen.getByRole("dialog", { name: "配置模型" })).getByRole("button", { name: "保存并启用" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      id: KIMI_ENTRY.id,
+      provider: "openai",
+      apiKey: KEYSTORE_MANAGED_API_KEY,
+      model: "kimi-k3",
+      baseUrl: "https://api.moonshot.cn/v1",
     });
-
-    await user.click(screen.getByRole("button", { name: "添加模型" }));
-    await user.click(within(screen.getByRole("dialog", { name: "添加模型" })).getByText("Anthropic (Claude)"));
-    const dialog = screen.getByRole("dialog", { name: "配置模型" });
-    await user.click(within(dialog).getByRole("button", { name: "保存并启用" }));
-
-    expect(onSave).toHaveBeenCalledWith("claude", KEYSTORE_MANAGED_API_KEY, "claude-opus-5-5", undefined);
+    expect(onActivate).toHaveBeenCalledWith(KIMI_ENTRY.id);
   });
 
   it("asks for the key again when the endpoint of a stored key is changed", async () => {
     const user = userEvent.setup();
-    const onSave = vi.fn(async () => undefined);
-    mount({
-      onSave,
-      entries: [
-        {
-          provider: "openai",
-          apiKey: KEYSTORE_MANAGED_API_KEY,
-          model: "kimi-k3",
-          baseUrl: "https://api.moonshot.cn/v1",
-        },
-      ],
-    });
+    const onSave = vi.fn(async () => KIMI_ENTRY.id);
+    mount({ onSave, entries: [KIMI_ENTRY] });
 
     await user.click(screen.getByLabelText("编辑 kimi-k3"));
     const dialog = screen.getByRole("dialog", { name: "配置模型" });
@@ -205,12 +208,18 @@ describe("LlmSettingsPanel", () => {
 
     await user.type(within(dialog).getByPlaceholderText("请输入服务商 API Key"), VALID_KEY);
     await user.click(save);
-    expect(onSave).toHaveBeenCalledWith("openai", VALID_KEY, "kimi-k3", "https://api.moonshot.ai/v1");
+    expect(onSave).toHaveBeenCalledWith({
+      id: KIMI_ENTRY.id,
+      provider: "openai",
+      apiKey: VALID_KEY,
+      model: "kimi-k3",
+      baseUrl: "https://api.moonshot.ai/v1",
+    });
   });
 
   it("opens custom model config and saves custom model", async () => {
     const user = userEvent.setup();
-    const onSave = vi.fn(async () => undefined);
+    const onSave = vi.fn(async () => "openai~custom01");
     const onActivate = vi.fn(async () => undefined);
     mount({ onSave, onActivate });
 
@@ -224,14 +233,19 @@ describe("LlmSettingsPanel", () => {
     await user.type(keyInput, VALID_KEY);
     await user.click(screen.getByRole("button", { name: "保存并启用" }));
 
-    expect(onSave).toHaveBeenCalledWith("openai", VALID_KEY, "ox-alpha", "https://api.openai.com/v1");
-    expect(onActivate).toHaveBeenCalledWith("openai");
+    expect(onSave).toHaveBeenCalledWith({
+      provider: "openai",
+      apiKey: VALID_KEY,
+      model: "ox-alpha",
+      baseUrl: "https://api.openai.com/v1",
+    });
+    expect(onActivate).toHaveBeenCalledWith("openai~custom01");
   });
 
   it("opens edit config modal from table row", async () => {
     const user = userEvent.setup();
     mount({
-      entries: [{ provider: "deepseek", apiKey: VALID_KEY, model: "deepseek-v4-flash" }],
+      entries: [{ id: "deepseek", provider: "deepseek", apiKey: VALID_KEY, model: "deepseek-v4-flash" }],
     });
 
     const editBtn = screen.getByLabelText("编辑 deepseek-v4-flash");
@@ -246,10 +260,10 @@ describe("LlmSettingsPanel", () => {
     const onSetEnabled = vi.fn(async () => undefined);
     const onActivate = vi.fn(async () => undefined);
     mount({
-      activeProvider: "openai",
+      activeEntryId: "openai",
       entries: [
-        { provider: "openai", apiKey: VALID_KEY, model: "gpt-5" },
-        { provider: "deepseek", apiKey: VALID_KEY, model: "deepseek-v4-flash", disabled: true },
+        { id: "openai", provider: "openai", apiKey: VALID_KEY, model: "gpt-5" },
+        { id: "deepseek", provider: "deepseek", apiKey: VALID_KEY, model: "deepseek-v4-flash", disabled: true },
       ],
       onSetEnabled,
       onActivate,
@@ -268,18 +282,18 @@ describe("LlmSettingsPanel", () => {
     expect(onSetEnabled).toHaveBeenCalledWith("openai", false);
   });
 
-  it("calls onClear when deleting a configured model from table", async () => {
+  it("calls onClear with the config id when deleting a configured model from table", async () => {
     const user = userEvent.setup();
     const onClear = vi.fn(async () => undefined);
     mount({
-      entries: [{ provider: "stepfun", apiKey: VALID_KEY, model: "step-3.7-flash" }],
+      entries: [{ id: "stepfun~a1b2c3d4", provider: "stepfun", apiKey: VALID_KEY, model: "step-3.7-flash" }],
       onClear,
     });
 
     const deleteBtn = screen.getByLabelText("删除 step-3.7-flash");
     await user.click(deleteBtn);
 
-    expect(onClear).toHaveBeenCalledWith("stepfun");
+    expect(onClear).toHaveBeenCalledWith("stepfun~a1b2c3d4");
   });
 
   it("toggles API key visibility in modal", async () => {
@@ -300,5 +314,3 @@ describe("LlmSettingsPanel", () => {
     expect(input.type).toBe("password");
   });
 });
-
-

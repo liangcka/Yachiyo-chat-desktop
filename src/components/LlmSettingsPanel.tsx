@@ -30,6 +30,8 @@ import { useLocale } from "../i18n/locale-context";
 import type { UiCopy } from "../i18n/messages";
 
 export interface LlmProviderEntry {
+  /** 配置 id：同一厂商可有多条配置，各自独立的 Key */
+  id: string;
   provider: ProviderId;
   apiKey: string;
   model: string;
@@ -37,16 +39,27 @@ export interface LlmProviderEntry {
   disabled?: boolean;
 }
 
+/** 保存表单提交的配置；id 缺省表示新建一条，不覆盖已有配置 */
+export interface LlmEntryDraft {
+  id?: string;
+  provider: ProviderId;
+  apiKey: string;
+  model: string;
+  baseUrl?: string;
+}
+
 export interface LlmSettingsPanelProps {
   copy: UiCopy;
   open: boolean;
-  activeProvider?: ProviderId;
+  /** 当前使用的配置 id */
+  activeEntryId?: string;
   entries: readonly LlmProviderEntry[];
   onClose: () => void;
-  onSave: (provider: ProviderId, apiKey: string, model: string, baseUrl?: string) => Promise<void>;
-  onClear: (provider: ProviderId) => Promise<void>;
-  onActivate: (provider: ProviderId) => Promise<void>;
-  onSetEnabled: (provider: ProviderId, enabled: boolean) => Promise<void>;
+  /** 返回保存后的配置 id */
+  onSave: (draft: LlmEntryDraft) => Promise<string>;
+  onClear: (id: string) => Promise<void>;
+  onActivate: (id: string) => Promise<void>;
+  onSetEnabled: (id: string, enabled: boolean) => Promise<void>;
 }
 
 const zhCopy = {
@@ -180,7 +193,7 @@ interface Feedback {
 export function LlmSettingsPanel({
   copy,
   open,
-  activeProvider,
+  activeEntryId,
   entries,
   onClose,
   onSave,
@@ -189,6 +202,8 @@ export function LlmSettingsPanel({
   onSetEnabled,
 }: LlmSettingsPanelProps) {
   const t = PANEL_COPY[useLocale()];
+  const activeEntry = entries.find((entry) => entry.id === activeEntryId);
+  const activeProvider = activeEntry?.provider;
   const closeRef = useRef<HTMLButtonElement>(null);
   const [selectedProvider, setSelectedProvider] = useState<ProviderId>(
     activeProvider ?? DOMESTIC_PROVIDERS[0],
@@ -205,8 +220,8 @@ export function LlmSettingsPanel({
   const [isCustomModel, setIsCustomModel] = useState(false);
   const [customBaseUrl, setCustomBaseUrl] = useState("");
   const [customModelName, setCustomModelName] = useState("");
-  // 从共用存储槽的其他厂商卡片切换过来时，槽内已存的 Key 属于别家，不能留空沿用
-  const [reuseStoredKey, setReuseStoredKey] = useState(true);
+  // 配置弹窗正在编辑的配置 id；undefined 表示新建一条
+  const [editingId, setEditingId] = useState<string>();
 
   const { render, closing } = useClosing(open, 300);
 
@@ -223,7 +238,7 @@ export function LlmSettingsPanel({
       setFeedback(undefined);
       setShowKey(false);
       setModalMode(null);
-      setReuseStoredKey(true);
+      setEditingId(undefined);
     }
   }
 
@@ -267,52 +282,47 @@ export function LlmSettingsPanel({
     setIsCustomModel(false);
   };
 
+  // 从服务商卡片进入一律新建配置，不会覆盖同厂商已有的配置与 Key
   const handleSelectVendor = (vendor: ModelVendorItem) => {
     setTargetVendor(vendor);
     setIsCustomModel(false);
+    setEditingId(undefined);
     setSelectedProvider(vendor.mappedProvider);
     setPrevSyncKey({ provider: vendor.mappedProvider, entries });
-    const stored = entries.find((item) => item.provider === vendor.mappedProvider);
-    // 槽内配置属于其他卡片时，其模型名与端点对当前厂商无效，改用卡片预设
-    const entry =
-      stored !== undefined && findVendorForEntry(stored.provider, stored.baseUrl)?.id === vendor.id
-        ? stored
-        : undefined;
-    setReuseStoredKey(stored === undefined || entry !== undefined);
-    setApiKeyInput(keyInputFor(entry));
-    setModelInput(entry?.model || vendor.defaultModel);
-    setCustomBaseUrl(entry?.baseUrl ?? vendor.defaultBaseUrl ?? "");
+    setApiKeyInput("");
+    setModelInput(vendor.defaultModel);
+    setCustomBaseUrl(vendor.defaultBaseUrl ?? "");
     setModalMode("config");
   };
 
   const handleSelectCustomModel = () => {
     setIsCustomModel(true);
     setTargetVendor(null);
-    setReuseStoredKey(true);
+    setEditingId(undefined);
     setSelectedProvider("openai");
     setPrevSyncKey({ provider: "openai", entries });
-    const entry = entries.find((item) => item.provider === "openai");
-    setApiKeyInput(keyInputFor(entry));
+    setApiKeyInput("");
     setCustomModelName("ox-alpha");
     setModelInput("ox-alpha");
     setCustomBaseUrl("https://api.openai.com/v1");
     setModalMode("config");
   };
 
-  const handleEditEntry = (providerId: ProviderId, currentModelName: string) => {
-    const entry = entries.find((item) => item.provider === providerId);
+  const handleEditEntry = (id: string) => {
+    const entry = entries.find((item) => item.id === id);
+    if (entry === undefined) return;
     const vendor =
-      findVendorForEntry(providerId, entry?.baseUrl) ??
-      MODEL_VENDORS.find((v) => v.mappedProvider === providerId) ??
+      findVendorForEntry(entry.provider, entry.baseUrl) ??
+      MODEL_VENDORS.find((v) => v.mappedProvider === entry.provider) ??
       MODEL_VENDORS[0];
     setTargetVendor(vendor);
     setIsCustomModel(false);
-    setReuseStoredKey(true);
-    setSelectedProvider(providerId);
-    setPrevSyncKey({ provider: providerId, entries });
+    setEditingId(id);
+    setSelectedProvider(entry.provider);
+    setPrevSyncKey({ provider: entry.provider, entries });
     setApiKeyInput(keyInputFor(entry));
-    setModelInput(currentModelName || entry?.model || vendor.defaultModel);
-    setCustomBaseUrl(entry?.baseUrl ?? vendor.defaultBaseUrl ?? "");
+    setModelInput(entry.model || vendor.defaultModel);
+    setCustomBaseUrl(entry.baseUrl ?? vendor.defaultBaseUrl ?? "");
     setModalMode("config");
   };
 
@@ -324,30 +334,32 @@ export function LlmSettingsPanel({
     const finalBaseUrl = customBaseUrl.trim() || undefined;
     await runAction(
       async () => {
-        await onSave(selectedProvider, keyToSave, finalModel, finalBaseUrl);
-        await onActivate(selectedProvider);
+        const savedId = await onSave({
+          ...(editingId !== undefined ? { id: editingId } : {}),
+          provider: selectedProvider,
+          apiKey: keyToSave,
+          model: finalModel,
+          ...(finalBaseUrl !== undefined ? { baseUrl: finalBaseUrl } : {}),
+        });
+        await onActivate(savedId);
       },
       copy.llmSaved,
     );
     setModalMode(null);
   };
 
-  const handleToggleEnabled = (providerId: ProviderId, enabled: boolean) => {
-    void runAction(() => onSetEnabled(providerId, enabled), copy.llmSaved);
+  const handleToggleEnabled = (id: string, enabled: boolean) => {
+    void runAction(() => onSetEnabled(id, enabled), copy.llmSaved);
   };
 
-  const handleClearEntry = (providerId: ProviderId) => {
+  const handleClearEntry = (id: string) => {
     void runAction(async () => {
-      await onClear(providerId);
-      if (selectedProvider === providerId) {
-        setApiKeyInput("");
-        const meta = getProviderMeta(providerId);
-        setModelInput(meta.defaultModel);
-      }
+      await onClear(id);
+      if (editingId === id) setEditingId(undefined);
     }, copy.llmCleared);
   };
 
-  // 管理列表直接渲染用户实际保存的配置条目（每厂商一行）
+  // 管理列表直接渲染用户实际保存的配置条目（每条配置一行，同一厂商可有多行）
   const displayRows: Array<{
     id: string;
     modelName: string;
@@ -357,12 +369,16 @@ export function LlmSettingsPanel({
     isActive: boolean;
     isEnabled: boolean;
   }> = entries.map((entry) => ({
-    id: `row-${entry.provider}`,
+    id: entry.id,
     modelName: entry.model || getProviderMeta(entry.provider).defaultModel,
-    providerLabel: PROVIDER_METADATA[entry.provider].label,
+    // 原生端点沿用厂商名；OpenAI 兼容的自定义端点显示各自服务商名（Kimi、通义等），便于区分同厂商的多条配置
+    providerLabel:
+      entry.baseUrl === undefined
+        ? PROVIDER_METADATA[entry.provider].label
+        : findVendorForEntry(entry.provider, entry.baseUrl)?.name ?? PROVIDER_METADATA[entry.provider].label,
     providerId: entry.provider,
     ...(entry.baseUrl !== undefined ? { baseUrl: entry.baseUrl } : {}),
-    isActive: activeProvider === entry.provider,
+    isActive: activeEntryId === entry.id,
     isEnabled: entry.disabled !== true,
   }));
 
@@ -370,8 +386,12 @@ export function LlmSettingsPanel({
   // Base URL 允许留空（走厂商原生端点），填写时必须是合法 https 地址
   const trimmedBaseUrl = customBaseUrl.trim();
   const isBaseUrlValid = trimmedBaseUrl.length === 0 || isValidBaseUrl(trimmedBaseUrl);
-  const storedEntry = entries.find((entry) => entry.provider === selectedProvider);
-  const hasStoredKey = reuseStoredKey && storedEntry?.apiKey === KEYSTORE_MANAGED_API_KEY;
+  // 弹窗编辑已有配置时沿用它的 Key；隐藏的兼容表单按厂商取第一条配置
+  const storedEntry =
+    modalMode === "config"
+      ? entries.find((entry) => entry.id === editingId)
+      : entries.find((entry) => entry.provider === selectedProvider);
+  const hasStoredKey = storedEntry?.apiKey === KEYSTORE_MANAGED_API_KEY;
   // 桌面网关把已存 Key 绑定在保存时的端点上，端点改了就不能再沿用
   const endpointChanged = hasStoredKey && (trimmedBaseUrl || undefined) !== storedEntry?.baseUrl;
   const canReuseStoredKey = hasStoredKey && !endpointChanged;
@@ -451,26 +471,32 @@ export function LlmSettingsPanel({
           type="button"
           disabled={busy || !isKeyValid}
           onClick={() =>
-            void onSave(selectedProvider, keyToSave, modelInput, customBaseUrl.trim() || undefined)
+            void onSave({
+              ...(storedEntry !== undefined ? { id: storedEntry.id } : {}),
+              provider: selectedProvider,
+              apiKey: keyToSave,
+              model: modelInput,
+              ...(customBaseUrl.trim() ? { baseUrl: customBaseUrl.trim() } : {}),
+            })
           }
         >
           {t.save}
         </button>
-        {entries.find((e) => e.provider === selectedProvider) && (
+        {storedEntry !== undefined && (
           <button
             type="button"
             disabled={busy}
-            onClick={() => void onClear(selectedProvider)}
+            onClick={() => void onClear(storedEntry.id)}
           >
             {t.clearConfig}
           </button>
         )}
-        {entries.find((e) => e.provider === selectedProvider) &&
-          activeProvider !== selectedProvider && (
+        {storedEntry !== undefined &&
+          activeEntryId !== storedEntry.id && (
             <button
               type="button"
               disabled={busy}
-              onClick={() => void onActivate(selectedProvider)}
+              onClick={() => void onActivate(storedEntry.id)}
             >
               {t.setActive}
             </button>
@@ -550,7 +576,7 @@ export function LlmSettingsPanel({
                         className="model-mgmt-action-btn"
                         title={t.editTitle}
                         aria-label={t.editLabel(row.modelName)}
-                        onClick={() => handleEditEntry(row.providerId, row.modelName)}
+                        onClick={() => handleEditEntry(row.id)}
                       >
                         <Edit3 size={14} />
                       </button>
@@ -560,7 +586,7 @@ export function LlmSettingsPanel({
                         className="model-mgmt-action-btn model-mgmt-action-btn--delete"
                         title={t.deleteTitle}
                         aria-label={t.deleteLabel(row.modelName)}
-                        onClick={() => handleClearEntry(row.providerId)}
+                        onClick={() => handleClearEntry(row.id)}
                       >
                         <Trash2 size={14} />
                       </button>
@@ -571,7 +597,7 @@ export function LlmSettingsPanel({
                         aria-checked={row.isEnabled}
                         disabled={busy}
                         className={`settings-toggle-switch ${row.isEnabled ? "settings-toggle-switch--active" : ""}`}
-                        onClick={() => handleToggleEnabled(row.providerId, !row.isEnabled)}
+                        onClick={() => handleToggleEnabled(row.id, !row.isEnabled)}
                         title={row.isEnabled ? t.enabledTitle : t.enableTitle}
                         aria-label={t.toggleLabel(row.modelName)}
                       >

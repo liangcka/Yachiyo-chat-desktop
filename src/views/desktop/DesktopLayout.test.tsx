@@ -69,7 +69,7 @@ describe("DesktopLayout", () => {
     copy,
     imageUrls: new Map(),
     isOnline: true,
-    llmActiveProvider: undefined,
+    llmActiveEntryId: undefined,
     llmEntries: [],
     onClearData: vi.fn(),
     onDelete: vi.fn(),

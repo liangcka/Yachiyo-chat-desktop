@@ -59,7 +59,7 @@ export function DesktopChatArea({
   copy,
   imageUrls,
   isOnline,
-  llmActiveProvider,
+  llmActiveEntryId,
   llmEntries,
   onImage,
   onLlmActivate,
@@ -87,8 +87,8 @@ export function DesktopChatArea({
   const loadingLabel = isJapanese ? "会話を読み込み中…" : "正在加载对话…";
   const isBlank = controller.messages.length === 0 && !controller.activeConversation?.summary;
   // 桌面端没有服务端兜底模型：未配置时直接引导到设置，而不是发出必然失败的请求
-  const needsModelSetup = isDesktopApp() && llmActiveProvider === undefined;
-  const activeLlmEntry = llmEntries.find((entry) => entry.provider === llmActiveProvider);
+  const activeLlmEntry = llmEntries.find((entry) => entry.id === llmActiveEntryId);
+  const needsModelSetup = isDesktopApp() && activeLlmEntry === undefined;
 
   // 走与输入框相同的发送入口，但不带输入框里的附件
   const controllerLocale = controller.locale;
@@ -678,10 +678,10 @@ export function DesktopChatArea({
 
             {/* 模型选择器 */}
             <ModelSelect
-              activeProvider={llmActiveProvider}
+              activeEntryId={llmActiveEntryId}
               entries={llmEntries}
-              onSelect={(provider) => {
-                void onLlmActivate(provider);
+              onSelect={(id) => {
+                void onLlmActivate(id);
               }}
               onOpenSettings={() => {
                 onOpenSettings?.("models");

@@ -88,6 +88,7 @@ pub struct SessionResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SaveKeyRequest {
+    /// 密钥槽名：厂商名，或同一厂商多条配置时的“厂商名~后缀”
     pub provider: String,
     pub key: String,
     /// Key 所属的自定义端点；省略表示厂商原生端点。网关只会把 Key 发往保存时绑定的端点
@@ -172,6 +173,9 @@ async fn handle_save_key(
     State(state): State<AppState>,
     Json(payload): Json<SaveKeyRequest>,
 ) -> impl IntoResponse {
+    if !crate::crypto::keys::is_valid_slot(&payload.provider) {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "invalid key slot" })));
+    }
     if let Some(base_url) = payload.base_url.as_deref() {
         if !crate::gateway::providers::openai_compat::is_valid_base_url(base_url) {
             return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "invalid baseUrl" })));
@@ -233,7 +237,7 @@ async fn handle_reasoning_levels(Json(request): Json<ReasoningLevelsRequest>) ->
 }
 
 async fn handle_deepseek_balance(State(state): State<AppState>) -> Response {
-    let Some(key) = state.key_store.get_key_for_endpoint("deepseek", None) else {
+    let Some(key) = state.key_store.native_key_for_provider("deepseek") else {
         return balance_problem(StatusCode::BAD_REQUEST, "API_KEY_MISSING");
     };
     let (primary, fallback) = state.select_clients(Some(crate::types::ProviderId::Deepseek), None);

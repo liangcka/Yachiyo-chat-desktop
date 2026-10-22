@@ -58,9 +58,10 @@ describe("SettingsModal", () => {
     copy,
     imageUrls: new Map(),
     isOnline: true,
-    llmActiveProvider: "deepseek",
+    llmActiveEntryId: "deepseek",
     llmEntries: [
       {
+        id: "deepseek",
         provider: "deepseek",
         apiKey: "sk-test",
         model: "deepseek-chat",

@@ -22,6 +22,25 @@ pub struct KeyStoreData {
 }
 
 /// 端点比较前的规范化：去掉首尾空白与尾部斜杠
+/// 密钥槽名：厂商名本身（旧版每厂商一把 Key），或“厂商名~后缀”（同一厂商的多条配置各占一槽）
+pub fn is_valid_slot(slot: &str) -> bool {
+    let (provider, suffix) = match slot.split_once('~') {
+        Some((provider, suffix)) => (provider, Some(suffix)),
+        None => (slot, None),
+    };
+    let provider_ok = !provider.is_empty() && provider.len() <= 32 && provider.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit());
+    let suffix_ok = match suffix {
+        None => true,
+        Some(s) => !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+    };
+    provider_ok && suffix_ok
+}
+
+/// 槽是否归属该厂商
+pub fn slot_belongs_to(slot: &str, provider: &str) -> bool {
+    is_valid_slot(slot) && (slot == provider || slot.strip_prefix(provider).is_some_and(|rest| rest.starts_with('~')))
+}
+
 fn normalize_endpoint(endpoint: &str) -> String {
     endpoint.trim().trim_end_matches('/').to_string()
 }
@@ -164,6 +183,21 @@ impl KeyStore {
             data.keys.remove(provider);
             data.endpoints.remove(provider);
         })
+    }
+
+    /// 该厂商任一绑定原生端点（无自定义端点）的 Key，优先旧版的厂商名槽；供余额查询等只认原生端点的场景
+    pub fn native_key_for_provider(&self, provider: &str) -> Option<String> {
+        let data = self.read_data();
+        if let Some(key) = data.keys.get(provider).filter(|_| !data.endpoints.contains_key(provider)) {
+            return Some(key.clone());
+        }
+        let mut slots: Vec<&String> = data
+            .keys
+            .keys()
+            .filter(|slot| slot_belongs_to(slot, provider) && !data.endpoints.contains_key(slot.as_str()))
+            .collect();
+        slots.sort();
+        slots.first().and_then(|slot| data.keys.get(slot.as_str()).cloned())
     }
 
     pub fn list_configured_providers(&self) -> Vec<String> {
@@ -380,6 +414,42 @@ mod tests {
         let store = KeyStore::at_path(path.clone());
         assert!(store.set_key("deepseek", "sk-test-1234567890").is_err());
         assert!(path.is_dir(), "读取失败时不得用空数据覆盖原文件");
+    }
+
+    #[test]
+    fn slots_of_one_provider_keep_separate_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = KeyStore::at_path(dir.path().join("keys.dat"));
+        store.set_key_for_endpoint("openai~kimi", "kimi-key-1234567890", Some("https://api.moonshot.cn/v1")).unwrap();
+        store.set_key_for_endpoint("openai~qwen", "qwen-key-1234567890", Some("https://dashscope.aliyuncs.com/compatible-mode/v1")).unwrap();
+        assert_eq!(store.get_key_for_endpoint("openai~kimi", Some("https://api.moonshot.cn/v1")).as_deref(), Some("kimi-key-1234567890"));
+        assert_eq!(store.get_key_for_endpoint("openai~qwen", Some("https://dashscope.aliyuncs.com/compatible-mode/v1")).as_deref(), Some("qwen-key-1234567890"));
+        assert_eq!(store.get_key_for_endpoint("openai~kimi", Some("https://dashscope.aliyuncs.com/compatible-mode/v1")), None);
+    }
+
+    #[test]
+    fn slot_names_are_validated_and_scoped_to_provider() {
+        assert!(is_valid_slot("deepseek"));
+        assert!(is_valid_slot("openai~a1B2-c_3"));
+        assert!(!is_valid_slot("openai~"));
+        assert!(!is_valid_slot("../etc"));
+        assert!(!is_valid_slot("OpenAI"));
+        assert!(slot_belongs_to("openai~x1", "openai"));
+        assert!(slot_belongs_to("openai", "openai"));
+        assert!(!slot_belongs_to("claude~x1", "openai"));
+        assert!(!slot_belongs_to("openaix~x1", "openai"));
+    }
+
+    #[test]
+    fn native_key_prefers_legacy_slot_and_skips_custom_endpoints() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = KeyStore::at_path(dir.path().join("keys.dat"));
+        store.set_key_for_endpoint("deepseek~a", "proxy-key-1234567890", Some("https://proxy.example.com/v1")).unwrap();
+        assert_eq!(store.native_key_for_provider("deepseek"), None);
+        store.set_key("deepseek~b", "native-key-1234567890").unwrap();
+        assert_eq!(store.native_key_for_provider("deepseek").as_deref(), Some("native-key-1234567890"));
+        store.set_key("deepseek", "legacy-key-1234567890").unwrap();
+        assert_eq!(store.native_key_for_provider("deepseek").as_deref(), Some("legacy-key-1234567890"));
     }
 
     #[test]

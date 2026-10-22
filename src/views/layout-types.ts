@@ -1,7 +1,6 @@
 import type { useChatController } from "../app/use-chat-controller";
-import type { LlmProviderEntry } from "../components/LlmSettingsPanel";
+import type { LlmEntryDraft, LlmProviderEntry } from "../components/LlmSettingsPanel";
 import type { Conversation, Locale } from "../domain/chat";
-import type { ProviderId } from "../domain/llm";
 import type { ImageProcessingErrorCode, ProcessedImage } from "../features/capture/image-processor";
 import type { UiCopy } from "../i18n/messages";
 import type { usePwaUpdate } from "../pwa/use-pwa-update";
@@ -18,7 +17,8 @@ export interface SharedViewProps {
   setComposerValue: (value: string) => void;
   activeProviderSupportsImage: boolean;
   activeSkillIds: string[];
-  llmActiveProvider?: ProviderId;
+  /** 当前使用的模型配置 id */
+  llmActiveEntryId?: string;
   llmEntries: readonly LlmProviderEntry[];
   webSearchSettings: WebSearchSettings;
   pwa: ReturnType<typeof usePwaUpdate>;
@@ -36,10 +36,11 @@ export interface SharedViewProps {
   onClearData: () => Promise<void>;
   onLocale: (locale: Locale) => Promise<void>;
   onSignOut: () => Promise<void>;
-  onLlmSave: (provider: ProviderId, apiKey: string, model: string) => Promise<void>;
-  onLlmClear: (provider: ProviderId) => Promise<void>;
-  onLlmActivate: (provider: ProviderId) => Promise<void>;
-  onLlmSetEnabled: (provider: ProviderId, enabled: boolean) => Promise<void>;
+  /** 保存一条模型配置，返回其 id；draft.id 缺省时新建 */
+  onLlmSave: (draft: LlmEntryDraft) => Promise<string>;
+  onLlmClear: (id: string) => Promise<void>;
+  onLlmActivate: (id: string) => Promise<void>;
+  onLlmSetEnabled: (id: string, enabled: boolean) => Promise<void>;
   onSkillToggle: (id: string, next: boolean) => Promise<void>;
   onWebSearchSettingsChange: (partial: Partial<WebSearchSettings>) => void;
   showToast: (message: string, tone?: "info" | "error") => void;

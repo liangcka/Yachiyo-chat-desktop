@@ -114,6 +114,9 @@ pub struct ClientChatRequest {
     /// 自定义 OpenAI 兼容端点（与 Web 端 baseUrl 契约一致）：仅 OpenAI 兼容厂商有效，存在时模型名交由上游校验
     #[serde(rename = "baseUrl", skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
+    /// 同一厂商可配置多条模型、各用各的 Key：指明取用哪个密钥槽（缺省为厂商名本身的槽）
+    #[serde(rename = "keySlot", skip_serializing_if = "Option::is_none")]
+    pub key_slot: Option<String>,
     #[serde(rename = "webSearch", skip_serializing_if = "Option::is_none")]
     pub web_search: Option<bool>,
     #[serde(rename = "smartSearch", skip_serializing_if = "Option::is_none")]

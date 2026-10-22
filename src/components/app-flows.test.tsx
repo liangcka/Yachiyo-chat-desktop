@@ -290,7 +290,7 @@ describe("App flows", () => {
     const db = new YachiyoDatabase(`yachiyo-app-llm-${crypto.randomUUID()}`);
     const llmSettings = new LlmSettingsService(db);
     const apiKey = "sk-step-plan-abcdefghijklmnopqrstuvwxyz012345";
-    await llmSettings.saveProvider("stepfun", apiKey, "step-3.7-flash");
+    await llmSettings.saveEntry({ provider: "stepfun", apiKey, model: "step-3.7-flash" });
     const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
       options.onDelta("这是模型返回的动态回答");
       return { truncated: false };
@@ -320,7 +320,7 @@ describe("App flows", () => {
     const db = new YachiyoDatabase(`yachiyo-app-llm-login-${crypto.randomUUID()}`);
     const llmSettings = new LlmSettingsService(db);
     const apiKey = "sk-step-plan-abcdefghijklmnopqrstuvwxyz012345";
-    await llmSettings.saveProvider("stepfun", apiKey, "step-3.7-flash");
+    await llmSettings.saveEntry({ provider: "stepfun", apiKey, model: "step-3.7-flash" });
     const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
       options.onDelta("这是模型返回的动态回答");
       return { truncated: false };

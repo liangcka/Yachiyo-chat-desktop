@@ -503,8 +503,9 @@ export function SettingsModal({
 
   if (!open) return null;
 
-  const currentProviderLabel = shared.llmActiveProvider
-    ? PROVIDER_METADATA[shared.llmActiveProvider]?.label ?? shared.llmActiveProvider
+  const activeLlmEntry = shared.llmEntries.find((entry) => entry.id === shared.llmActiveEntryId);
+  const currentProviderLabel = activeLlmEntry
+    ? PROVIDER_METADATA[activeLlmEntry.provider].label
     : t.defaultProvider;
 
 
@@ -877,7 +878,7 @@ export function SettingsModal({
               </div>
 
               <LlmSettingsPanel
-                activeProvider={shared.llmActiveProvider}
+                activeEntryId={shared.llmActiveEntryId}
                 copy={shared.copy}
                 entries={shared.llmEntries}
                 onActivate={shared.onLlmActivate}

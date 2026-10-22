@@ -1,21 +1,28 @@
 import { Check, ChevronDown, Cpu } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { PROVIDER_METADATA, type ProviderId } from "../../domain/llm";
+import { PROVIDER_METADATA, findVendorForEntry, type ProviderId } from "../../domain/llm";
 import { useLocale } from "../../i18n/locale-context";
 
 export interface ModelSelectProps {
-  activeProvider?: ProviderId;
+  /** 当前使用的模型配置 id */
+  activeEntryId?: string;
   activeModel?: string;
-  entries: readonly { provider: ProviderId; apiKey: string; model: string; disabled?: boolean }[];
-  onSelect: (provider: ProviderId) => void;
+  entries: readonly { id: string; provider: ProviderId; apiKey: string; model: string; baseUrl?: string; disabled?: boolean }[];
+  onSelect: (id: string) => void;
   onOpenSettings: () => void;
   disabled?: boolean;
 }
 
 
 
+/** 同一厂商可有多条配置：OpenAI 兼容的服务商按端点显示各自名称（如 Kimi、通义），而不是统一显示 OpenAI */
+function entryLabel(entry: { provider: ProviderId; baseUrl?: string }): string {
+  const meta = PROVIDER_METADATA[entry.provider];
+  return entry.baseUrl === undefined ? meta.label : findVendorForEntry(entry.provider, entry.baseUrl)?.name ?? meta.label;
+}
+
 export function ModelSelect({
-  activeProvider,
+  activeEntryId,
   activeModel,
   entries,
   onSelect,
@@ -44,15 +51,16 @@ export function ModelSelect({
   }, [open]);
 
   const enabledEntries = entries.filter((e) => e.disabled !== true);
-  const activeEntry = entries.find((e) => e.provider === activeProvider);
-  const activeMeta = activeProvider ? PROVIDER_METADATA[activeProvider] : undefined;
+  const activeEntry = entries.find((e) => e.id === activeEntryId);
+  const activeMeta = activeEntry ? PROVIDER_METADATA[activeEntry.provider] : undefined;
+  const activeLabel = activeEntry ? entryLabel(activeEntry) : undefined;
   const currentModel = activeEntry?.model || activeModel || activeMeta?.defaultModel;
   const modelLabel = currentModel?.replace(/^glm-/i, "GLM-").replace(/-flash$/i, " Flash");
 
-  const fullLabel = activeMeta
+  const fullLabel = activeLabel
     ? currentModel
-      ? `${activeMeta.label} (${currentModel})`
-      : activeMeta.label
+      ? `${activeLabel} (${currentModel})`
+      : activeLabel
     : ja ? "モデルを選択 (Default)" : "选择模型 (Default)";
 
   return (
@@ -91,19 +99,19 @@ export function ModelSelect({
             ) : (
               enabledEntries.map((entry) => {
                 const meta = PROVIDER_METADATA[entry.provider];
-                const isSelected = entry.provider === activeProvider;
+                const isSelected = entry.id === activeEntryId;
                 return (
                   <button
-                    key={entry.provider}
+                    key={entry.id}
                     type="button"
                     className={`dsh-model-select__option ${isSelected ? "dsh-model-select__option--selected" : ""}`}
                     onClick={() => {
-                      onSelect(entry.provider);
+                      onSelect(entry.id);
                       setOpen(false);
                     }}
                   >
                     <div className="dsh-model-select__option-main">
-                      <div className="dsh-model-select__option-name">{meta.label}</div>
+                      <div className="dsh-model-select__option-name">{entryLabel(entry)}</div>
                       <div className="dsh-model-select__option-model">{entry.model || meta.defaultModel}</div>
                     </div>
                     {isSelected ? <Check size={14} className="dsh-model-select__check" /> : null}

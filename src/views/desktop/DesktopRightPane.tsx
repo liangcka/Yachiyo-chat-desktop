@@ -158,7 +158,7 @@ export function DesktopRightPane({
         {/* 兼容旧版 Tab 映射 */}
         {activeTab === "llm" ? (
           <LlmSettingsPanel
-            activeProvider={shared.llmActiveProvider}
+            activeEntryId={shared.llmActiveEntryId}
             copy={shared.copy}
             entries={shared.llmEntries}
             onActivate={shared.onLlmActivate}

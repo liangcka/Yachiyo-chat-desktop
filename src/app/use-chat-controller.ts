@@ -691,6 +691,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
                   ...(activeConfig.baseUrl !== undefined
                     ? { baseUrl: activeConfig.baseUrl }
                     : {}),
+                  ...(activeConfig.keySlot !== undefined ? { keySlot: activeConfig.keySlot } : {}),
                 }
               : {}),
           },
@@ -958,6 +959,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
                   ...(activeConfig.baseUrl !== undefined
                     ? { baseUrl: activeConfig.baseUrl }
                     : {}),
+                  ...(activeConfig.keySlot !== undefined ? { keySlot: activeConfig.keySlot } : {}),
                 }
               : {}),
             ...(webSearchEnabledRef.current === true ? { webSearch: true } : {}),
@@ -1236,6 +1238,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
                   ...(activeConfig.baseUrl !== undefined
                     ? { baseUrl: activeConfig.baseUrl }
                     : {}),
+                  ...(activeConfig.keySlot !== undefined ? { keySlot: activeConfig.keySlot } : {}),
                 }
               : {}),
           },

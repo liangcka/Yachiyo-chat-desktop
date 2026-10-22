@@ -5,8 +5,8 @@ import { ModelSelect } from "./ModelSelect";
 
 describe("ModelSelect", () => {
   const mockEntries = [
-    { provider: "stepfun" as const, apiKey: "key-1", model: "step-3.7-flash" },
-    { provider: "deepseek" as const, apiKey: "key-2", model: "deepseek-v4-flash" },
+    { id: "stepfun", provider: "stepfun" as const, apiKey: "key-1", model: "step-3.7-flash" },
+    { id: "deepseek~a1b2c3d4", provider: "deepseek" as const, apiKey: "key-2", model: "deepseek-v4-flash" },
   ];
 
   it("renders placeholder when no provider is active", () => {
@@ -24,7 +24,7 @@ describe("ModelSelect", () => {
   it("renders clean structured vendor and model name without redundant text or brackets", () => {
     render(
       <ModelSelect
-        activeProvider="stepfun"
+        activeEntryId="stepfun"
         entries={mockEntries}
         onSelect={vi.fn()}
         onOpenSettings={vi.fn()}
@@ -45,7 +45,7 @@ describe("ModelSelect", () => {
 
     render(
       <ModelSelect
-        activeProvider="stepfun"
+        activeEntryId="stepfun"
         entries={mockEntries}
         onSelect={onSelect}
         onOpenSettings={onOpenSettings}
@@ -69,7 +69,7 @@ describe("ModelSelect", () => {
     expect(deepseekOption).not.toBeNull();
     if (deepseekOption) {
       await user.click(deepseekOption);
-      expect(onSelect).toHaveBeenCalledWith("deepseek");
+      expect(onSelect).toHaveBeenCalledWith("deepseek~a1b2c3d4");
     }
 
     // 菜单关闭
@@ -82,7 +82,7 @@ describe("ModelSelect", () => {
 
     render(
       <ModelSelect
-        activeProvider="stepfun"
+        activeEntryId="stepfun"
         entries={mockEntries}
         onSelect={vi.fn()}
         onOpenSettings={onOpenSettings}
