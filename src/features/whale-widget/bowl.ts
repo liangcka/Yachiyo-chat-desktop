@@ -1,26 +1,7 @@
+import bowlImageUrl from "./bowl.webp";
+
 const BOWL_CLASS = "yachiyo-whale-bowl";
 const KNOCK_CLASS = "yachiyo-whale-bowl--knock";
-
-const BOWL_SVG = `<svg viewBox="0 0 200 100" aria-hidden="true" focusable="false">
-  <defs>
-    <linearGradient id="yachiyo-whale-bowl-shell" x1="0" x2="1" y1="0" y2="0">
-      <stop offset="0" stop-color="#6b727c" />
-      <stop offset="0.28" stop-color="#c9ced6" />
-      <stop offset="0.42" stop-color="#f4f6f9" />
-      <stop offset="0.62" stop-color="#aab0b9" />
-      <stop offset="1" stop-color="#5d636c" />
-    </linearGradient>
-    <linearGradient id="yachiyo-whale-bowl-rim" x1="0" x2="1" y1="0" y2="0">
-      <stop offset="0" stop-color="#5a6069" />
-      <stop offset="0.4" stop-color="#e2e6ec" />
-      <stop offset="1" stop-color="#565c65" />
-    </linearGradient>
-  </defs>
-  <path d="M16 82C19 46 42 16 100 13c58 3 81 33 84 69z" fill="url(#yachiyo-whale-bowl-shell)" stroke="#4b5059" stroke-width="2" />
-  <ellipse cx="100" cy="15" rx="44" ry="6" fill="#d7dbe1" stroke="#4b5059" stroke-width="1.6" />
-  <path d="M60 30c-9 10-14 26-15 46" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.7" />
-  <ellipse cx="100" cy="84" rx="97" ry="11" fill="url(#yachiyo-whale-bowl-rim)" stroke="#4b5059" stroke-width="2" />
-</svg>`;
 
 let audio: AudioContext | null = null;
 
@@ -63,7 +44,11 @@ export function installWhaleBowl(): void {
   bowl.className = BOWL_CLASS;
   bowl.title = "敲一下";
   bowl.setAttribute("aria-label", "敲一下小鲸鱼头上的盆");
-  bowl.innerHTML = BOWL_SVG;
+  const image = document.createElement("img");
+  image.src = bowlImageUrl;
+  image.alt = "";
+  image.draggable = false;
+  bowl.append(image);
   bowl.addEventListener("animationend", () => bowl.classList.remove(KNOCK_CLASS));
 
   const attach = (): boolean => {

@@ -9,20 +9,20 @@ html[data-whale-hidden] body > [class*="dshw"] {
  */
 .yachiyo-whale-bowl {
   position: absolute;
-  left: 57%;
-  top: 43.5%;
-  width: 42.2%;
-  aspect-ratio: 2 / 1;
+  left: 53.5%;
+  top: 36.6%;
+  width: 49%;
+  aspect-ratio: 440 / 314;
   padding: 0;
   border: 0;
   background: none;
   cursor: pointer;
   pointer-events: auto;
   transform: rotate(8deg);
-  transform-origin: 50% 84%;
+  transform-origin: 50% 64%;
 }
 
-.yachiyo-whale-bowl svg {
+.yachiyo-whale-bowl img {
   display: block;
   width: 100%;
   height: 100%;
