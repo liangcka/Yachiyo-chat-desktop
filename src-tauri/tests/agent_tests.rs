@@ -490,6 +490,127 @@ async fn test_loop_multi_turn_chain() {
     assert!(matches!(&second[2], AgentMessage::ToolResult { content, .. } if content.contains("内容")));
 }
 
+fn tool_call(id: &str, name: &str, arguments: serde_json::Value) -> ToolInvocation {
+    ToolInvocation { id: id.to_string(), name: name.to_string(), arguments }
+}
+
+fn tool_event_order(events: &[ClientStreamEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|ev| match ev {
+            ClientStreamEvent::ToolCall { id, .. } => Some(format!("call:{id}")),
+            ClientStreamEvent::ToolResult { id, .. } => Some(format!("result:{id}")),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn test_loop_runs_independent_reads_concurrently_in_call_order() {
+    let dir = temp_workspace();
+    std::fs::write(dir.path().join("a.txt"), "甲").unwrap();
+    std::fs::write(dir.path().join("b.txt"), "乙").unwrap();
+    let executor = ScriptedExecutor::new(vec![
+        TurnOutcome {
+            reasoning: String::new(), native: Vec::new(),
+            text: String::new(),
+            tool_calls: vec![
+                tool_call("call-a", "read_file", serde_json::json!({ "path": "a.txt" })),
+                tool_call("call-b", "read_file", serde_json::json!({ "path": "b.txt" })),
+                tool_call("call-ls", "list_directory", serde_json::json!({ "path": "." })),
+            ],
+            usage: None,
+        },
+        done_turn("读完了"),
+    ]);
+    let (sink, events) = collector();
+    let gate = ApprovalRegistry::new();
+    let mut checkpoint = Some(checkpoint_store(dir.path(), "run-concurrent"));
+    let cancelled = AtomicBool::new(false);
+    let http = reqwest::Client::new();
+
+    let outcome = run_agent_loop(
+        vec![AgentMessage::User { text: "读两个文件".to_string(), image_data_url: None }],
+        get_agent_tools_schema(),
+        AgentLoopConfig::default(),
+        &executor,
+        &gate,
+        &mut checkpoint,
+        &cancelled,
+        &sink,
+        Some(dir.path()),
+        &http,
+    )
+    .await
+    .unwrap();
+
+    assert!(matches!(outcome, LoopOutcome::Completed { .. }));
+    // 整段先全部标为执行中，再按调用顺序回填结果
+    assert_eq!(
+        tool_event_order(&events.lock().unwrap()),
+        ["call:call-a", "call:call-b", "call:call-ls", "result:call-a", "result:call-b", "result:call-ls"]
+    );
+    let second = &executor.seen.lock().unwrap()[1];
+    assert_eq!(second.len(), 5);
+    assert!(matches!(&second[2], AgentMessage::ToolResult { tool_call_id, content, .. } if tool_call_id == "call-a" && content.contains('甲')));
+    assert!(matches!(&second[3], AgentMessage::ToolResult { tool_call_id, content, .. } if tool_call_id == "call-b" && content.contains('乙')));
+    assert!(matches!(&second[4], AgentMessage::ToolResult { tool_call_id, content, .. } if tool_call_id == "call-ls" && content.contains("a.txt")));
+}
+
+#[tokio::test]
+async fn test_loop_reads_after_write_in_same_turn_see_new_content() {
+    let dir = temp_workspace();
+    std::fs::write(dir.path().join("a.txt"), "甲").unwrap();
+    std::fs::write(dir.path().join("b.txt"), "乙").unwrap();
+    let executor = ScriptedExecutor::new(vec![
+        TurnOutcome {
+            reasoning: String::new(), native: Vec::new(),
+            text: String::new(),
+            tool_calls: vec![
+                tool_call("read-1", "read_file", serde_json::json!({ "path": "a.txt" })),
+                tool_call("edit", "edit_file", serde_json::json!({ "path": "a.txt", "old_string": "甲", "new_string": "丙" })),
+                tool_call("read-2", "read_file", serde_json::json!({ "path": "a.txt" })),
+                tool_call("read-3", "read_file", serde_json::json!({ "path": "b.txt" })),
+            ],
+            usage: None,
+        },
+        done_turn("改好了"),
+    ]);
+    let (sink, events) = collector();
+    let gate = ApprovalRegistry::new();
+    let mut checkpoint = Some(checkpoint_store(dir.path(), "run-write-barrier"));
+    let cancelled = AtomicBool::new(false);
+    let http = reqwest::Client::new();
+    let mut config = AgentLoopConfig::default();
+    config.execution_mode = AgentExecutionMode::FullAuto;
+
+    let outcome = run_agent_loop(
+        vec![AgentMessage::User { text: "改 a.txt".to_string(), image_data_url: None }],
+        get_agent_tools_schema(),
+        config,
+        &executor,
+        &gate,
+        &mut checkpoint,
+        &cancelled,
+        &sink,
+        Some(dir.path()),
+        &http,
+    )
+    .await
+    .unwrap();
+
+    assert!(matches!(outcome, LoopOutcome::Completed { .. }));
+    // 写操作是并发段的边界：之前的读取先完成，之后的读取等写入落地再一起并发
+    assert_eq!(
+        tool_event_order(&events.lock().unwrap()),
+        ["call:read-1", "result:read-1", "call:edit", "result:edit", "call:read-2", "call:read-3", "result:read-2", "result:read-3"]
+    );
+    let second = &executor.seen.lock().unwrap()[1];
+    assert!(matches!(&second[3], AgentMessage::ToolResult { tool_call_id, content, .. } if tool_call_id == "edit" && !content.contains("FS_")));
+    assert!(matches!(&second[4], AgentMessage::ToolResult { tool_call_id, content, .. } if tool_call_id == "read-2" && content.contains('丙')));
+    assert!(matches!(&second[5], AgentMessage::ToolResult { tool_call_id, content, .. } if tool_call_id == "read-3" && content.contains('乙')));
+}
+
 #[tokio::test]
 async fn test_loop_carries_turn_reasoning_into_next_request() {
     let dir = temp_workspace();

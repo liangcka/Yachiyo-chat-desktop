@@ -209,8 +209,51 @@ pub async fn run_agent_loop_ext(
         let mut turn_outputs: Vec<String> = Vec::with_capacity(outcome.tool_calls.len());
         // look 截图：工具结果只回填文字，图片在本轮工具结果之后作为一条带图消息交给模型
         let mut turn_image: Option<String> = None;
-        for call in &outcome.tool_calls {
+        let spill_root = if config.execution_mode == AgentExecutionMode::Readonly { None } else { workspace_root };
+        let mut record_result = |call: &ToolInvocation, output: String, is_error: bool, duration_ms: u64| {
+            let model_output = if is_error { output } else { process_tool_output(&call.name, &output, spill_root) };
+            sink(LoopEmit::Event(ClientStreamEvent::ToolResult {
+                id: call.id.clone(),
+                name: call.name.clone(),
+                output: preview_tool_output(&model_output),
+                is_error,
+                duration_ms,
+            }));
+            turn_outputs.push(model_output.clone());
+            messages.push(AgentMessage::ToolResult {
+                tool_call_id: call.id.clone(),
+                name: call.name.clone(),
+                content: model_output,
+            });
+        };
+        let calls = &outcome.tool_calls;
+        let mut index = 0;
+        while index < calls.len() {
             if cancelled.load(Ordering::Relaxed) { return Ok(LoopOutcome::Cancelled); }
+            // 连续的免审批只读调用互不依赖，整段并发执行，结果仍按调用顺序回填
+            let concurrent = calls[index..].iter().take_while(|call| runs_concurrently(&call.name, workspace_root)).count();
+            if concurrent > 1 {
+                let batch = &calls[index..index + concurrent];
+                index += concurrent;
+                for call in batch {
+                    sink(LoopEmit::Event(ClientStreamEvent::ToolCall {
+                        id: call.id.clone(),
+                        name: call.name.clone(),
+                        arguments: call.arguments.clone(),
+                    }));
+                }
+                let auth = ToolAuthorization::Agent { mode: config.execution_mode, approved: true };
+                let results = tokio::select! {
+                    results = execute_concurrently(batch, workspace_root, http_client, &fs_tracker, auth) => results,
+                    _ = wait_cancelled(cancelled) => return Ok(LoopOutcome::Cancelled),
+                };
+                for (call, (output, is_error, duration_ms)) in batch.iter().zip(results) {
+                    record_result(call, output, is_error, duration_ms);
+                }
+                continue;
+            }
+            let call = &calls[index];
+            index += 1;
             sink(LoopEmit::Event(ClientStreamEvent::ToolCall {
                 id: call.id.clone(),
                 name: call.name.clone(),
@@ -358,26 +401,7 @@ pub async fn run_agent_loop_ext(
                     DENIED_TOOL_RESULT
                 }.to_string(), true)
             };
-            let duration_ms = started.elapsed().as_millis() as u64;
-
-            let model_output = if is_error {
-                output.clone()
-            } else {
-                process_tool_output(&call.name, &output, if config.execution_mode == AgentExecutionMode::Readonly { None } else { workspace_root })
-            };
-            sink(LoopEmit::Event(ClientStreamEvent::ToolResult {
-                id: call.id.clone(),
-                name: call.name.clone(),
-                output: preview_tool_output(&model_output),
-                is_error,
-                duration_ms,
-            }));
-            turn_outputs.push(model_output.clone());
-            messages.push(AgentMessage::ToolResult {
-                tool_call_id: call.id.clone(),
-                name: call.name.clone(),
-                content: model_output,
-            });
+            record_result(call, output, is_error, started.elapsed().as_millis() as u64);
         }
 
         if let Some(image) = turn_image {
@@ -395,6 +419,44 @@ pub async fn run_agent_loop_ext(
             ToolLoopVerdict::Stop => return Ok(LoopOutcome::LoopDetected { usage }),
         }
     }
+}
+
+/// 同一轮里可以并发执行的工具：无副作用、无需审批，也不依赖本轮其他调用的结果。
+/// 子 Agent 会占用检查点并可能发起审批，仍逐个执行
+fn runs_concurrently(name: &str, workspace_root: Option<&Path>) -> bool {
+    tool_risk(name) == Some(ToolRisk::Read) && name != SUBAGENT_TOOL && !is_unbound_file_read(name, workspace_root)
+}
+
+/// 并发执行一段只读工具调用，按调用顺序返回（输出，是否出错，耗时毫秒）。
+/// 文件读取与检索是同步阻塞 IO，放进阻塞线程池才能真正并行，也不会占住异步工作线程
+async fn execute_concurrently(
+    calls: &[ToolInvocation],
+    workspace_root: Option<&Path>,
+    http_client: &reqwest::Client,
+    fs_tracker: &FsObservationTracker,
+    auth: ToolAuthorization,
+) -> Vec<(String, bool, u64)> {
+    let runtime = tokio::runtime::Handle::current();
+    let tasks = calls.iter().map(|call| {
+        let (runtime, name, arguments) = (runtime.clone(), call.name.clone(), call.arguments.clone());
+        let (root, client, tracker) = (workspace_root.map(Path::to_path_buf), http_client.clone(), fs_tracker.clone());
+        tokio::task::spawn_blocking(move || {
+            let started = Instant::now();
+            let result = runtime.block_on(execute_tool_with_context(
+                &name, &arguments, root.as_deref(), &client, Some(&tracker), auth,
+            ));
+            (result, started.elapsed().as_millis() as u64)
+        })
+    });
+    futures::future::join_all(tasks)
+        .await
+        .into_iter()
+        .map(|joined| match joined {
+            Ok((Ok(output), duration_ms)) => (output, false, duration_ms),
+            Ok((Err(error), duration_ms)) => (error, true, duration_ms),
+            Err(error) => (format!("工具执行异常: {}", error), true, 0),
+        })
+        .collect()
 }
 
 pub const SCREENSHOT_MESSAGE: &str = "【系统附图】这是 look 工具刚截取的画面，请据此判断界面状态；需要点击时用图上的像素坐标作为 click 的 image_x / image_y。";
