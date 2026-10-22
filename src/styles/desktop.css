@@ -135,33 +135,6 @@
   letter-spacing: 0.01em;
 }
 
-.desktop-topbar__title-edit-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-  opacity: 0.6;
-  transition:
-    opacity var(--ds-transition-duration-fast) var(--ds-ease-in-out),
-    background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
-}
-
-.desktop-topbar__title-wrapper:hover .desktop-topbar__title-edit-btn {
-  opacity: 1;
-}
-
-.desktop-topbar__title-edit-btn:hover {
-  background: var(--interactive-hover);
-  color: var(--text-primary);
-}
-
 .desktop-topbar__project-name {
   font-size: 12px;
   color: var(--text-muted);

@@ -157,7 +157,7 @@ describe("DesktopLayout", () => {
     const props = createMockProps();
     render(<DesktopLayout {...props} />);
 
-    const editBtn = screen.getByTitle("重命名会话");
+    const editBtn = screen.getByTitle(/点击重命名/);
     await user.click(editBtn);
 
     const input = screen.getByLabelText("重命名当前会话");
@@ -174,7 +174,7 @@ describe("DesktopLayout", () => {
     const props = createMockProps();
     render(<DesktopLayout {...props} />);
 
-    await user.click(screen.getByTitle("重命名会话"));
+    await user.click(screen.getByTitle(/点击重命名/));
     const input = screen.getByLabelText("重命名当前会话");
     await user.clear(input);
     await user.type(input, "尚未保存的标题");
@@ -190,7 +190,7 @@ describe("DesktopLayout", () => {
     props.onRename = vi.fn(() => new Promise<void>(() => undefined));
     render(<DesktopLayout {...props} />);
 
-    await user.click(screen.getByTitle("重命名会话"));
+    await user.click(screen.getByTitle(/点击重命名/));
     const input = screen.getByLabelText("重命名当前会话");
     await user.clear(input);
     await user.type(input, "新标题{Enter}");

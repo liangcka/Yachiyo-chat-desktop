@@ -2,7 +2,7 @@ use yachiyo_desktop_lib::crypto::keys::KeyStore;
 use yachiyo_desktop_lib::gateway::prompt::build_system_prompt;
 use yachiyo_desktop_lib::gateway::providers::anthropic::extract_anthropic_delta;
 use yachiyo_desktop_lib::gateway::providers::gemini::extract_gemini_delta;
-use yachiyo_desktop_lib::gateway::stream::{encode_client_event, extract_openai_delta};
+use yachiyo_desktop_lib::gateway::stream::{encode_client_event, extract_openai_delta, SseDecoder};
 use yachiyo_desktop_lib::types::{ChatLocale, ClientStreamEvent, RequestMode, TokenUsage};
 
 #[test]
@@ -880,4 +880,23 @@ async fn test_gateway_reports_reasoning_levels() {
     assert_eq!(deepseek, serde_json::json!({ "levels": ["low", "high", "max"], "defaultLevel": "high" }));
     let unsupported = query(serde_json::json!({ "provider": "claude", "model": "claude-haiku-4-5" })).await;
     assert_eq!(unsupported, serde_json::json!({ "levels": [] }));
+}
+
+#[test]
+fn test_sse_decoder_keeps_multibyte_char_split_across_chunks() {
+    let event = "data: {\"text\":\"八千代\"}\n\n".as_bytes();
+    // 切在「八」的三个字节中间
+    let split = event.iter().position(|&b| b >= 0x80).unwrap() + 1;
+    let mut decoder = SseDecoder::default();
+    assert!(decoder.push(&event[..split]).is_empty());
+    assert_eq!(decoder.push(&event[split..]), ["{\"text\":\"八千代\"}"]);
+}
+
+#[test]
+fn test_sse_decoder_splits_records_and_buffers_partial_tail() {
+    let mut decoder = SseDecoder::default();
+    let payloads = decoder.push(b"event: x\ndata: a\n\n: ping\n\ndata: line1\ndata: line2\n\ndata: par");
+    assert_eq!(payloads, ["a", "line1\nline2"]);
+    assert_eq!(decoder.push(b"tial\n\ndata: [DONE]\n\n"), ["partial", "[DONE]"]);
+    assert!(decoder.push(b"").is_empty());
 }
