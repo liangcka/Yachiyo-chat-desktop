@@ -1,6 +1,7 @@
 import {
   Boxes,
   ChevronRight,
+  Download,
   Edit3,
   Eye,
   EyeOff,
@@ -28,6 +29,7 @@ import {
 import type { Locale } from "../domain/chat";
 import { useLocale } from "../i18n/locale-context";
 import type { UiCopy } from "../i18n/messages";
+import { fetchModelList } from "../services/model-list";
 
 export interface LlmProviderEntry {
   /** 配置 id：同一厂商可有多条配置，各自独立的 Key */
@@ -112,6 +114,11 @@ const zhCopy = {
   customModelPlaceholder: "如 ox-alpha / qwen-turbo",
   modelIdPlaceholder: "模型 ID",
   presets: "可选推荐:",
+  fetchModels: "获取模型列表",
+  fetchingModels: "获取中…",
+  fetchedModels: (count: number) => `端点提供 ${count} 个模型:`,
+  fetchModelsEmpty: "端点未返回模型，请直接填写模型名称",
+  fetchModelsFailed: "获取模型列表失败，请检查 API 端点与 Key，或直接填写模型名称",
   baseUrl: "API 端点 (Base URL)",
   baseUrlPlaceholder: "如 https://api.openai.com/v1",
   cancel: "取消",
@@ -171,6 +178,11 @@ const jaCopy: PanelCopy = {
   customModelPlaceholder: "例: ox-alpha / qwen-turbo",
   modelIdPlaceholder: "モデル ID",
   presets: "おすすめ:",
+  fetchModels: "モデル一覧を取得",
+  fetchingModels: "取得中…",
+  fetchedModels: (count) => `エンドポイントのモデル（${count} 件）:`,
+  fetchModelsEmpty: "エンドポイントからモデルが返されませんでした。モデル名を直接入力してください",
+  fetchModelsFailed: "モデル一覧を取得できませんでした。API エンドポイントとキーを確認するか、モデル名を直接入力してください",
   baseUrl: "API エンドポイント (Base URL)",
   baseUrlPlaceholder: "例: https://api.openai.com/v1",
   cancel: "キャンセル",
@@ -220,6 +232,9 @@ export function LlmSettingsPanel({
   const [isCustomModel, setIsCustomModel] = useState(false);
   const [customBaseUrl, setCustomBaseUrl] = useState("");
   const [customModelName, setCustomModelName] = useState("");
+  // 自定义端点 /models 返回的模型列表；undefined 表示尚未获取
+  const [fetchedModels, setFetchedModels] = useState<readonly string[]>();
+  const [modelsStatus, setModelsStatus] = useState<"idle" | "loading" | "error">("idle");
   // 配置弹窗正在编辑的配置 id；undefined 表示新建一条
   const [editingId, setEditingId] = useState<string>();
 
@@ -276,6 +291,11 @@ export function LlmSettingsPanel({
     }
   };
 
+  const resetFetchedModels = () => {
+    setFetchedModels(undefined);
+    setModelsStatus("idle");
+  };
+
   const handleOpenAddModal = () => {
     setModalMode("add");
     setTargetVendor(null);
@@ -292,6 +312,7 @@ export function LlmSettingsPanel({
     setApiKeyInput("");
     setModelInput(vendor.defaultModel);
     setCustomBaseUrl(vendor.defaultBaseUrl ?? "");
+    resetFetchedModels();
     setModalMode("config");
   };
 
@@ -305,24 +326,30 @@ export function LlmSettingsPanel({
     setCustomModelName("ox-alpha");
     setModelInput("ox-alpha");
     setCustomBaseUrl("https://api.openai.com/v1");
+    resetFetchedModels();
     setModalMode("config");
   };
 
   const handleEditEntry = (id: string) => {
     const entry = entries.find((item) => item.id === id);
     if (entry === undefined) return;
+    const matchedVendor = findVendorForEntry(entry.provider, entry.baseUrl);
+    // 端点不属于任何服务商卡片的配置来自「自定义模型」，按自定义表单编辑
+    const isCustom = matchedVendor === undefined && entry.baseUrl !== undefined;
     const vendor =
-      findVendorForEntry(entry.provider, entry.baseUrl) ??
+      matchedVendor ??
       MODEL_VENDORS.find((v) => v.mappedProvider === entry.provider) ??
       MODEL_VENDORS[0];
-    setTargetVendor(vendor);
-    setIsCustomModel(false);
+    setTargetVendor(isCustom ? null : vendor);
+    setIsCustomModel(isCustom);
+    setCustomModelName(entry.model);
     setEditingId(id);
     setSelectedProvider(entry.provider);
     setPrevSyncKey({ provider: entry.provider, entries });
     setApiKeyInput(keyInputFor(entry));
     setModelInput(entry.model || vendor.defaultModel);
     setCustomBaseUrl(entry.baseUrl ?? vendor.defaultBaseUrl ?? "");
+    resetFetchedModels();
     setModalMode("config");
   };
 
@@ -346,6 +373,22 @@ export function LlmSettingsPanel({
       copy.llmSaved,
     );
     setModalMode(null);
+  };
+
+  const handleFetchModels = async () => {
+    setModelsStatus("loading");
+    try {
+      const models = await fetchModelList({
+        baseUrl: customBaseUrl,
+        ...(keyToSave !== KEYSTORE_MANAGED_API_KEY ? { apiKey: keyToSave } : {}),
+        ...(editingId !== undefined ? { slot: editingId } : {}),
+      });
+      setFetchedModels(models);
+      setModelsStatus("idle");
+    } catch {
+      setFetchedModels(undefined);
+      setModelsStatus("error");
+    }
   };
 
   const handleToggleEnabled = (id: string, enabled: boolean) => {
@@ -745,14 +788,27 @@ export function LlmSettingsPanel({
               <div className="model-form-field">
                 <label htmlFor="model-cfg-model-name" className="model-form-label">{t.modelId}</label>
                 {isCustomModel ? (
-                  <input
-                    id="model-cfg-model-name"
-                    type="text"
-                    className="model-form-input"
-                    placeholder={t.customModelPlaceholder}
-                    value={customModelName}
-                    onChange={(e) => setCustomModelName(e.target.value)}
-                  />
+                  <div className="model-form-input-row">
+                    <input
+                      id="model-cfg-model-name"
+                      type="text"
+                      className="model-form-input"
+                      placeholder={t.customModelPlaceholder}
+                      value={customModelName}
+                      onChange={(e) => setCustomModelName(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="settings-btn settings-btn--ghost model-form-fetch-btn"
+                      disabled={
+                        modelsStatus === "loading" || trimmedBaseUrl.length === 0 || !isBaseUrlValid || !isKeyValid
+                      }
+                      onClick={() => void handleFetchModels()}
+                    >
+                      <Download size={14} />
+                      <span>{modelsStatus === "loading" ? t.fetchingModels : t.fetchModels}</span>
+                    </button>
+                  </div>
                 ) : (
                   <div className="model-form-input-wrap">
                     <input
@@ -763,6 +819,29 @@ export function LlmSettingsPanel({
                       onChange={(e) => setModelInput(e.target.value)}
                       placeholder={targetVendor?.defaultModel || t.modelIdPlaceholder}
                     />
+                  </div>
+                )}
+                {isCustomModel && modelsStatus === "error" && (
+                  <span className="model-form-hint" role="alert">{t.fetchModelsFailed}</span>
+                )}
+                {isCustomModel && fetchedModels !== undefined && fetchedModels.length === 0 && (
+                  <span className="model-form-hint">{t.fetchModelsEmpty}</span>
+                )}
+                {isCustomModel && fetchedModels !== undefined && fetchedModels.length > 0 && (
+                  <div className="model-preset-tags model-preset-tags--scroll">
+                    <span style={{ fontSize: 11, color: "var(--dsw-alias-label-tertiary)" }}>
+                      {t.fetchedModels(fetchedModels.length)}
+                    </span>
+                    {fetchedModels.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        className={`model-tag-pill ${customModelName === m ? "model-tag-pill--active" : ""}`}
+                        onClick={() => setCustomModelName(m)}
+                      >
+                        {m}
+                      </button>
+                    ))}
                   </div>
                 )}
                 {targetVendor?.models && targetVendor.models.length > 0 && (

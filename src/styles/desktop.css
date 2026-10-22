@@ -5846,6 +5846,25 @@
   margin-top: 4px;
 }
 
+.model-preset-tags--scroll {
+  max-height: 132px;
+  overflow-y: auto;
+}
+
+.model-form-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-form-fetch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .model-tag-pill {
   padding: 2px 8px;
   border-radius: 6px;

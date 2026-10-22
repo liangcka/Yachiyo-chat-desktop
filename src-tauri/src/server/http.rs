@@ -278,6 +278,100 @@ async fn handle_deepseek_balance(State(state): State<AppState>) -> Response {
     }
 }
 
+#[derive(Deserialize)]
+struct ListModelsRequest {
+    #[serde(rename = "baseUrl")]
+    base_url: String,
+    /// 表单里刚输入的 Key；省略时用 slot 对应配置已保存的 Key
+    #[serde(default)]
+    key: Option<String>,
+    #[serde(default)]
+    slot: Option<String>,
+}
+
+/// OpenAI 兼容端点的模型列表地址：与对话端点同样剥掉尾部斜杠后拼接
+fn models_endpoint(base_url: &str) -> String {
+    format!("{}/models", base_url.trim_end_matches('/'))
+}
+
+/// 解析 `/models` 响应的 `data[].id`，去重并按字母序排列
+fn parse_model_ids(body: &serde_json::Value) -> Vec<String> {
+    let mut ids: Vec<String> = body
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.get("id").and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// 自定义模型表单的模型列表代理：webview 直连第三方端点受 CORS 限制，且已保存的 Key 只在网关内；
+/// 沿用已存 Key 时同样只发往该配置保存时绑定的端点
+async fn handle_list_models(
+    State(state): State<AppState>,
+    Json(request): Json<ListModelsRequest>,
+) -> Response {
+    let base_url = request.base_url.trim();
+    if !crate::gateway::providers::openai_compat::is_valid_base_url(base_url) {
+        return balance_problem(StatusCode::BAD_REQUEST, "INVALID_BASE_URL");
+    }
+    let typed_key = request.key.as_deref().map(str::trim).filter(|key| !key.is_empty());
+    let key = match typed_key {
+        Some(key) => Some(key.to_string()),
+        None => request
+            .slot
+            .as_deref()
+            .and_then(|slot| state.key_store.get_key_for_endpoint(slot, Some(base_url))),
+    };
+    let Some(key) = key else {
+        return balance_problem(StatusCode::BAD_REQUEST, "API_KEY_MISSING");
+    };
+    let url = models_endpoint(base_url);
+    let (primary, fallback) = state.select_clients(None, Some(base_url));
+    let send = |client: reqwest::Client| {
+        let key = key.clone();
+        let url = url.clone();
+        async move {
+            client
+                .get(url)
+                .bearer_auth(key)
+                .header(header::ACCEPT, "application/json")
+                .timeout(std::time::Duration::from_secs(15))
+                .send()
+                .await
+        }
+    };
+    // 只在连接层失败时换客户端重试：HTTP 错误说明请求已到达上游，换线路无益
+    let upstream = match send(primary).await {
+        Ok(response) => Ok(response),
+        Err(error) => match fallback {
+            Some(client) => send(client).await,
+            None => Err(error),
+        },
+    };
+    let upstream = match upstream {
+        Ok(response) => response,
+        Err(_) => return balance_problem(StatusCode::BAD_GATEWAY, "PROVIDER_ERROR"),
+    };
+    let status = upstream.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return balance_problem(StatusCode::UNAUTHORIZED, "PROVIDER_AUTH_FAILED");
+    }
+    if !status.is_success() {
+        return balance_problem(StatusCode::BAD_GATEWAY, "PROVIDER_ERROR");
+    }
+    match upstream.json::<serde_json::Value>().await {
+        Ok(body) => Json(serde_json::json!({ "models": parse_model_ids(&body) })).into_response(),
+        Err(_) => balance_problem(StatusCode::BAD_GATEWAY, "PROVIDER_ERROR"),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct AgentApprovalRequest {
     #[serde(rename = "requestId")]
@@ -471,6 +565,7 @@ pub fn create_router(state: AppState, dist_path: PathBuf) -> Router {
         .route("/api/keys/{provider}", delete(handle_delete_key))
         .route("/api/deepseek/balance", post(handle_deepseek_balance))
         .route("/api/reasoning/levels", post(handle_reasoning_levels))
+        .route("/api/models", post(handle_list_models))
         .route("/api/mcp/servers", get(handle_list_mcp_servers).post(handle_save_mcp_server))
         .route("/api/mcp/servers/{id}", delete(handle_delete_mcp_server))
         .route("/api/mcp/servers/{id}/toggle", post(handle_toggle_mcp_server))
@@ -587,6 +682,29 @@ mod tests {
         ] {
             assert!(origins.iter().any(|o| o == expected), "缺少允许源: {}", expected);
         }
+    }
+
+    #[test]
+    fn models_endpoint_strips_trailing_slash() {
+        assert_eq!(models_endpoint("https://api.example.com/v1/"), "https://api.example.com/v1/models");
+        assert_eq!(models_endpoint("https://api.example.com/v1"), "https://api.example.com/v1/models");
+    }
+
+    #[test]
+    fn parse_model_ids_sorts_dedups_and_skips_invalid() {
+        let body = serde_json::json!({
+            "object": "list",
+            "data": [
+                { "id": "qwen-turbo" },
+                { "id": "gpt-4o" },
+                { "id": " " },
+                { "name": "no-id" },
+                { "id": 42 },
+                { "id": "gpt-4o" }
+            ]
+        });
+        assert_eq!(parse_model_ids(&body), vec!["gpt-4o", "qwen-turbo"]);
+        assert!(parse_model_ids(&serde_json::json!({ "models": [] })).is_empty());
     }
 
     #[test]
