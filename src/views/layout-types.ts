@@ -57,6 +57,7 @@ export function controllerErrorMessage(code: string, copy: UiCopy): string {
   if (code === "DAILY_QUOTA_EXCEEDED") return copy.quotaReached;
   if (code === "SESSION_REQUIRED") return copy.sessionExpired;
   if (code === "WORKSPACE_REQUIRED") return copy.workspaceRequired;
+  if (code === "API_KEY_MISSING") return copy.apiKeyMissing;
   if (code === "NETWORK_ERROR") return copy.offline;
   if (code === "STORAGE_ERROR") return copy.storageFull;
   return copy.genericFailure;

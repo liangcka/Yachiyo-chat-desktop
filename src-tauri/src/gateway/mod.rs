@@ -147,7 +147,7 @@ pub fn handle_chat_stream(
             Some(k) if !k.is_empty() => k,
             _ => {
                 yield Ok(encode_client_event(&ClientStreamEvent::Error {
-                    code: "SESSION_REQUIRED".to_string(),
+                    code: "API_KEY_MISSING".to_string(),
                 }));
                 return;
             }

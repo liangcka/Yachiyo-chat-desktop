@@ -52,46 +52,68 @@ impl KeyStore {
 
     fn read_data(&self) -> KeyStoreData {
         let mut cache_guard = self.cache.lock().unwrap();
-        if let Some(cached) = &*cache_guard {
-            return cached.clone();
-        }
+        // 读不出时按「没有 Key」处理，但不写缓存，文件恢复可读后下次读取即生效
+        self.load(&mut cache_guard).unwrap_or_default()
+    }
 
-        if !self.storage_path.exists() {
-            let data = KeyStoreData::default();
-            *cache_guard = Some(data.clone());
-            return data;
+    /// 在持有缓存锁的前提下取出当前数据。文件存在却读不出时返回错误而不是空数据，
+    /// 否则随后的任何一次保存都会把空数据写回，其余厂商的 Key 随之永久丢失
+    fn load(&self, cache: &mut Option<KeyStoreData>) -> Result<KeyStoreData, String> {
+        if let Some(cached) = cache.as_ref() {
+            return Ok(cached.clone());
         }
 
         let encrypted_bytes = match fs::read(&self.storage_path) {
             Ok(bytes) => bytes,
-            Err(_) => return KeyStoreData::default(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let data = KeyStoreData::default();
+                *cache = Some(data.clone());
+                return Ok(data);
+            }
+            // 占用、权限等多为暂时性故障，文件本身可能完好，不能当作空存储
+            Err(e) => return Err(format!("读取密钥文件失败: {e}")),
         };
 
-        let Some(decrypted) = self.open(&encrypted_bytes) else {
-            return KeyStoreData::default();
+        let data = match self
+            .open(&encrypted_bytes)
+            .and_then(|decrypted| serde_json::from_slice::<KeyStoreData>(&decrypted).ok())
+        {
+            Some(data) => {
+                // 旧版文件用可推导的机器密钥加密：读取成功后立即按当前方案重新加密落盘
+                if needs_reseal(&encrypted_bytes) {
+                    let _ = self.write_file(&data);
+                }
+                data
+            }
+            None => {
+                // 内容已无法解密（损坏或换了系统账户）：原文件移到旁边留作恢复，再从空存储开始，
+                // 用户重新填写 Key 即可继续使用
+                let aside = self.storage_path.with_extension("enc.unreadable");
+                fs::rename(&self.storage_path, &aside)
+                    .map_err(|e| format!("密钥文件无法解密且无法移走: {e}"))?;
+                KeyStoreData::default()
+            }
         };
-
-        let data: KeyStoreData = serde_json::from_slice(&decrypted).unwrap_or_default();
-        // 旧版文件用可推导的机器密钥加密：读取成功后立即按当前方案重新加密落盘
-        if needs_reseal(&encrypted_bytes) {
-            let _ = self.write_file(&data);
-        }
-        *cache_guard = Some(data.clone());
-        data
+        *cache = Some(data.clone());
+        Ok(data)
     }
 
-    /// 只负责加密落盘，不触碰缓存锁：`read_data` 持锁期间迁移旧文件时也会调用
+    /// 先写同目录临时文件再整体替换，写到一半退出也不会留下残缺的密钥文件
     fn write_file(&self, data: &KeyStoreData) -> Result<(), String> {
         let plaintext = serde_json::to_vec(data).map_err(|e| e.to_string())?;
         let output = self.seal(&plaintext)?;
-        fs::write(&self.storage_path, output).map_err(|e| e.to_string())
+        let staging = self.storage_path.with_extension("enc.tmp");
+        fs::write(&staging, output).map_err(|e| e.to_string())?;
+        fs::rename(&staging, &self.storage_path).map_err(|e| e.to_string())
     }
 
-    fn write_data(&self, data: &KeyStoreData) -> Result<(), String> {
-        self.write_file(data)?;
-
+    /// 读-改-写全程持有缓存锁，并发保存不同厂商的 Key 时不会互相覆盖
+    fn update(&self, change: impl FnOnce(&mut KeyStoreData)) -> Result<(), String> {
         let mut cache_guard = self.cache.lock().unwrap();
-        *cache_guard = Some(data.clone());
+        let mut data = self.load(&mut cache_guard)?;
+        change(&mut data);
+        self.write_file(&data)?;
+        *cache_guard = Some(data);
         Ok(())
     }
 
@@ -124,24 +146,24 @@ impl KeyStore {
 
     /// 保存 Key 并绑定到保存时使用的自定义端点（None 表示厂商原生端点）
     pub fn set_key_for_endpoint(&self, provider: &str, key: &str, base_url: Option<&str>) -> Result<(), String> {
-        let mut data = self.read_data();
-        data.keys.insert(provider.to_string(), key.to_string());
-        match base_url {
-            Some(base_url) => {
-                data.endpoints.insert(provider.to_string(), normalize_endpoint(base_url));
+        self.update(|data| {
+            data.keys.insert(provider.to_string(), key.to_string());
+            match base_url {
+                Some(base_url) => {
+                    data.endpoints.insert(provider.to_string(), normalize_endpoint(base_url));
+                }
+                None => {
+                    data.endpoints.remove(provider);
+                }
             }
-            None => {
-                data.endpoints.remove(provider);
-            }
-        }
-        self.write_data(&data)
+        })
     }
 
     pub fn delete_key(&self, provider: &str) -> Result<(), String> {
-        let mut data = self.read_data();
-        data.keys.remove(provider);
-        data.endpoints.remove(provider);
-        self.write_data(&data)
+        self.update(|data| {
+            data.keys.remove(provider);
+            data.endpoints.remove(provider);
+        })
     }
 
     pub fn list_configured_providers(&self) -> Vec<String> {
@@ -328,6 +350,60 @@ mod tests {
         assert_eq!(reopened.get_key("claude").as_deref(), Some("sk-ant-test-1234567890"));
         let raw = fs::read(&path).unwrap();
         assert!(!raw.windows(10).any(|w| w == b"sk-ant-tes"), "密文中不得出现明文 Key");
+    }
+
+    #[test]
+    fn unreadable_file_is_kept_aside_instead_of_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("keys.enc");
+        fs::write(&path, b"not a valid sealed keystore").unwrap();
+
+        let store = KeyStore::at_path(path.clone());
+        assert_eq!(store.get_key("deepseek"), None);
+        store.set_key("glm", "glm-key-1234567890").unwrap();
+
+        assert_eq!(
+            fs::read(dir.path().join("keys.enc.unreadable")).unwrap(),
+            b"not a valid sealed keystore",
+            "读不出的原文件应原样保留以便恢复"
+        );
+        assert_eq!(KeyStore::at_path(path).get_key("glm").as_deref(), Some("glm-key-1234567890"));
+    }
+
+    #[test]
+    fn save_is_refused_when_the_file_cannot_be_read() {
+        let dir = tempfile::tempdir().unwrap();
+        // 以目录占位制造非 NotFound 的读取错误，模拟文件被占用等暂时性故障
+        let path = dir.path().join("keys.enc");
+        fs::create_dir(&path).unwrap();
+
+        let store = KeyStore::at_path(path.clone());
+        assert!(store.set_key("deepseek", "sk-test-1234567890").is_err());
+        assert!(path.is_dir(), "读取失败时不得用空数据覆盖原文件");
+    }
+
+    #[test]
+    fn concurrent_saves_keep_every_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("keys.enc");
+        let store = std::sync::Arc::new(KeyStore::at_path(path.clone()));
+        let providers = ["deepseek", "glm", "openai", "claude", "gemini", "stepfun"];
+        let handles: Vec<_> = providers
+            .iter()
+            .map(|provider| {
+                let store = std::sync::Arc::clone(&store);
+                let provider = provider.to_string();
+                std::thread::spawn(move || store.set_key(&provider, &format!("{provider}-key-1234567890")).unwrap())
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let reopened = KeyStore::at_path(path);
+        for provider in providers {
+            assert_eq!(reopened.get_key(provider), Some(format!("{provider}-key-1234567890")));
+        }
     }
 
     #[test]

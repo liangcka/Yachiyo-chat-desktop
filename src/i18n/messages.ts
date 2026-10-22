@@ -164,6 +164,9 @@ export interface UiCopy {
   readonly themeDark: string;
   readonly themeSystem: string;
   readonly desktopKeyRequired: string;
+  readonly apiKeyMissing: string;
+  readonly whaleKeyMissing: string;
+  readonly whaleKeyRejected: string;
   readonly desktopUpdateAvailable: (version: string) => string;
   readonly desktopUpdateAction: string;
   readonly desktopUpdateDownloading: (percent: number | undefined) => string;
@@ -337,6 +340,9 @@ const chinese = Object.freeze({
   themeDark: "深色",
   themeSystem: "跟随系统",
   desktopKeyRequired: "还没有可用的模型，请在「设置 → 模型」中填写 API Key 并启用。",
+  apiKeyMissing: "找不到当前模型已保存的 API Key，请在「设置 → 模型」中编辑该模型并重新填写 Key。",
+  whaleKeyMissing: "余额小鲸鱼读不到已保存的 DeepSeek API Key，请在「设置 → 模型」中重新填写。",
+  whaleKeyRejected: "余额小鲸鱼：DeepSeek 拒绝了当前 API Key，请在「设置 → 模型」中更新。",
   desktopUpdateAvailable: (version) => `发现新版本 v${version}`,
   desktopUpdateAction: "立即更新",
   desktopUpdateDownloading: (percent) => (percent === undefined ? "正在下载更新…" : `正在下载更新 ${percent}%`),
@@ -511,6 +517,9 @@ const japanese = Object.freeze({
   themeDark: "ダーク",
   themeSystem: "システム設定",
   desktopKeyRequired: "利用できるモデルがありません。「設定 → モデル」で API キーを入力して有効にしてください。",
+  apiKeyMissing: "このモデルの保存済み API キーが見つかりません。「設定 → モデル」でモデルを編集し、キーを入力し直してください。",
+  whaleKeyMissing: "残高クジラが保存済みの DeepSeek API キーを読み取れません。「設定 → モデル」で入力し直してください。",
+  whaleKeyRejected: "残高クジラ：DeepSeek が現在の API キーを拒否しました。「設定 → モデル」で更新してください。",
   desktopUpdateAvailable: (version) => `新しいバージョン v${version} があります`,
   desktopUpdateAction: "今すぐ更新",
   desktopUpdateDownloading: (percent) => (percent === undefined ? "更新をダウンロード中…" : `更新をダウンロード中 ${percent}%`),

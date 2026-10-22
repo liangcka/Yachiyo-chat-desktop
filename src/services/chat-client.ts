@@ -54,6 +54,7 @@ export interface StreamChatResult {
 
 export type ChatClientErrorCode =
   | "SESSION_REQUIRED"
+  | "API_KEY_MISSING"
   | "DAILY_QUOTA_EXCEEDED"
   | "INVALID_REQUEST"
   | "WORKSPACE_REQUIRED"
@@ -93,6 +94,7 @@ export function isRetryableChatErrorCode(code: string | undefined): boolean {
 /** 流内 error 事件的 code → 客户端错误码；未知码一律视为上游故障，原始值进 detail */
 function streamErrorEvent(code: string, detail?: string): ChatClientError {
   if (code === "WORKSPACE_REQUIRED") return new ChatClientError("WORKSPACE_REQUIRED", undefined, detail);
+  if (code === "API_KEY_MISSING") return new ChatClientError("API_KEY_MISSING", undefined, detail);
   if (code === "PROVIDER_STREAM_ERROR") return new ChatClientError("PROVIDER_ERROR", undefined, detail);
   return new ChatClientError("PROVIDER_ERROR", undefined, `${code}${detail === undefined ? "" : ` ${detail}`}`);
 }

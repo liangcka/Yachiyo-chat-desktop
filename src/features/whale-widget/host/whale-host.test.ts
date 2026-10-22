@@ -46,6 +46,27 @@ describe("余额与记账", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("网关确认 Key 缺失或被拒时通知宿主应用，同一问题只通知一次，恢复后可再次通知", async () => {
+    const host = createHost();
+    const issues: string[] = [];
+    host.onKeyIssue((issue) => issues.push(issue));
+    host.setContext({ hasKey: true });
+    const problem = (code: string, status: number) =>
+      new Response(JSON.stringify({ error: { code } }), { status, headers: { "content-type": "application/json" } });
+    fetchMock
+      .mockResolvedValueOnce(problem("API_KEY_MISSING", 400))
+      .mockResolvedValueOnce(problem("API_KEY_MISSING", 400))
+      .mockResolvedValueOnce(balanceResponse("10.00"))
+      .mockResolvedValueOnce(problem("PROVIDER_AUTH_FAILED", 401));
+
+    expect(await call(host, "/dsh-whale/balance.json?refresh=1")).toMatchObject({ ok: false, code: "NO_KEY" });
+    await call(host, "/dsh-whale/balance.json?refresh=1");
+    expect(issues).toEqual(["missing"]);
+    expect(await call(host, "/dsh-whale/balance.json?refresh=1")).toMatchObject({ ok: true });
+    await call(host, "/dsh-whale/balance.json?refresh=1");
+    expect(issues).toEqual(["missing", "rejected"]);
+  });
+
   it("余额经代理获取，余额下降计入今日已用，不下发账户指纹", async () => {
     const host = createHost();
     host.setContext({ hasKey: true, apiKey: API_KEY });

@@ -899,7 +899,7 @@ pub fn run_agent_chat_stream(
         let api_key = match api_key {
             Some(k) if !k.is_empty() => k,
             _ => {
-                yield Ok(encode_client_event(&ClientStreamEvent::Error { code: "SESSION_REQUIRED".to_string() }));
+                yield Ok(encode_client_event(&ClientStreamEvent::Error { code: "API_KEY_MISSING".to_string() }));
                 return;
             }
         };

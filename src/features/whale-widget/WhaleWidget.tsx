@@ -3,6 +3,7 @@ import type { LlmProviderEntry } from "../../components/LlmSettingsPanel";
 import type { ChatMessage } from "../../domain/chat";
 import type { ProviderId } from "../../domain/llm";
 import { isDesktopApp } from "../../services/app-platform";
+import type { WhaleKeyIssue } from "./host/whale-host";
 import { ensureWhaleWidget, setWhaleWidgetVisible } from "./runtime";
 
 export interface WhaleWidgetProps {
@@ -14,13 +15,15 @@ export interface WhaleWidgetProps {
   conversationTitle?: string;
   /** Agent 工具等待审批时，挂件按上游的「授权提示」冒泡 */
   pendingPermissionId?: string;
+  /** 网关确认 DeepSeek Key 缺失或失效时回调，挂件自身的气泡无法显示原因 */
+  onKeyIssue?: (issue: WhaleKeyIssue) => void;
 }
 
 /**
  * 余额小鲸鱼：界面与交互完全由上游 DeepSeek-Balance-Whale-Widget 的前端脚本负责，
  * 本组件只把 Key、对话名、审批状态与回复起止同步给本机宿主，卸载时隐藏挂件。
  */
-export function WhaleWidget({ entries, activeProvider, phase, messages, conversationTitle, pendingPermissionId }: WhaleWidgetProps) {
+export function WhaleWidget({ entries, activeProvider, phase, messages, conversationTitle, pendingPermissionId, onKeyIssue }: WhaleWidgetProps) {
   // 只认绑定官方端点的 DeepSeek Key，自定义端点的 Key 不会被发往官方余额接口
   const entry = entries.find((item) => item.provider === "deepseek" && item.baseUrl === undefined);
   const hasKey = entry !== undefined;
@@ -41,6 +44,16 @@ export function WhaleWidget({ entries, activeProvider, phase, messages, conversa
       pending: pendingPermissionId ? { kind: "approval", id: pendingPermissionId } : null,
     });
   }, [apiKey, hasKey, conversationTitle, pendingPermissionId]);
+
+  const onKeyIssueRef = useRef(onKeyIssue);
+  useEffect(() => {
+    onKeyIssueRef.current = onKeyIssue;
+  }, [onKeyIssue]);
+  useEffect(() => {
+    const host = ensureWhaleWidget();
+    host.onKeyIssue((issue) => onKeyIssueRef.current?.(issue));
+    return () => host.onKeyIssue(null);
+  }, []);
 
   const messagesRef = useRef(messages);
   useEffect(() => {
