@@ -237,8 +237,7 @@ describe("App flows", () => {
       expect(screen.queryByLabelText("参考来源")).not.toBeInTheDocument();
 
       // 设置 → 联网搜索 → 开启联网搜索
-      await user.click(screen.getByLabelText("用户资料与菜单"));
-      await user.click(screen.getByLabelText("设置"));
+      await user.click(screen.getByLabelText("打开设置"));
       await user.click(await screen.findByRole("tab", { name: "联网搜索" }));
       await user.click(screen.getByRole("button", { name: "切换技能启用状态: 联网搜索" }));
       await user.click(screen.getByRole("button", { name: "关闭设置" }));
@@ -265,8 +264,7 @@ describe("App flows", () => {
       ).toEqual(sources);
 
       // 关闭"显示引用来源"后不再渲染来源列表
-      await user.click(screen.getByLabelText("用户资料与菜单"));
-      await user.click(screen.getByLabelText("设置"));
+      await user.click(screen.getByLabelText("打开设置"));
       await user.click(await screen.findByRole("tab", { name: "联网搜索" }));
       await user.click(screen.getByRole("button", { name: "切换技能启用状态: 显示引用来源" }));
       await user.click(screen.getByRole("button", { name: "关闭设置" }));
@@ -402,8 +400,7 @@ describe("App flows", () => {
     await user.click(screen.getByRole("button", { name: "发送" }));
     expect(await screen.findByText("还在慢慢写")).toBeVisible();
 
-    await user.click(screen.getByLabelText("用户资料与菜单"));
-    await user.click(screen.getByLabelText("设置"));
+    await user.click(screen.getByLabelText("打开设置"));
     await user.click(screen.getByRole("tab", { name: "存储与维护" }));
     await user.click(screen.getByRole("button", { name: /清除凭据/i }));
 
@@ -496,8 +493,7 @@ describe("App flows", () => {
     await user.click(within(dialog).getByRole("button", { name: "删除" }));
     await waitFor(() => expect(services.repository.conversations).toHaveLength(1));
 
-    await user.click(screen.getByLabelText("用户资料与菜单"));
-    await user.click(screen.getByLabelText("设置"));
+    await user.click(screen.getByLabelText("打开设置"));
     await user.click(screen.getByRole("tab", { name: "存储与维护" }));
     await user.click(screen.getByRole("button", { name: "清空数据" }));
     await user.click(screen.getByRole("button", { name: "确认清空" }));

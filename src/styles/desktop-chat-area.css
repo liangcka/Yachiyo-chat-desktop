@@ -270,6 +270,12 @@
   box-shadow: none;
 }
 
+.desktop-shell-root :is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]), textarea, select):focus-visible {
+  outline: none;
+  border-color: var(--focus-ring);
+  box-shadow: inset 0 0 0 1px var(--focus-ring);
+}
+
 .desktop-shell-root .dsh-skill-popover__more-btn {
   color: var(--text-primary);
 }

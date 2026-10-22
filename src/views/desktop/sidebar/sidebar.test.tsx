@@ -288,7 +288,7 @@ describe("DesktopSidebar & Submodules", () => {
     expect(onDelete).toHaveBeenCalledWith(mockConversations[0]!.id);
   });
 
-  it("opens user popover from sidebar footer and triggers account, theme, locale, settings and signout", async () => {
+  it("opens user popover from sidebar footer and triggers account, theme, locale and signout", async () => {
     const user = userEvent.setup();
     const onToggleTheme = vi.fn();
     const onLocale = vi.fn();
@@ -354,12 +354,10 @@ describe("DesktopSidebar & Submodules", () => {
     // 点击后浮层自动关闭
     expect(screen.queryByRole("dialog", { name: "用户账户与设置菜单" })).not.toBeInTheDocument();
 
-    // 8. 再次打开并点击偏好设置
+    // 8. 设置入口只在侧栏底部常驻，用户菜单里不再重复
     await user.click(userBar);
-    const settingsBtn = screen.getByLabelText("设置");
-    await user.click(settingsBtn);
-    expect(onOpenSettings).toHaveBeenCalledWith("general");
-    expect(screen.queryByRole("dialog", { name: "用户账户与设置菜单" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("dialog", { name: "用户账户与设置菜单" })).queryByLabelText("设置")).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
 
     // 9. 再次打开并点击报告问题（直接跳到 GitHub 仓库主页）
     await user.click(userBar);

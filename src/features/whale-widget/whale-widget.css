@@ -2,3 +2,51 @@
 html[data-whale-hidden] body > [class*="dshw"] {
   display: none !important;
 }
+
+/*
+ * 头顶的盆：位置按默认形象（610×610 素材，在挂件里占右下 59.45%）的头顶量出，
+ * 用百分比跟随挂件缩放；换成其它角色时头顶位置未知，直接隐藏
+ */
+.yachiyo-whale-bowl {
+  position: absolute;
+  left: 57%;
+  top: 43.5%;
+  width: 42.2%;
+  aspect-ratio: 2 / 1;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  pointer-events: auto;
+  transform: rotate(8deg);
+  transform-origin: 50% 84%;
+}
+
+.yachiyo-whale-bowl svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.dshwv-img:not([data-whale-src^="/dsh-whale/image.png"]) ~ .yachiyo-whale-bowl {
+  display: none;
+}
+
+.yachiyo-whale-bowl--knock {
+  animation: yachiyo-whale-bowl-knock 0.7s ease-out;
+}
+
+@keyframes yachiyo-whale-bowl-knock {
+  0% { transform: rotate(8deg); }
+  18% { transform: translateY(-22%) rotate(-6deg); }
+  40% { transform: translateY(0) rotate(16deg); }
+  58% { transform: rotate(3deg); }
+  76% { transform: rotate(11deg); }
+  100% { transform: rotate(8deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .yachiyo-whale-bowl--knock {
+    animation-duration: 0.01s;
+  }
+}

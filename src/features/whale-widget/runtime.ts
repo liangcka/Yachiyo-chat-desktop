@@ -1,5 +1,6 @@
 import { WhaleHost } from "./host/whale-host";
 import { WhaleStore } from "./host/store";
+import { installWhaleBowl } from "./bowl";
 import widgetScriptUrl from "./upstream/whale-widget.js?url";
 import "./whale-widget.css";
 
@@ -38,9 +39,12 @@ function interceptWhaleRequests(target: WhaleHost, nativeFetch: typeof fetch): v
     set(this: HTMLImageElement, value: unknown) {
       if (typeof value !== "string" || !value.startsWith(WHALE_PATH_PREFIX)) {
         requested.delete(this);
+        this.removeAttribute("data-whale-src");
         set.call(this, value);
         return;
       }
+      // 换成 Blob URL 后 src 不再透露原地址，留一份供样式按当前角色显隐头顶的盆
+      this.setAttribute("data-whale-src", value);
       requested.set(this, value);
       void target.imageUrl(value).then((url) => {
         if (requested.get(this) !== value) return;
@@ -57,6 +61,7 @@ export function ensureWhaleWidget(): WhaleHost {
     const nativeFetch = window.fetch.bind(window);
     host = new WhaleHost(new WhaleStore(), nativeFetch);
     interceptWhaleRequests(host, nativeFetch);
+    installWhaleBowl();
     const script = document.createElement("script");
     script.src = widgetScriptUrl;
     document.head.append(script);
