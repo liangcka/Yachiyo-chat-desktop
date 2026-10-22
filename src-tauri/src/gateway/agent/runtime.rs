@@ -649,7 +649,7 @@ impl TurnExecutor for HttpTurnExecutor {
                 let mut thought_repetition = RepetitionDetector::default();
                 let mut text_repetition = RepetitionDetector::default();
                 let mut usage: Option<TokenUsage> = None;
-                let mut buffer = String::new();
+                let mut sse = crate::gateway::stream::SseDecoder::default();
                 let mut byte_stream = res.bytes_stream();
                 // 已向前端下发过内容就不能再整轮重放，否则界面会出现重复的思考与正文
                 let mut emitted = false;
@@ -665,24 +665,8 @@ impl TurnExecutor for HttpTurnExecutor {
                         }
                         Err(error) => return Err(format!("上游流读取失败: {}", error)),
                     };
-                    if let Ok(text) = std::str::from_utf8(&bytes) {
-                        buffer.push_str(text);
-                    }
-                    while let Some(pos) = buffer.find("\n\n") {
-                        let record = buffer[..pos].to_string();
-                        buffer = buffer[pos + 2..].to_string();
-                        let mut data_str = String::new();
-                        for line in record.lines() {
-                            let trimmed = line.trim();
-                            if trimmed.starts_with("data:") {
-                                let content = trimmed[5..].trim_start();
-                                if !data_str.is_empty() {
-                                    data_str.push('\n');
-                                }
-                                data_str.push_str(content);
-                            }
-                        }
-                        if data_str.is_empty() || data_str == "[DONE]" {
+                    for data_str in sse.push(&bytes) {
+                        if data_str == "[DONE]" {
                             continue;
                         }
                         native.push(&data_str);

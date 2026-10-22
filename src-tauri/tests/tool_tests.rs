@@ -427,6 +427,26 @@ fn test_process_tool_output_spill() {
 }
 
 #[test]
+fn test_process_tool_output_spills_to_distinct_files_within_same_second() {
+    use yachiyo_desktop_lib::tools::process_tool_output;
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let first = "第一份输出\n".repeat(2000);
+    let second = "第二份输出\n".repeat(2000);
+    process_tool_output("run_command", &first, Some(temp_dir.path()));
+    process_tool_output("run_command", &second, Some(temp_dir.path()));
+
+    let mut saved: Vec<String> = fs::read_dir(temp_dir.path().join(".yachiyo").join("spill"))
+        .unwrap()
+        .map(|entry| fs::read_to_string(entry.unwrap().path()).unwrap())
+        .collect();
+    saved.sort();
+    let mut expected = vec![first, second];
+    expected.sort();
+    assert_eq!(saved, expected);
+}
+
+#[test]
 fn test_read_file_encodings_utf16_gbk_bom() {
     let temp_dir = std::env::temp_dir().join("yachiyo_test_encodings");
     fs::create_dir_all(&temp_dir).unwrap();

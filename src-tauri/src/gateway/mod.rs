@@ -5,7 +5,7 @@ pub mod stream;
 
 use crate::crypto::keys::KeyStore;
 use crate::gateway::providers::registry::get_provider_config;
-use crate::gateway::stream::{encode_client_event, OpenAiDeltaParser};
+use crate::gateway::stream::{encode_client_event, OpenAiDeltaParser, SseDecoder};
 use crate::tools::WorkspaceManager;
 use crate::types::{ClientChatRequest, ClientStreamEvent, ProviderId, TokenUsage};
 use async_stream::stream;
@@ -237,7 +237,7 @@ pub fn handle_chat_stream(
         let is_title_mode = request.mode == Some(crate::types::RequestMode::Title);
         let mut accumulated_chars: usize = 0;
         let mut byte_stream = upstream_res.bytes_stream();
-        let mut buffer = String::new();
+        let mut sse = SseDecoder::default();
         let mut accumulated_usage: Option<TokenUsage> = None;
         let mut openai_parser = OpenAiDeltaParser::default();
 
@@ -253,30 +253,7 @@ pub fn handle_chat_stream(
                 }
             };
 
-            if let Ok(text) = std::str::from_utf8(&chunk) {
-                buffer.push_str(text);
-            }
-
-            while let Some(pos) = buffer.find("\n\n") {
-                let record = buffer[..pos].to_string();
-                buffer = buffer[pos + 2..].to_string();
-
-                let mut data_str = String::new();
-                for line in record.lines() {
-                    let trimmed = line.trim();
-                    if trimmed.starts_with("data:") {
-                        let content = trimmed[5..].trim_start();
-                        if !data_str.is_empty() {
-                            data_str.push('\n');
-                        }
-                        data_str.push_str(content);
-                    }
-                }
-
-                if data_str.is_empty() {
-                    continue;
-                }
-
+            for data_str in sse.push(&chunk) {
                 if data_str == "[DONE]" {
                     break;
                 }

@@ -66,6 +66,40 @@ pub fn encode_ping() -> &'static str {
     ": ping\n\n"
 }
 
+/// 上游 SSE 字节流解码器：按字节缓冲，凑齐以空行结尾的完整事件后再解码。
+/// 网络分块可能切在多字节字符中间，逐块按 UTF-8 解码会把整块数据连同其中的事件一起丢掉
+#[derive(Default)]
+pub struct SseDecoder {
+    buffer: Vec<u8>,
+}
+
+impl SseDecoder {
+    /// 追加一块字节，返回其中已完整事件的 data 内容；多行 data 以换行拼接，没有 data 的事件跳过
+    pub fn push(&mut self, chunk: &[u8]) -> Vec<String> {
+        self.buffer.extend_from_slice(chunk);
+        let mut payloads = Vec::new();
+        let mut start = 0;
+        while let Some(pos) = self.buffer[start..].windows(2).position(|pair| pair == b"\n\n") {
+            let record = String::from_utf8_lossy(&self.buffer[start..start + pos]);
+            start += pos + 2;
+            let mut data = String::new();
+            for line in record.lines() {
+                if let Some(content) = line.trim().strip_prefix("data:") {
+                    if !data.is_empty() {
+                        data.push('\n');
+                    }
+                    data.push_str(content.trim_start());
+                }
+            }
+            if !data.is_empty() {
+                payloads.push(data);
+            }
+        }
+        self.buffer.drain(..start);
+        payloads
+    }
+}
+
 /// MiniMax reasoning_split 模式的 reasoning_details[].text 拼接；不同实现分别按累计快照或增量下发
 fn reasoning_details_text(delta_obj: &serde_json::Value) -> Option<String> {
     let text: String = delta_obj

@@ -119,7 +119,10 @@ pub fn process_tool_output(name: &str, output: &str, workspace_root: Option<&Pat
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let filename = format!("spill-{}-{}.txt", timestamp, name);
+    // 同一秒内可能有多份超长输出落盘，序号保证文件名不重复、后写的不会覆盖先写的
+    static SPILL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let sequence = SPILL_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let filename = format!("spill-{}-{}-{}.txt", timestamp, sequence, name);
     let Ok(spill_path) = fs::resolve_tool_path(&format!(".yachiyo/spill/{filename}"), workspace_root) else {
         return truncate_tool_output(name, output);
     };
