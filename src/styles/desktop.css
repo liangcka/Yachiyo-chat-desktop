@@ -681,6 +681,10 @@
   font-weight: 500;
 }
 
+[data-theme="dark"] .desktop-sidebar__history-item--active {
+  background: var(--accent-brand-soft);
+}
+
 .desktop-sidebar__history-main {
   display: flex;
   align-items: center;
@@ -2277,6 +2281,16 @@
 .dsh-composer-card__send-btn--stop:hover {
   opacity: 0.9;
   transform: translateY(-1px);
+}
+
+/* 深色主题的发送按钮用蓝紫渐变点亮，禁用态仍沿用上方的弱化样式 */
+[data-theme="dark"] .dsh-composer-card__send-btn:not(:disabled):not(.dsh-composer-card__send-btn--stop) {
+  background: var(--accent-gradient);
+  color: #ffffff;
+}
+
+[data-theme="dark"] .dsh-composer-card__send-btn:hover:not(:disabled):not(.dsh-composer-card__send-btn--stop) {
+  box-shadow: 0 0 0 4px var(--accent-brand-soft);
 }
 
 /* ─── 7. ContextMeter 环形进度指示器 ───────────────────────── */

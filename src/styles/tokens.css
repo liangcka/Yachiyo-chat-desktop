@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════
    Yachiyo Chat — 核心设计 Tokens
-   目标风格：中性灰阶（参考 Codex 桌面版、Antigravity、Claude 桌面版）
+   目标风格：浅色为中性灰阶（参考 Codex 桌面版、Antigravity、Claude 桌面版），深色为带蓝紫倾向的夜空靛蓝
    平铺布局、弱阴影，主界面无毛玻璃（深色主题浮层可选毛玻璃），紧凑信息密度，强调色仅用于焦点、选中态和发送按钮
    ═══════════════════════════════════════════════════════════════ */
 
@@ -116,96 +116,98 @@
   --dsh-composer-text-max-height: 336px;
 }
 
-/* ─── 深色主题（Dark）中性灰阶 ─── */
+/* ─── 深色主题（Dark）夜空靛蓝：底色带一点蓝紫，强调色为长春花蓝，辅以紫色点缀 ─── */
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --space-0: #1a1a1a;
-  --space-1: #212121;
-  --space-2: #282828;
-  --space-3: #303030;
+  --space-0: #15161e;
+  --space-1: #1b1c26;
+  --space-2: #222431;
+  --space-3: #2d2f3e;
 
-  --glass: #212121;
-  --glass-soft: #282828;
-  --glass-strong: #212121;
-  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass: #1b1c26;
+  --glass-soft: #222431;
+  --glass-strong: #1b1c26;
+  --glass-border: rgba(170, 180, 255, 0.09);
 
-  --text-primary: #ececec;
-  --text-muted: #9b9b9b;
-  --text-dim: #707070;
-  --danger: #e05252;
-  --warning: #f59e0b;
+  --text-primary: #e8e9f3;
+  --text-muted: #9a9db3;
+  --text-dim: #6e7189;
+  --danger: #ef6b73;
+  --warning: #f5b544;
 
-  --interactive-hover: rgba(255, 255, 255, 0.05);
-  --interactive-active: rgba(255, 255, 255, 0.08);
-  --border-l1: rgba(255, 255, 255, 0.08);
-  --border-l2: rgba(255, 255, 255, 0.12);
+  --interactive-hover: rgba(150, 160, 255, 0.07);
+  --interactive-active: rgba(150, 160, 255, 0.12);
+  --border-l1: rgba(170, 180, 255, 0.09);
+  --border-l2: rgba(170, 180, 255, 0.13);
   --composer-border: var(--border-l2);
-  --composer-border-focus: rgba(255, 255, 255, 0.24);
+  --composer-border-focus: rgba(124, 140, 255, 0.5);
   --context-meter-system: var(--text-dim);
-  --context-meter-tools: var(--text-muted);
-  --context-meter-messages: var(--text-primary);
+  --context-meter-tools: #c4a1ff;
+  --context-meter-messages: #7c8cff;
 
-  --surface-sidebar: #1e1e1e;
-  --surface-card: #212121;
-  --surface-input: #1e1e1e;
-  --shadow-elevated: 0 4px 12px rgba(0, 0, 0, 0.18);
+  --surface-sidebar: #181922;
+  --surface-card: #1b1c26;
+  --surface-input: #1a1b24;
+  --shadow-elevated: 0 4px 12px rgba(4, 5, 15, 0.3);
 
-  --bubble-user-bg: #2a2a2a;
-  --bubble-user-border: rgba(255, 255, 255, 0.08);
+  --bubble-user-bg: #262a42;
+  --bubble-user-border: rgba(124, 140, 255, 0.24);
   --bubble-assistant-bg: transparent;
   --bubble-assistant-border: transparent;
 
-  --accent-brand: #4b8bf5;
-  --accent-brand-soft: rgba(75, 139, 245, 0.12);
+  --accent-brand: #7c8cff;
+  --accent-brand-soft: rgba(124, 140, 255, 0.16);
+  /* 发送按钮等主操作的蓝紫渐变 */
+  --accent-gradient: linear-gradient(135deg, #7c8cff 0%, #a78bfa 100%);
 
-  --focus-ring: #4b8bf5;
+  --focus-ring: #7c8cff;
 
   /* 角色情绪与动作高亮色（深色） */
-  --yachiyo-emote-bg: rgba(168, 85, 247, 0.14);
+  --yachiyo-emote-bg: rgba(168, 85, 247, 0.16);
   --yachiyo-emote-color: #d8b4fe;
-  --yachiyo-emote-border: rgba(168, 85, 247, 0.28);
+  --yachiyo-emote-border: rgba(168, 85, 247, 0.32);
 
   /* ─── dsh 融合语义层：alias（深色） ─── */
-  --yx-alias-bg-base: #1a1a1a;
-  --yx-alias-bg-layer-1: #212121;
-  --yx-alias-bg-layer-2: #282828;
-  --yx-alias-bg-layer-3: #2d2d2d;
-  --yx-alias-bg-overlay: #212121;
-  --yx-alias-bg-mask: rgba(0, 0, 0, 0.88);
+  --yx-alias-bg-base: #15161e;
+  --yx-alias-bg-layer-1: #1b1c26;
+  --yx-alias-bg-layer-2: #222431;
+  --yx-alias-bg-layer-3: #282a38;
+  --yx-alias-bg-overlay: #1b1c26;
+  --yx-alias-bg-mask: rgba(8, 9, 16, 0.86);
 
-  --yx-alias-border-l1: rgba(255, 255, 255, 0.08);
-  --yx-alias-border-l2: rgba(255, 255, 255, 0.12);
-  --yx-alias-border-l3: rgba(255, 255, 255, 0.16);
-  --yx-alias-border-l4: rgba(255, 255, 255, 0.20);
+  --yx-alias-border-l1: rgba(170, 180, 255, 0.09);
+  --yx-alias-border-l2: rgba(170, 180, 255, 0.13);
+  --yx-alias-border-l3: rgba(170, 180, 255, 0.17);
+  --yx-alias-border-l4: rgba(170, 180, 255, 0.21);
 
-  --yx-alias-label-primary: #ececec;
-  --yx-alias-label-secondary: #9b9b9b;
-  --yx-alias-label-tertiary: #707070;
+  --yx-alias-label-primary: #e8e9f3;
+  --yx-alias-label-secondary: #9a9db3;
+  --yx-alias-label-tertiary: #6e7189;
 
-  --yx-alias-interactive-bg-hover: rgba(255, 255, 255, 0.05);
-  --yx-alias-interactive-bg-active: rgba(255, 255, 255, 0.08);
-  --yx-alias-interactive-bg-hover-accent: rgba(75, 139, 245, 0.12);
+  --yx-alias-interactive-bg-hover: rgba(150, 160, 255, 0.07);
+  --yx-alias-interactive-bg-active: rgba(150, 160, 255, 0.12);
+  --yx-alias-interactive-bg-hover-accent: rgba(124, 140, 255, 0.16);
 
-  --yx-alias-button-primary-fill: #ffffff;
-  --yx-alias-button-primary-text: #1a1a1a;
-  --yx-alias-button-primary-hover: #e5e5e5;
+  --yx-alias-button-primary-fill: #eef0ff;
+  --yx-alias-button-primary-text: #15161e;
+  --yx-alias-button-primary-hover: #dde1ff;
   --dsw-alias-button-primary-fill: var(--yx-alias-button-primary-fill);
   --dsw-alias-button-primary-text: var(--yx-alias-button-primary-text);
   --dsw-alias-button-primary-hover: var(--yx-alias-button-primary-hover);
   --yx-alias-button-ghost-fill: transparent;
-  --yx-alias-button-floating-fill: #262626;
-  --yx-alias-button-floating-hover: rgba(255, 255, 255, 0.08);
+  --yx-alias-button-floating-fill: #232534;
+  --yx-alias-button-floating-hover: rgba(150, 160, 255, 0.12);
 
-  --yx-alias-markdown-code-block: #151515;
-  --yx-alias-markdown-code-banner: #1c1c1c;
-  --yx-alias-markdown-inline-code: rgba(255, 255, 255, 0.08);
+  --yx-alias-markdown-code-block: #11121a;
+  --yx-alias-markdown-code-banner: #181923;
+  --yx-alias-markdown-inline-code: rgba(124, 140, 255, 0.14);
 
-  --yx-alias-scrollbar-bg: rgba(255, 255, 255, 0.15);
-  --yx-alias-scrollbar-hover: rgba(255, 255, 255, 0.25);
+  --yx-alias-scrollbar-bg: rgba(170, 180, 255, 0.16);
+  --yx-alias-scrollbar-hover: rgba(170, 180, 255, 0.28);
 
   --yx-alias-state-error: var(--danger);
-  --yx-alias-shadow-floating: 0 4px 12px rgba(0, 0, 0, 0.22);
+  --yx-alias-shadow-floating: 0 4px 12px rgba(4, 5, 15, 0.36);
 
   /* ─── dsh 融合语义层：specific（深色） ─── */
   --yx-specific-bubble-user: var(--bubble-user-bg);
@@ -217,58 +219,58 @@
   --yx-specific-sidebar-nav-item-hover: var(--interactive-hover);
   --yx-specific-sidebar-nav-item-active: var(--accent-brand-soft);
 
-  /* ─── deepseek-harness 规范别名（Dark 中性灰阶） ─── */
-  --dsw-alias-bg-base: #1a1a1a;
-  --dsw-alias-bg-layer-1: #212121;
-  --dsw-alias-bg-layer-2: #282828;
-  --dsw-alias-bg-layer-3: #2d2d2d;
-  --dsw-alias-bg-overlay: #212121;
-  --dsw-alias-bg-mask-1: rgba(0, 0, 0, 0.88);
-  --dsw-alias-border-inverted: rgba(255, 255, 255, 0.12);
-  --dsw-alias-border-l1: rgba(255, 255, 255, 0.08);
-  --dsw-alias-border-l2: rgba(255, 255, 255, 0.12);
-  --dsw-alias-border-l2-darkmode-thin: rgba(255, 255, 255, 0.06);
-  --dsw-alias-border-l3: rgba(255, 255, 255, 0.16);
-  --dsw-alias-border-l4: rgba(255, 255, 255, 0.20);
-  --dsw-alias-label-primary: #ececec;
-  --dsw-alias-label-primary-bluish: #ececec;
-  --dsw-alias-label-secondary: #9b9b9b;
-  --dsw-alias-label-tertiary: #707070;
-  --dsw-alias-label-caption: #808080;
-  --dsw-alias-label-dimmed: #606060;
-  --dsw-alias-interactive-bg-hover: rgba(255, 255, 255, 0.05);
-  --dsw-alias-interactive-bg-active: rgba(255, 255, 255, 0.08);
-  --dsw-alias-interactive-bg-hover-accent: rgba(75, 139, 245, 0.12);
-  --dsw-alias-interactive-bg-hover-solid: #2e2e2e;
-  --dsw-alias-interactive-bg-hover-danger: rgba(224, 82, 82, 0.15);
-  --dsw-alias-button-info-fill: #4b8bf5;
-  --dsw-alias-button-info-hover: #3b7ce6;
-  --dsw-alias-button-elevated-fill: #262626;
-  --dsw-alias-button-floating-fill: #262626;
-  --dsw-alias-button-floating-hover: rgba(255, 255, 255, 0.08);
-  --dsw-alias-state-business-primary: #4b8bf5;
-  --dsw-alias-state-business-tertiary: rgba(75, 139, 245, 0.12);
-  --dsw-alias-state-warn-label: #e09f3e;
-  --dsw-alias-state-error-primary: #e05252;
-  --dsw-alias-scrollbar-bg-l2: rgba(255, 255, 255, 0.15);
-  --dsw-alias-scrollbar-hover-l2: rgba(255, 255, 255, 0.25);
-  --dsw-shadow-lv1: 0 1px 3px rgba(0, 0, 0, 0.16);
-  --dsw-shadow-lv2: 0 4px 12px rgba(0, 0, 0, 0.22);
-  --dsw-shadow-lv3: 0 8px 24px rgba(0, 0, 0, 0.28);
-  --dsw-specific-sidebar-fill: #1e1e1e;
-  --dsw-specific-input-major: #1e1e1e;
-  --dsw-specific-selector: #262626;
-  --dsw-specific-menu: #212121;
+  /* ─── deepseek-harness 规范别名（Dark 夜空靛蓝） ─── */
+  --dsw-alias-bg-base: #15161e;
+  --dsw-alias-bg-layer-1: #1b1c26;
+  --dsw-alias-bg-layer-2: #222431;
+  --dsw-alias-bg-layer-3: #282a38;
+  --dsw-alias-bg-overlay: #1b1c26;
+  --dsw-alias-bg-mask-1: rgba(8, 9, 16, 0.86);
+  --dsw-alias-border-inverted: rgba(170, 180, 255, 0.13);
+  --dsw-alias-border-l1: rgba(170, 180, 255, 0.09);
+  --dsw-alias-border-l2: rgba(170, 180, 255, 0.13);
+  --dsw-alias-border-l2-darkmode-thin: rgba(170, 180, 255, 0.07);
+  --dsw-alias-border-l3: rgba(170, 180, 255, 0.17);
+  --dsw-alias-border-l4: rgba(170, 180, 255, 0.21);
+  --dsw-alias-label-primary: #e8e9f3;
+  --dsw-alias-label-primary-bluish: #e3e6ff;
+  --dsw-alias-label-secondary: #9a9db3;
+  --dsw-alias-label-tertiary: #6e7189;
+  --dsw-alias-label-caption: #7f8299;
+  --dsw-alias-label-dimmed: #5f6278;
+  --dsw-alias-interactive-bg-hover: rgba(150, 160, 255, 0.07);
+  --dsw-alias-interactive-bg-active: rgba(150, 160, 255, 0.12);
+  --dsw-alias-interactive-bg-hover-accent: rgba(124, 140, 255, 0.16);
+  --dsw-alias-interactive-bg-hover-solid: #2a2c3b;
+  --dsw-alias-interactive-bg-hover-danger: rgba(239, 107, 115, 0.15);
+  --dsw-alias-button-info-fill: #7c8cff;
+  --dsw-alias-button-info-hover: #6a7bf0;
+  --dsw-alias-button-elevated-fill: #232534;
+  --dsw-alias-button-floating-fill: #232534;
+  --dsw-alias-button-floating-hover: rgba(150, 160, 255, 0.12);
+  --dsw-alias-state-business-primary: #7c8cff;
+  --dsw-alias-state-business-tertiary: rgba(124, 140, 255, 0.16);
+  --dsw-alias-state-warn-label: #f5b544;
+  --dsw-alias-state-error-primary: #ef6b73;
+  --dsw-alias-scrollbar-bg-l2: rgba(170, 180, 255, 0.16);
+  --dsw-alias-scrollbar-hover-l2: rgba(170, 180, 255, 0.28);
+  --dsw-shadow-lv1: 0 1px 3px rgba(4, 5, 15, 0.24);
+  --dsw-shadow-lv2: 0 4px 12px rgba(4, 5, 15, 0.32);
+  --dsw-shadow-lv3: 0 8px 24px rgba(4, 5, 15, 0.4);
+  --dsw-specific-sidebar-fill: #181922;
+  --dsw-specific-input-major: #1a1b24;
+  --dsw-specific-selector: #232534;
+  --dsw-specific-menu: #1b1c26;
   --dsw-mask-blur: none;
   --dsw-menu-blur: none;
 }
 
 /* ─── 深色毛玻璃（设置 → 外观可关闭）：只作用于菜单、弹出框与弹窗遮罩，主界面保持纯色平铺 ─── */
 [data-theme="dark"][data-glass="on"] {
-  --dsw-specific-menu: rgba(33, 33, 33, 0.72);
+  --dsw-specific-menu: rgba(27, 28, 38, 0.72);
   --dsw-menu-blur: blur(20px) saturate(160%);
   /* 遮罩过深时背景模糊不可见，降低不透明度让模糊透出层次 */
-  --yx-alias-bg-mask: rgba(0, 0, 0, 0.5);
+  --yx-alias-bg-mask: rgba(8, 9, 16, 0.5);
   --dsw-mask-blur: blur(8px);
 }
 

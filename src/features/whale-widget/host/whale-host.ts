@@ -247,6 +247,9 @@ export interface WhalePending {
   id: string;
 }
 
+/** 网关确认的 Key 问题：缺失（未保存或已丢失）或被 DeepSeek 拒绝 */
+export type WhaleKeyIssue = "missing" | "rejected";
+
 export interface WhaleHostContext {
   /** 网页版传浏览器本地的 Key；桌面端由网关取系统加密存储里的 Key，这里留空 */
   apiKey?: string;
@@ -275,6 +278,8 @@ export class WhaleHost {
   private updateCheckCache: { at: number; payload: JsonRecord } | null = null;
   private readonly imageUrls = new Map<string, Promise<string | null>>();
   private readonly startedAt = Date.now();
+  private keyIssue: WhaleKeyIssue | null = null;
+  private keyIssueListener: ((issue: WhaleKeyIssue) => void) | null = null;
 
   constructor(
     private readonly store: WhaleStore = new WhaleStore(),
@@ -284,6 +289,17 @@ export class WhaleHost {
   setContext(next: Partial<WhaleHostContext>): void {
     if (next.pending !== undefined && next.pending?.id !== this.context.pending?.id) this.pendingSince = Date.now();
     this.context = { ...this.context, ...next };
+  }
+
+  /** 上游挂件的气泡显示不了余额失败原因，Key 问题交给宿主应用提示；同一问题持续存在时只通知一次 */
+  onKeyIssue(listener: ((issue: WhaleKeyIssue) => void) | null): void {
+    this.keyIssueListener = listener;
+  }
+
+  private reportKeyIssue(issue: WhaleKeyIssue | null): void {
+    const previous = this.keyIssue;
+    this.keyIssue = issue;
+    if (issue !== null && issue !== previous) this.keyIssueListener?.(issue);
   }
 
   /* ── 每轮消耗：回复开始时记下余额，结束后按余额下降结算 ── */
@@ -493,6 +509,7 @@ export class WhaleHost {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const balance = await fetchDeepSeekBalance(this.context.apiKey);
+        this.reportKeyIssue(null);
         return {
           ok: true,
           totalBalance: balance.total,
@@ -508,6 +525,9 @@ export class WhaleHost {
         if (!TRANSIENT_BALANCE_CODES.has(lastCode)) break;
         if (attempt === 0) await delay(500);
       }
+    }
+    if (lastCode === "API_KEY_MISSING" || lastCode === "PROVIDER_AUTH_FAILED") {
+      this.reportKeyIssue(lastCode === "API_KEY_MISSING" ? "missing" : "rejected");
     }
     if (lastCode === "API_KEY_MISSING") return { ok: false, code: "NO_KEY", error: NO_KEY_ERROR };
     const reason = lastCode === "PROVIDER_AUTH_FAILED" ? "API Key 无效或已失效"

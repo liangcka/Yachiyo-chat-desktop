@@ -158,6 +158,19 @@ describe("streamChat", () => {
     );
   });
 
+  it("maps the desktop gateway's missing-key event to a non-retryable code", async () => {
+    serverFetch.mockResolvedValue(sseResponse('event: error\ndata: {"code":"API_KEY_MISSING"}\n\n'));
+
+    const error = await streamChat(sampleRequest, { fetcher: serverFetch, onDelta: vi.fn() }).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(ChatClientError);
+    expect((error as ChatClientError).code).toBe("API_KEY_MISSING");
+    expect((error as ChatClientError).retryable).toBe(false);
+  });
+
   it("generalizes in-stream error events to any code and preserves the message as detail", async () => {
     serverFetch.mockResolvedValue(
       sseResponse('event: error\ndata: {"code":"RATE_LIMITED","message":"请求过于频繁，请稍后再试"}\n\n'),

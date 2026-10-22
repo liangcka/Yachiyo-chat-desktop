@@ -489,6 +489,7 @@ export function DesktopLayout(props: SharedViewProps) {
           messages={props.controller.messages}
           conversationTitle={props.controller.activeConversation?.title}
           pendingPermissionId={props.controller.pendingPermission?.requestId}
+          onKeyIssue={(issue) => props.showToast(issue === "missing" ? props.copy.whaleKeyMissing : props.copy.whaleKeyRejected, "error")}
         />
       ) : null}
 

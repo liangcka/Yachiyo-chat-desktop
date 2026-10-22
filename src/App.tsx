@@ -95,6 +95,7 @@ function controllerErrorMessage(code: string, copy: UiCopy): string {
     return isDesktopApp() ? copy.desktopKeyRequired : copy.sessionExpired;
   }
   if (code === "WORKSPACE_REQUIRED") return copy.workspaceRequired;
+  if (code === "API_KEY_MISSING") return copy.apiKeyMissing;
   if (code === "NETWORK_ERROR") return copy.offline;
   if (code === "STORAGE_ERROR") return copy.storageFull;
   return copy.genericFailure;
