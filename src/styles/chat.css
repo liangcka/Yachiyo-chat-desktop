@@ -645,6 +645,7 @@
   padding: 0.26rem 0.34rem;
   border-radius: 9999px;
   background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: var(--dsw-menu-blur);
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   white-space: nowrap;

@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════
    Yachiyo Chat — 核心设计 Tokens
    目标风格：中性灰阶（参考 Codex 桌面版、Antigravity、Claude 桌面版）
-   平铺布局、弱阴影、无毛玻璃，紧凑信息密度，强调色仅用于焦点、选中态和发送按钮
+   平铺布局、弱阴影，主界面无毛玻璃（深色主题浮层可选毛玻璃），紧凑信息密度，强调色仅用于焦点、选中态和发送按钮
    ═══════════════════════════════════════════════════════════════ */
 
 :root {
@@ -260,6 +260,16 @@
   --dsw-specific-selector: #262626;
   --dsw-specific-menu: #212121;
   --dsw-mask-blur: none;
+  --dsw-menu-blur: none;
+}
+
+/* ─── 深色毛玻璃（设置 → 外观可关闭）：只作用于菜单、弹出框与弹窗遮罩，主界面保持纯色平铺 ─── */
+[data-theme="dark"][data-glass="on"] {
+  --dsw-specific-menu: rgba(33, 33, 33, 0.72);
+  --dsw-menu-blur: blur(20px) saturate(160%);
+  /* 遮罩过深时背景模糊不可见，降低不透明度让模糊透出层次 */
+  --yx-alias-bg-mask: rgba(0, 0, 0, 0.5);
+  --dsw-mask-blur: blur(8px);
 }
 
 /* ─── 浅色主题（Light）中性灰阶 ─── */
@@ -407,4 +417,5 @@
   --dsw-specific-selector: #f2f2f2;
   --dsw-specific-menu: #ffffff;
   --dsw-mask-blur: none;
+  --dsw-menu-blur: none;
 }

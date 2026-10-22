@@ -43,6 +43,7 @@
   border: 1px solid var(--dsw-alias-border-inverted);
   border-radius: 16px;
   background: var(--dsw-specific-menu);
+  backdrop-filter: var(--dsw-menu-blur);
   box-shadow: var(--dsw-shadow-lv3);
 }
 
