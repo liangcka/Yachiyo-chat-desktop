@@ -60,7 +60,8 @@ test.describe("动效系统", () => {
     const menu = page.getByRole("dialog", { name: "用户账户与设置菜单" });
     await expect(menu).toBeVisible();
     await expectEffectiveAnimation(menu);
-    await menu.getByRole("button", { name: "设置", exact: true }).click();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "打开设置" }).click();
     const settings = page.getByRole("dialog", { name: "设置中心" });
     await expect(settings).toBeVisible();
     await expectEffectiveAnimation(settings.locator(".settings-modal"));

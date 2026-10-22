@@ -6,7 +6,6 @@ import {
   Moon,
   Power,
   RotateCcw,
-  Settings,
   Sun,
   User,
   X,
@@ -114,11 +113,6 @@ export function SidebarUserPopover({
       const next = locale === "zh-CN" ? "ja-JP" : "zh-CN";
       void onLocale(next);
     }
-  };
-
-  const handleOpenGeneralSettings = () => {
-    onClose();
-    onOpenSettings?.("general");
   };
 
   const handleReportIssue = () => {
@@ -305,7 +299,7 @@ export function SidebarUserPopover({
 
           <div className="desktop-sidebar__popover-divider" />
 
-          {/* 3. 菜单项：管理账户、语言、主题、设置、报告问题 */}
+          {/* 3. 菜单项：管理账户、语言、主题、报告问题；设置入口在侧栏底部常驻 */}
           <div className="desktop-sidebar__popover-menu">
             <button
               type="button"
@@ -356,19 +350,6 @@ export function SidebarUserPopover({
               <div className="desktop-sidebar__popover-item-right">
                 <span className="desktop-sidebar__popover-item-value">{isLight ? (ja ? "ライト" : "亮色") : ja ? "ダーク" : "深色"}</span>
                 <ChevronRight size={14} className="desktop-sidebar__popover-item-arrow" />
-              </div>
-            </button>
-
-            <button
-              type="button"
-              className="desktop-sidebar__popover-item"
-              onClick={handleOpenGeneralSettings}
-              title={ja ? "設定と環境" : "系统设置与偏好"}
-              aria-label={ja ? "設定" : "设置"}
-            >
-              <div className="desktop-sidebar__popover-item-left">
-                <Settings size={16} className="desktop-sidebar__popover-item-icon" />
-                <span className="desktop-sidebar__popover-item-label">{ja ? "設定" : "设置"}</span>
               </div>
             </button>
 

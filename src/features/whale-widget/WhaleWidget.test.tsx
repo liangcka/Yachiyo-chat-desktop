@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PluginsPanel } from "../../components/settings/PluginsPanel";
 import { getPluginSettings } from "../../services/plugin-settings";
 import { WhaleWidget } from "./WhaleWidget";
+import { ensureWhaleWidget } from "./runtime";
 
 const deepseekEntry = { id: "deepseek", provider: "deepseek" as const, apiKey: "sk-" + "w".repeat(40), model: "deepseek-flash" };
 
@@ -33,6 +34,38 @@ describe("WhaleWidget", () => {
     render(<WhaleWidget entries={[]} phase="idle" messages={[]} />);
     expect(document.head.querySelectorAll('script[src*="whale-widget"]')).toHaveLength(1);
     expect(document.documentElement).not.toHaveAttribute("data-whale-hidden");
+  });
+});
+
+describe("头顶的盆", () => {
+  it("挂件出现后插进身体，点击由盆认领而不触发上游的拖动", async () => {
+    ensureWhaleWidget();
+    const upstreamPointerDown = vi.fn();
+    document.addEventListener("pointerdown", upstreamPointerDown, true);
+
+    const root = document.createElement("div");
+    root.className = "dshwv-root";
+    const body = document.createElement("div");
+    body.className = "dshwv-body";
+    const img = document.createElement("img");
+    img.className = "dshwv-img";
+    img.src = "/dsh-whale/image.png?v=2";
+    body.append(img);
+    root.append(body);
+    document.body.append(root);
+    await Promise.resolve();
+
+    expect(img).toHaveAttribute("data-whale-src", "/dsh-whale/image.png?v=2");
+    const bowl = screen.getByRole("button", { name: "敲一下小鲸鱼头上的盆" });
+    expect(bowl.previousElementSibling).toBe(img);
+
+    fireEvent.pointerDown(bowl, { button: 0 });
+    expect(upstreamPointerDown).not.toHaveBeenCalled();
+    fireEvent.click(bowl);
+    expect(bowl).toHaveClass("yachiyo-whale-bowl--knock");
+
+    document.removeEventListener("pointerdown", upstreamPointerDown, true);
+    root.remove();
   });
 });
 

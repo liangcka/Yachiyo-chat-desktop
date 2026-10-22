@@ -88,6 +88,13 @@ button {
   box-shadow: none;
 }
 
+/* 文本类输入框自带边框：聚焦时直接把这条边框加粗，不在外圈再套一层描边 */
+:is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]), textarea, select):focus-visible {
+  outline: none;
+  border-color: var(--focus-ring, #c4c4c8);
+  box-shadow: inset 0 0 0 1px var(--focus-ring, #c4c4c8);
+}
+
 .visually-hidden {
   position: absolute !important;
   width: 1px !important;
