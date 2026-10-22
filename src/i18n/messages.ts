@@ -55,6 +55,11 @@ export interface UiCopy {
   readonly exitHint: string;
   readonly truncated: string;
   readonly loopStopped: string;
+  readonly runStopped: string;
+  readonly runFailed: string;
+  readonly runNoFinalAnswer: string;
+  readonly continueRun: string;
+  readonly continuePrompt: string;
   readonly llmSettings: string;
   readonly llmSettingsEntry: string;
   readonly llmActive: string;
@@ -231,6 +236,11 @@ const chinese = Object.freeze({
   exitHint: "再按一次返回键退出",
   truncated: "回复太长，已截断显示。",
   loopStopped: "检测到重复循环，已自动停止。",
+  runStopped: "已中断，回复没有完成。",
+  runFailed: "运行出错，回复没有完成。",
+  runNoFinalAnswer: "执行完工具后没有给出最终答复。",
+  continueRun: "继续",
+  continuePrompt: "继续",
   llmSettings: "LLM 设置",
   llmSettingsEntry: "LLM 设置",
   llmActive: "当前使用",
@@ -407,6 +417,11 @@ const japanese = Object.freeze({
   exitHint: "もう一度戻ると終了します",
   truncated: "返答が長すぎたため、途中まで表示しています。",
   loopStopped: "同じ処理の繰り返しを検知したため、自動で停止しました。",
+  runStopped: "途中で中断されたため、返答は完了していません。",
+  runFailed: "エラーのため、返答を完了できませんでした。",
+  runNoFinalAnswer: "ツール実行後、最終的な返答がありませんでした。",
+  continueRun: "続ける",
+  continuePrompt: "続けて",
   llmSettings: "LLM 設定",
   llmSettingsEntry: "LLM 設定",
   llmActive: "現在使用中",

@@ -1414,3 +1414,28 @@
   color: #1d4ed8;
 }
 
+
+/* Agent 未正常收尾的说明条：中断/出错/工具后无最终答复 */
+.message-bubble__run-note {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--yx-alias-label-tertiary);
+}
+
+.message-bubble__run-note button {
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--yx-alias-border-l1);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--yx-alias-label-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.message-bubble__run-note button:hover {
+  color: var(--yx-alias-label-primary);
+}

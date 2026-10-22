@@ -58,6 +58,8 @@ export interface ConversationViewProps {
   showSources?: boolean;
   onRecall?: () => void;
   onRegenerate?: (messageId?: string) => void;
+  /** Agent 未正常收尾时，最后一条回复上的“继续”入口 */
+  onContinue?: () => void;
   onEdit?: (messageId: string, text: string) => void;
   conversation?: Conversation;
   onVersionChange?: (messageId: string, version: number) => void;
@@ -80,6 +82,7 @@ export function ConversationView({
   messages,
   onRecall,
   onRegenerate,
+  onContinue,
   onEdit,
   conversation,
   onVersionChange,
@@ -182,6 +185,7 @@ export function ConversationView({
           showSources={showSources}
           onRecall={message.role === "user" && index === lastUserMessageIndex ? onRecall : undefined}
           onRegenerate={message.role === "assistant" ? onRegenerate : undefined}
+          onContinue={message.role === "assistant" && index === lastAssistantMessageIndex && index === messages.length - 1 ? onContinue : undefined}
           onEdit={message.role === "user" ? onEdit : undefined}
           versions={switchableVersions(conversation, message)}
           onVersionChange={onVersionChange}
@@ -193,7 +197,7 @@ export function ConversationView({
         />
       </li>
     ),
-    [handleImageLoad, imageUrls, lastUserMessageIndex, lastAssistantMessageIndex, isGenerating, locale, onRecall, onRegenerate, onToast, showSources, onEdit, onVersionChange, conversation, pendingPermission, pendingToolName],
+    [handleImageLoad, imageUrls, lastUserMessageIndex, lastAssistantMessageIndex, isGenerating, locale, messages.length, onContinue, onRecall, onRegenerate, onToast, showSources, onEdit, onVersionChange, conversation, pendingPermission, pendingToolName],
   );
 
   const skillsCard =

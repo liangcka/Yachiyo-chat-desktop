@@ -10,7 +10,7 @@ import {
   X,
 } from "lucide-react";
 import type { KeyboardEvent } from "react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ContextMeter } from "../../components/ContextMeter";
 import { ConversationView } from "../../components/ConversationView";
 import { ModelSelect } from "../../components/desktop/ModelSelect";
@@ -21,6 +21,7 @@ import { ProjectSelector } from "../../components/desktop/ProjectSelector";
 import { PermissionCard } from "../../components/tools/PermissionCard";
 import { appendAttachments, COMPOSER_CHARACTER_LIMIT, readTextAttachment, type TextAttachment } from "../../features/file-reference/attachments";
 import { extractLatestTodos } from "../../domain/chat";
+import { copyFor } from "../../i18n/messages";
 import { isRetryableChatErrorCode } from "../../services/chat-client";
 import { SKILLS, skillLabel } from "../../skills";
 
@@ -35,6 +36,7 @@ import {
 } from "../../components/chat/SlashCommandPicker";
 import { isDesktopApp } from "../../services/app-platform";
 import { searchWorkspaceFiles } from "../../services/desktop-bridge";
+import { useProjectState } from "../../services/project-manager";
 import "../../styles/desktop-chat-area.css";
 import { DesktopWelcome } from "./DesktopWelcome";
 import { useComposerDockTransition } from "./use-composer-dock-transition";
@@ -87,6 +89,12 @@ export function DesktopChatArea({
   // 桌面端没有服务端兜底模型：未配置时直接引导到设置，而不是发出必然失败的请求
   const needsModelSetup = isDesktopApp() && llmActiveProvider === undefined;
   const activeLlmEntry = llmEntries.find((entry) => entry.provider === llmActiveProvider);
+
+  // 走与输入框相同的发送入口，但不带输入框里的附件
+  const controllerLocale = controller.locale;
+  const handleContinue = useCallback(() => {
+    onSend(copyFor(controllerLocale).continuePrompt);
+  }, [controllerLocale, onSend]);
 
   const latestTodos = useMemo(
     () => extractLatestTodos(controller.messages),
@@ -180,7 +188,8 @@ export function DesktopChatArea({
   const [slashPickerQuery, setSlashPickerQuery] = useState("");
   const slashPickerRef = useRef<SlashCommandPickerHandle>(null);
 
-  // 检索工作区文件列表
+  // 检索工作区文件列表；在 @ 浮层里选好项目后随之重新检索
+  const { activeProject } = useProjectState();
   useEffect(() => {
     if (!filePickerOpen) return;
     let cancelled = false;
@@ -192,7 +201,7 @@ export function DesktopChatArea({
     return () => {
       cancelled = true;
     };
-  }, [filePickerOpen, filePickerQuery]);
+  }, [activeProject, filePickerOpen, filePickerQuery]);
 
   const updatePickersTrigger = (text: string, cursorPos: number) => {
     const beforeCursor = text.slice(0, cursorPos);
@@ -770,6 +779,7 @@ export function DesktopChatArea({
               onLoadEarlier={() => void controller.loadEarlier()}
               onRecall={onRecall}
               onRegenerate={isOffline || isStreaming || isCompressing ? undefined : onRegenerate}
+              onContinue={isOffline || isStreaming || isCompressing ? undefined : handleContinue}
               onToast={showToast}
               showSources={webSearchSettings.showSources}
               summary={controller.activeConversation?.summary}

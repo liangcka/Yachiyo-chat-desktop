@@ -19,6 +19,8 @@ export interface MessageBubbleProps {
   onVersionChange?: (messageId: string, version: number) => void;
   onToast?: (message: string) => void;
   onImageLoad?: () => void;
+  /** 仅最后一条回复传入：Agent 未正常收尾时提供“继续”入口 */
+  onContinue?: () => void;
   isLastAssistant?: boolean;
   isGenerating?: boolean;
   pendingPermission?: { toolName: string; argumentsJson: string };
@@ -43,6 +45,7 @@ export const MessageBubble = memo(function MessageBubble({
   locale,
   message,
   onImageLoad,
+  onContinue,
   onRecall,
   onRegenerate,
   onEdit,
@@ -227,6 +230,18 @@ export const MessageBubble = memo(function MessageBubble({
   }
 
   const isStreamingMessage = message.status === "streaming";
+  // Agent 未正常收尾时说明原因：中断/出错，或最后一步是工具调用、之后没有正文
+  const endedOnTool = message.contentSegments?.at(-1)?.type === "tool";
+  const runEndNote =
+    message.role !== "assistant" || isEmpty || message.loopStopped === true || message.truncated === true
+      ? undefined
+      : message.status === "stopped"
+        ? copyFor(locale).runStopped
+        : message.status === "failed"
+          ? copyFor(locale).runFailed
+          : message.status === "complete" && hasToolSteps && endedOnTool
+            ? copyFor(locale).runNoFinalAnswer
+            : undefined;
   const hasMenuOptions = onRecall !== undefined || (!isStreamingMessage && (onRegenerate !== undefined || hasText));
   const showVersions = Boolean(hasVersions && !isGenerating && !isStreamingMessage);
   const showCopy = Boolean(hasText && !isStreamingMessage);
@@ -297,6 +312,16 @@ export const MessageBubble = memo(function MessageBubble({
       ) : null}
       {message.loopStopped === true ? (
         <span className="message-bubble__truncated">{copyFor(locale).loopStopped}</span>
+      ) : null}
+      {runEndNote !== undefined ? (
+        <div className="message-bubble__run-note" role="status">
+          <span>{runEndNote}</span>
+          {onContinue !== undefined && !isGenerating ? (
+            <button type="button" onClick={(e) => { e.stopPropagation(); onContinue(); }}>
+              {copyFor(locale).continueRun}
+            </button>
+          ) : null}
+        </div>
       ) : null}
       {hasVisibleSources && visibleSources !== undefined ? (
         <div aria-label={copyFor(locale).sourcesLabel} className="message-bubble__sources">

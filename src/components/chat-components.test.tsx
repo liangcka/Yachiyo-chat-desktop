@@ -694,5 +694,43 @@ describe("reference chat components", () => {
     expect(screen.getByText("查看思考")).toBeInTheDocument();
     expect(screen.getByText("你好呀！")).toBeInTheDocument();
   });
-});
 
+  describe("Agent 未正常收尾的说明", () => {
+    const toolStep = { id: "call-1", name: "read_file", argumentsJson: '{"path":"a.ts"}', result: { output: "hi", isError: false, durationMs: 3 } };
+    const zh = copyFor("zh-CN");
+
+    it("最后一步是工具调用且之后没有正文时提示并可继续", () => {
+      const onContinue = vi.fn();
+      const message = makeAssistantMessage({
+        text: "先看看",
+        toolSteps: [toolStep],
+        contentSegments: [{ type: "text", start: 0, end: 3 }, { type: "tool", toolId: "call-1" }],
+      });
+      render(<MessageBubble locale="zh-CN" message={message} onContinue={onContinue} />);
+      expect(screen.getByText(zh.runNoFinalAnswer)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: zh.continueRun }));
+      expect(onContinue).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ["stopped", zh.runStopped],
+      ["failed", zh.runFailed],
+    ] as const)("%s 状态说明原因", (status, note) => {
+      const message = makeAssistantMessage({ status, text: "做了一半", toolSteps: [toolStep] });
+      render(<MessageBubble locale="zh-CN" message={message} />);
+      expect(screen.getByText(note)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: zh.continueRun })).not.toBeInTheDocument();
+    });
+
+    it("正常以正文收尾时不显示说明", () => {
+      const message = makeAssistantMessage({
+        text: "结论",
+        toolSteps: [toolStep],
+        contentSegments: [{ type: "tool", toolId: "call-1" }, { type: "text", start: 0, end: 2 }],
+      });
+      render(<MessageBubble locale="zh-CN" message={message} onContinue={vi.fn()} />);
+      expect(screen.queryByText(zh.runNoFinalAnswer)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: zh.continueRun })).not.toBeInTheDocument();
+    });
+  });
+});

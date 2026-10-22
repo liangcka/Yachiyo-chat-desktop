@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AtSign, File, FileCode, FileJson, FileText, Image as ImageIcon, X } from "lucide-react";
+import { AtSign, File, FileCode, FileJson, FileText, FolderOpen, Image as ImageIcon, X } from "lucide-react";
 import { useLocale } from "../../i18n/locale-context";
 import { searchWorkspaceFiles } from "../../services/desktop-bridge";
+import { projectManager, useProjectState } from "../../services/project-manager";
 
 export interface FileReferencePickerProps {
   /** 当前 @ 之后的检索关键词（空字符串表示已输入 @ 但未输入后续字符） */
@@ -85,6 +86,7 @@ export function FileReferencePicker({
   onSelectedIndexChange,
 }: FileReferencePickerProps) {
   const ja = useLocale() === "ja-JP";
+  const { activeProject } = useProjectState();
   const [internalItems, setInternalItems] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [uncontrolledIndex, setUncontrolledIndex] = useState(0);
@@ -184,7 +186,21 @@ export function FileReferencePicker({
       </div>
 
       <ul className="file-ref-picker__list" ref={listRef}>
-        {loading && displayList.length === 0 ? (
+        {activeProject === null && !loading && displayList.length === 0 ? (
+          // 没有项目时工作区为空：说明原因并直接给出选择项目的入口，而不是笼统的“未找到”
+          <li className="file-ref-picker__empty file-ref-picker__empty--no-project">
+            <span>{ja ? "プロジェクトが選択されていないため、参照できるファイルがありません。" : "当前没有选择项目，@ 只能引用项目文件夹里的文件。"}</span>
+            <button
+              type="button"
+              className="file-ref-picker__pick-project"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => void projectManager.pickAndOpenProject("Open workspace")}
+            >
+              <FolderOpen size={13} />
+              {ja ? "プロジェクトフォルダを選ぶ" : "选择项目文件夹"}
+            </button>
+          </li>
+        ) : loading && displayList.length === 0 ? (
           <li className="file-ref-picker__empty">{ja ? "ワークスペースのファイルを検索中…" : "正在检索工作区文件…"}</li>
         ) : displayList.length === 0 ? (
           <li className="file-ref-picker__empty">{ja ? "一致するファイルはありません" : "未找到匹配的工作区文件"}</li>

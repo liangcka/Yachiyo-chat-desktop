@@ -1,8 +1,23 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FileReferencePicker } from "./FileReferencePicker";
 
+const projectMock = vi.hoisted(() => ({
+  activeProject: "D:/demo" as string | null,
+  pickAndOpenProject: vi.fn(),
+}));
+
+vi.mock("../../services/project-manager", () => ({
+  projectManager: { pickAndOpenProject: projectMock.pickAndOpenProject },
+  useProjectState: () => ({ activeProject: projectMock.activeProject, recentProjects: [] }),
+}));
+
 describe("FileReferencePicker", () => {
+  beforeEach(() => {
+    projectMock.activeProject = "D:/demo";
+    projectMock.pickAndOpenProject.mockReset();
+  });
+
   const sampleItems = [
     "src/App.tsx",
     "src/components/Composer.tsx",
@@ -71,5 +86,22 @@ describe("FileReferencePicker", () => {
     );
 
     expect(screen.getByText("未找到匹配的工作区文件")).toBeInTheDocument();
+  });
+
+  it("没有选择项目时说明原因并提供选择项目入口", () => {
+    projectMock.activeProject = null;
+    render(
+      <FileReferencePicker
+        query=""
+        items={[]}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("当前没有选择项目，@ 只能引用项目文件夹里的文件。")).toBeInTheDocument();
+    expect(screen.queryByText("未找到匹配的工作区文件")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "选择项目文件夹" }));
+    expect(projectMock.pickAndOpenProject).toHaveBeenCalledTimes(1);
   });
 });

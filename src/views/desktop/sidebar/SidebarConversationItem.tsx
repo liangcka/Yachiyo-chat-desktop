@@ -100,6 +100,19 @@ export function SidebarConversationItem({
     });
   };
 
+  // 右键在光标处打开同一份操作菜单，代替 WebView 自带的刷新/检查菜单
+  const openContextMenu = (event: ReactMouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const left = Math.min(Math.max(8, event.clientX), window.innerWidth - MENU_WIDTH - 8);
+    const openUpward = window.innerHeight - event.clientY < MENU_ESTIMATED_HEIGHT + 8;
+    setMenuPosition({
+      left,
+      ...(openUpward ? { bottom: window.innerHeight - event.clientY } : { top: event.clientY }),
+      width: MENU_WIDTH,
+    });
+  };
+
   const runMenuAction = (action: () => void) => {
     closeMenu();
     action();
@@ -143,6 +156,7 @@ export function SidebarConversationItem({
       } ${isPinned ? "desktop-sidebar__history-item--pinned" : ""} ${
         menuOpen ? "desktop-sidebar__history-item--menu-open" : ""
       }`}
+      onContextMenu={editing ? undefined : openContextMenu}
     >
       {editing ? (
         <form onSubmit={(e) => void handleSaveRename(e)} className="desktop-sidebar__rename-form">

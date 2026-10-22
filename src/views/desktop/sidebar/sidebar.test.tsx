@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Conversation } from "../../../domain/chat";
@@ -385,5 +385,23 @@ describe("DesktopSidebar & Submodules", () => {
     expect(screen.getByRole("dialog", { name: "用户账户与设置菜单" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "用户账户与设置菜单" })).not.toBeInTheDocument();
+  });
+
+  it("右键对话行在光标处打开操作菜单并阻止浏览器默认菜单", () => {
+    render(
+      <SidebarConversationItem
+        active={false}
+        conversation={mockConversations[0]!}
+        copy={copy}
+        onDelete={vi.fn()}
+        onRename={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    const row = screen.getAllByRole("listitem")[0]!;
+    const notPrevented = fireEvent.contextMenu(row, { clientX: 40, clientY: 60 });
+    expect(notPrevented).toBe(false);
+    expect(screen.getByRole("menu", { name: "对话操作" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "删除" })).toBeInTheDocument();
   });
 });

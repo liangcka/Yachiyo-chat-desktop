@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Locale } from "../../domain/chat";
+import type { Theme } from "../../app/use-theme";
 import { LlmSettingsPanel } from "../LlmSettingsPanel";
 import { SkillsPanel } from "../SkillsPanel";
 import { UserMemoryPanel } from "../UserMemoryPanel";
@@ -54,7 +55,9 @@ export interface SettingsModalProps {
   onClose: () => void;
   onCompress?: () => void;
   onToggleDarkGlass?: () => void;
-  onToggleTheme?: () => void;
+  /** 用户选择的主题偏好（含跟随系统）；与 onThemeChange 同时传入时显示三选一 */
+  theme?: Theme;
+  onThemeChange?: (theme: Theme) => void;
   open: boolean;
   resolvedTheme?: "light" | "dark";
   shared: SharedViewProps;
@@ -118,9 +121,10 @@ const zhCopy = {
   appearanceDesc: "自定义界面色彩主题、明暗模式与多语言本地化。",
   interfaceGroup: "界面偏好",
   themeName: "色彩主题",
-  themeCurrent: (dark: boolean) => `当前主题：${dark ? "星空深色 (Dark)" : "皓月浅色 (Light)"}`,
-  toLight: "切换为浅色",
-  toDark: "切换为深色",
+  themeCurrent: (dark: boolean, system: boolean) => `当前主题：${system ? "跟随系统 · " : ""}${dark ? "星空深色 (Dark)" : "皓月浅色 (Light)"}`,
+  themeLight: "浅色",
+  themeDark: "深色",
+  themeSystem: "跟随系统",
   glassName: "夜间毛玻璃效果",
   glassDesc: "深色主题下，菜单、弹出框与弹窗遮罩使用半透明背景模糊。浅色主题不受影响。",
   glassToggle: "切换夜间毛玻璃效果",
@@ -256,9 +260,10 @@ const jaCopy: SettingsCopy = {
   appearanceDesc: "カラーテーマ、ライト／ダークモード、表示言語を設定します。",
   interfaceGroup: "表示設定",
   themeName: "カラーテーマ",
-  themeCurrent: (dark) => `現在のテーマ：${dark ? "星空ダーク (Dark)" : "月光ライト (Light)"}`,
-  toLight: "ライトに切り替え",
-  toDark: "ダークに切り替え",
+  themeCurrent: (dark, system) => `現在のテーマ：${system ? "システムに合わせる · " : ""}${dark ? "星空ダーク (Dark)" : "月光ライト (Light)"}`,
+  themeLight: "ライト",
+  themeDark: "ダーク",
+  themeSystem: "システム",
   glassName: "ダークモードのすりガラス効果",
   glassDesc: "ダークテーマで、メニュー・ポップオーバー・ダイアログの背景を半透明にしてぼかします。ライトテーマには影響しません。",
   glassToggle: "すりガラス効果を切り替え",
@@ -344,7 +349,8 @@ export function SettingsModal({
   onClose,
   onCompress,
   onToggleDarkGlass,
-  onToggleTheme,
+  theme,
+  onThemeChange,
   open,
   resolvedTheme = "dark",
   shared,
@@ -797,17 +803,24 @@ export function SettingsModal({
                 <div className="settings-item-card">
                   <div className="settings-item-card__lead">
                     <strong className="settings-item-card__name">{t.themeName}</strong>
-                    <span className="settings-item-card__desc">{t.themeCurrent(resolvedTheme === "dark")}</span>
+                    <span className="settings-item-card__desc">{t.themeCurrent(resolvedTheme === "dark", theme === "system")}</span>
                   </div>
                   <div className="settings-item-card__action">
-                    {onToggleTheme ? (
-                      <button
-                        type="button"
-                        className="settings-btn"
-                        onClick={onToggleTheme}
-                      >
-                        {resolvedTheme === "dark" ? t.toLight : t.toDark}
-                      </button>
+                    {onThemeChange ? (
+                      <div className="settings-segmented-control" role="radiogroup" aria-label={t.themeName}>
+                        {([["light", t.themeLight], ["dark", t.themeDark], ["system", t.themeSystem]] as const).map(([value, label]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            role="radio"
+                            aria-checked={theme === value}
+                            className={`settings-segmented-btn${theme === value ? " settings-segmented-btn--active" : ""}`}
+                            onClick={() => onThemeChange(value)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
                     ) : null}
                   </div>
                 </div>

@@ -262,4 +262,23 @@ describe("SettingsModal", () => {
     fireEvent.click(glassSwitch);
     expect(onToggleDarkGlass).toHaveBeenCalledTimes(1);
   });
+
+  it("外观面板主题提供浅色、深色、跟随系统三选一", () => {
+    const onThemeChange = vi.fn();
+    render(
+      <SettingsModal
+        open
+        onClose={vi.fn()}
+        shared={createMockSharedProps()}
+        initialTab="appearance"
+        theme="dark"
+        resolvedTheme="dark"
+        onThemeChange={onThemeChange}
+      />
+    );
+
+    expect(screen.getByRole("radio", { name: "深色" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("radio", { name: "跟随系统" }));
+    expect(onThemeChange).toHaveBeenCalledWith("system");
+  });
 });
