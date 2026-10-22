@@ -36,11 +36,11 @@ describe("ReasoningEffortSelect", () => {
     expect(slider).toHaveAttribute("aria-valuetext", "中");
     expect(screen.getByRole("button", { name: "恢复模型默认档位" })).toBeDisabled();
 
-    expect(document.querySelector(".dsh-reasoning-select__meteors")).toBeNull();
+    expect(document.querySelector(".dsh-reasoning-select__matrix")).toBeNull();
     fireEvent.keyDown(slider, { key: "End" });
     expect(slider).toHaveAttribute("aria-valuetext", "Ultra");
     expect(screen.getByRole("dialog")).toHaveClass("dsh-reasoning-select__panel--ultra");
-    expect(document.querySelectorAll(".dsh-reasoning-select__meteors i")).toHaveLength(4);
+    expect(document.querySelector("canvas.dsh-reasoning-select__matrix")).toBeInTheDocument();
     expect(readReasoningEffort(model)).toBe("max");
     expect(screen.getByRole("button", { name: /推理强度 · Ultra/ })).toBeInTheDocument();
 
@@ -79,6 +79,27 @@ describe("ReasoningEffortSelect", () => {
     // 松手后的移动不再改档位
     fireEvent.pointerMove(slider, { pointerId: 1, clientX: 0 });
     expect(readReasoningEffort(model)).toBe("max");
+  });
+
+  it("悬停刻度时在上方提示该档位名", async () => {
+    support.value = { levels: ["low", "medium", "high", "xhigh", "max"], defaultLevel: "high" };
+    const user = userEvent.setup();
+    render(<ReasoningEffortSelect model={model} onOpenModelSettings={vi.fn()} />);
+    await user.click(await screen.findByRole("button", { name: "选择推理强度" }));
+
+    const slider = screen.getByRole("slider", { name: "选择推理强度" });
+    const rail = slider.querySelector<HTMLElement>(".dsh-reasoning-select__rail")!;
+    vi.spyOn(rail, "getBoundingClientRect").mockReturnValue({ left: 0, width: 200, top: 0, height: 28, right: 200, bottom: 28, x: 0, y: 0, toJSON: () => ({}) });
+
+    fireEvent.pointerMove(slider, { pointerId: 1, clientX: 198 });
+    expect(document.querySelector(".dsh-reasoning-select__tip")).toHaveTextContent("Ultra");
+    // 悬停在当前档位上不重复提示
+    fireEvent.pointerMove(slider, { pointerId: 1, clientX: 100 });
+    expect(document.querySelector(".dsh-reasoning-select__tip")).toBeNull();
+    fireEvent.pointerMove(slider, { pointerId: 1, clientX: 0 });
+    fireEvent.pointerLeave(slider);
+    expect(document.querySelector(".dsh-reasoning-select__tip")).toBeNull();
+    expect(readReasoningEffort(model)).toBeUndefined();
   });
 
   it("点击模型名打开模型设置", async () => {

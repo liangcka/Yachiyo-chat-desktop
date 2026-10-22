@@ -34,12 +34,13 @@
 
 .dsh-reasoning-select__panel {
   --reasoning-accent: var(--dsw-alias-state-business-primary, #4b8bf5);
+  --reasoning-ultra: #b9a4ff;
   position: absolute;
   right: 0;
   bottom: calc(100% + 8px);
   z-index: 100;
-  width: 260px;
-  padding: 12px 14px 14px;
+  width: 280px;
+  padding: 14px 14px 10px;
   border: 1px solid var(--dsw-alias-border-inverted);
   border-radius: 16px;
   background: var(--dsw-specific-menu);
@@ -52,47 +53,40 @@
 }
 
 .dsh-reasoning-select__header {
-  position: relative;
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: 2px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
-.dsh-reasoning-select__level {
-  color: var(--reasoning-accent);
-  font-size: 14px;
+.dsh-reasoning-select__title {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 15px;
   font-weight: 600;
 }
 
-.dsh-reasoning-select__model {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  max-width: 180px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--text-muted);
-  font-size: 11px;
-  cursor: pointer;
+/* Ultra 档名带紫色辉光，切入时从模糊淡入 */
+.dsh-reasoning-select__panel--ultra .dsh-reasoning-select__level {
+  display: inline-block;
+  color: #b583ff;
+  text-shadow: 0 0 10px rgba(168, 85, 247, 0.65);
+  animation: reasoning-level-in 0.35s ease-out;
 }
 
-.dsh-reasoning-select__model span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+@keyframes reasoning-level-in {
+  from {
+    opacity: 0;
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
 }
 
-.dsh-reasoning-select__model:hover {
-  color: var(--text-primary);
-}
-
-.dsh-reasoning-select__reset {
-  position: absolute;
-  top: -2px;
-  right: -4px;
+.dsh-reasoning-select__icon {
   display: grid;
   place-items: center;
   width: 24px;
@@ -102,30 +96,44 @@
   border-radius: 6px;
   background: none;
   color: var(--text-muted);
+}
+
+.dsh-reasoning-select__icon[title] {
+  cursor: help;
+}
+
+button.dsh-reasoning-select__icon {
   cursor: pointer;
 }
 
-.dsh-reasoning-select__reset:hover:not(:disabled) {
+button.dsh-reasoning-select__icon:hover:not(:disabled) {
   background: var(--interactive-hover);
   color: var(--text-primary);
 }
 
-.dsh-reasoning-select__reset:disabled {
+button.dsh-reasoning-select__icon:disabled {
   cursor: default;
   opacity: 0.35;
 }
 
-/* 滑杆：圆点与拇指放在两端各内缩一个拇指半径的定位层里，left 百分比即档位位置 */
+.dsh-reasoning-select__ends {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* 滑杆：圆点与拇指放在两端各内缩半个拇指再留 3px 的定位层里，left 百分比即档位位置 */
 .dsh-reasoning-select__track {
   position: relative;
-  height: 28px;
-  border-radius: 999px;
-  background: var(--interactive-active);
+  height: 32px;
+  border-radius: 10px;
+  background: var(--interactive-hover);
   cursor: grab;
   touch-action: none;
   user-select: none;
   outline: none;
-  overflow: hidden;
 }
 
 /* 拖动中拇指与填充直接跟手，不做过渡动画 */
@@ -147,19 +155,26 @@
   top: 0;
   bottom: 0;
   left: 0;
+  overflow: hidden;
   border-radius: inherit;
-  background: var(--reasoning-accent);
+  background: var(--interactive-active);
   transition: width 0.15s ease;
 }
 
 .dsh-reasoning-select__rail {
   position: absolute;
-  inset: 0 14px;
+  inset: 0 16px;
+}
+
+.dsh-reasoning-select__stop,
+.dsh-reasoning-select__thumb,
+.dsh-reasoning-select__tip {
+  position: absolute;
+  transform: translateX(-50%);
 }
 
 .dsh-reasoning-select__stop,
 .dsh-reasoning-select__thumb {
-  position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
 }
@@ -169,118 +184,68 @@
   height: 4px;
   border-radius: 50%;
   background: var(--text-dim);
-  opacity: 0.7;
 }
 
-.dsh-reasoning-select__stop--passed {
-  background: #ffffff;
-  opacity: 0.6;
+.dsh-reasoning-select__stop--ultra {
+  background: #8b5cf6;
+  box-shadow: 0 0 4px rgba(139, 92, 246, 0.8);
+}
+
+.dsh-reasoning-select__tip {
+  bottom: calc(100% + 4px);
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--text-primary) 10%, var(--dsw-specific-menu));
+  backdrop-filter: var(--dsw-menu-blur);
+  box-shadow: var(--dsw-shadow-lv3);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .dsh-reasoning-select__thumb {
-  width: 24px;
+  display: grid;
+  place-items: center;
+  width: 26px;
   height: 24px;
-  border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  border-radius: 7px;
+  background: #f2f2f5;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  color: #3f3f46;
   transition: left 0.15s ease;
 }
 
-/* Ultra：整条轨道换成紫色渐变星空 */
-.dsh-reasoning-select__panel--ultra .dsh-reasoning-select__track {
-  background: linear-gradient(90deg, #3b3fd8 0%, #7c5cf5 55%, #b79cfb 100%);
+/* 指针移入或拖动时拇指上显示左右箭头，提示可拖动 */
+.dsh-reasoning-select__thumb svg {
+  opacity: 0;
+  transition: opacity 0.12s ease;
 }
 
+.dsh-reasoning-select__track:hover .dsh-reasoning-select__thumb svg,
+.dsh-reasoning-select__track:focus-visible .dsh-reasoning-select__thumb svg,
+.dsh-reasoning-select__track--dragging .dsh-reasoning-select__thumb svg {
+  opacity: 1;
+}
+
+/* Ultra：填充换成紫色点阵，越靠右越密越亮 */
 .dsh-reasoning-select__panel--ultra .dsh-reasoning-select__fill {
   background: transparent;
-}
-
-.dsh-reasoning-select__panel--ultra .dsh-reasoning-select__track::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background-image:
-    radial-gradient(1px 1px at 12% 40%, rgba(255, 255, 255, 0.9), transparent),
-    radial-gradient(1.5px 1.5px at 24% 70%, rgba(255, 255, 255, 0.8), transparent),
-    radial-gradient(1px 1px at 38% 30%, rgba(255, 255, 255, 0.9), transparent),
-    radial-gradient(1.5px 1.5px at 52% 62%, rgba(255, 255, 255, 0.7), transparent),
-    radial-gradient(1px 1px at 66% 36%, rgba(255, 255, 255, 0.9), transparent),
-    radial-gradient(1.5px 1.5px at 78% 68%, rgba(255, 255, 255, 0.8), transparent);
-  pointer-events: none;
 }
 
 .dsh-reasoning-select__panel--ultra .dsh-reasoning-select__stop {
   opacity: 0;
 }
 
-/* 星点闪烁与流星划过只动 opacity / transform，由合成器处理；只在 Ultra 弹层打开期间运行 */
-.dsh-reasoning-select__panel--ultra .dsh-reasoning-select__track::before {
-  animation: reasoning-twinkle 1.6s ease-in-out infinite alternate;
-}
-
-.dsh-reasoning-select__meteors {
+/* 点阵画布延伸到拇指中线：左侧圆角处露出点阵，右侧不越过拇指外缘；拖动时随填充宽度伸缩 */
+.dsh-reasoning-select__matrix {
   position: absolute;
-  inset: 0;
-  overflow: hidden;
-  border-radius: inherit;
-  pointer-events: none;
-}
-
-.dsh-reasoning-select__meteors i {
-  position: absolute;
-  left: 0;
-  width: 28px;
-  height: 1.5px;
-  border-radius: 1px;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.95));
-  opacity: 0;
-  animation: reasoning-meteor 2.6s linear infinite;
-}
-
-.dsh-reasoning-select__meteors i:nth-child(1) {
-  top: 6px;
-}
-
-.dsh-reasoning-select__meteors i:nth-child(2) {
-  top: 15px;
-  animation-delay: 0.7s;
-  animation-duration: 2.2s;
-}
-
-.dsh-reasoning-select__meteors i:nth-child(3) {
-  top: 10px;
-  animation-delay: 1.4s;
-  animation-duration: 3s;
-}
-
-.dsh-reasoning-select__meteors i:nth-child(4) {
-  top: 19px;
-  animation-delay: 2s;
-}
-
-@keyframes reasoning-meteor {
-  0% {
-    opacity: 0;
-    transform: translate(-36px, -4px) rotate(10deg);
-  }
-  12%,
-  70% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-    transform: translate(250px, 8px) rotate(10deg);
-  }
-}
-
-@keyframes reasoning-twinkle {
-  from {
-    opacity: 0.45;
-  }
-  to {
-    opacity: 1;
-  }
+  top: 3px;
+  bottom: 3px;
+  left: 4px;
+  width: calc(100% - 20px);
+  height: calc(100% - 6px);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -289,8 +254,31 @@
     transition: none;
   }
 
-  .dsh-reasoning-select__panel--ultra .dsh-reasoning-select__track::before,
-  .dsh-reasoning-select__meteors i {
+  .dsh-reasoning-select__panel--ultra .dsh-reasoning-select__level {
     animation: none;
   }
+}
+
+.dsh-reasoning-select__model {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.dsh-reasoning-select__model span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dsh-reasoning-select__model:hover {
+  color: var(--text-primary);
 }

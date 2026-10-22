@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleHelp, MoveHorizontal, RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useLocale } from "../../i18n/locale-context";
 import {
@@ -10,6 +10,7 @@ import {
   type ReasoningModel,
   type ReasoningSupport,
 } from "../../services/reasoning-effort";
+import { ReasoningUltraMatrix } from "./ReasoningUltraMatrix";
 import "./ReasoningEffortSelect.css";
 
 export interface ReasoningEffortSelectProps {
@@ -50,6 +51,8 @@ export function ReasoningEffortSelect({ model, onOpenModelSettings, disabled = f
   // 拖动中拇指跟随指针的连续位置（0~1）；松手时吸附到最近档位，未拖动时为 undefined
   const [dragRatio, setDragRatio] = useState<number>();
   const dragPointerRef = useRef<number | undefined>(undefined);
+  // 指针悬停处最近的档位，用于在刻度上方提示档位名
+  const [hoverIndex, setHoverIndex] = useState<number>();
   const modelKey = model === undefined ? undefined : reasoningModelKey(model);
   // model 对象每次渲染都会新建，查询以其字段为依赖
   const provider = model?.provider;
@@ -125,12 +128,17 @@ export function ReasoningEffortSelect({ model, onOpenModelSettings, disabled = f
       // 不支持指针捕获时仍可在轨道内拖动
     }
     dragPointerRef.current = event.pointerId;
+    setHoverIndex(undefined);
     dragTo(event.clientX);
   };
 
   const onTrackPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (dragPointerRef.current !== event.pointerId) return;
-    dragTo(event.clientX);
+    if (dragPointerRef.current === event.pointerId) {
+      dragTo(event.clientX);
+      return;
+    }
+    const ratio = ratioAt(event.clientX);
+    setHoverIndex(ratio === undefined ? undefined : Math.round(ratio * (levels.length - 1)));
   };
 
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -149,10 +157,12 @@ export function ReasoningEffortSelect({ model, onOpenModelSettings, disabled = f
   };
 
   const placeholder = ja ? "推論の強さを選択" : "选择推理强度";
+  const helpText = ja ? "強くするほど深く考えますが、応答は遅くなります" : "推理强度越高，模型思考越充分，响应也越慢";
   const unsupportedHint = ja ? "このモデルは推論の強さを調整できません" : "当前模型不支持调节推理强度";
   const triggerLabel = selected === undefined ? placeholder : `${ja ? "推論" : "推理强度"} · ${levelLabel(selected, ja)}`;
   const triggerDisabled = disabled || !supported;
   const dragging = dragRatio !== undefined;
+  const hoverLevel = hoverIndex === undefined || hoverIndex === effectiveIndex ? undefined : levels[hoverIndex];
   const progress = dragging ? dragRatio * 100 : stopPosition(effectiveIndex, levels.length);
 
   return (
@@ -173,29 +183,26 @@ export function ReasoningEffortSelect({ model, onOpenModelSettings, disabled = f
       {open && !triggerDisabled && effective !== undefined ? (
         <div className={`dsh-reasoning-select__panel ${ultra ? "dsh-reasoning-select__panel--ultra" : ""}`} role="dialog" aria-label={placeholder}>
           <div className="dsh-reasoning-select__header">
-            <span className="dsh-reasoning-select__level">{levelLabel(effective, ja)}</span>
+            <span className="dsh-reasoning-select__title">
+              {ja ? "推論" : "推理强度"} <span className="dsh-reasoning-select__level">{levelLabel(effective, ja)}</span>
+            </span>
             <button
               type="button"
-              className="dsh-reasoning-select__model"
-              onClick={() => {
-                setOpen(false);
-                onOpenModelSettings();
-              }}
-              title={ja ? "モデル設定を開く" : "打开模型设置"}
-            >
-              <span>{model.model}</span>
-              <ChevronRight size={12} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="dsh-reasoning-select__reset"
+              className="dsh-reasoning-select__icon"
               onClick={() => choose(undefined)}
               disabled={selected === undefined}
               title={ja ? "モデルの既定に戻す" : "恢复模型默认档位"}
               aria-label={ja ? "モデルの既定に戻す" : "恢复模型默认档位"}
             >
-              <RotateCcw size={14} />
+              <RotateCcw size={13} />
             </button>
+            <span className="dsh-reasoning-select__icon" title={helpText} aria-label={helpText} role="img">
+              <CircleHelp size={15} />
+            </span>
+          </div>
+          <div className="dsh-reasoning-select__ends" aria-hidden="true">
+            <span>{ja ? "速い" : "更快"}</span>
+            <span>{ja ? "賢い" : "更聪明"}</span>
           </div>
           <div
             className={`dsh-reasoning-select__track ${dragging ? "dsh-reasoning-select__track--dragging" : ""}`}
@@ -210,30 +217,44 @@ export function ReasoningEffortSelect({ model, onOpenModelSettings, disabled = f
             onPointerMove={onTrackPointerMove}
             onPointerUp={endDrag}
             onPointerCancel={endDrag}
+            onPointerLeave={() => setHoverIndex(undefined)}
             onLostPointerCapture={endDrag}
             onKeyDown={onSliderKeyDown}
           >
-            {/* 填充从轨道左端一直盖到拇指右缘；首档不填充 */}
-            <span className="dsh-reasoning-select__fill" style={{ width: progress === 0 ? 0 : `calc(28px + (100% - 28px) * ${progress / 100})` }} />
-            {ultra ? (
-              <span className="dsh-reasoning-select__meteors" aria-hidden="true">
-                <i />
-                <i />
-                <i />
-                <i />
-              </span>
-            ) : null}
+            {/* 填充从轨道左端一直盖到拇指右缘；Ultra 时换成点阵 */}
+            <span className="dsh-reasoning-select__fill" style={{ width: `calc(32px + (100% - 32px) * ${progress / 100})` }}>
+              {ultra ? <ReasoningUltraMatrix /> : null}
+            </span>
             <span ref={railRef} className="dsh-reasoning-select__rail" aria-hidden="true">
               {levels.map((level, index) => (
                 <span
                   key={level}
-                  className={`dsh-reasoning-select__stop ${index <= effectiveIndex ? "dsh-reasoning-select__stop--passed" : ""}`}
+                  className={`dsh-reasoning-select__stop ${level === "max" ? "dsh-reasoning-select__stop--ultra" : ""}`}
                   style={{ left: `${stopPosition(index, levels.length)}%` }}
                 />
               ))}
-              <span className="dsh-reasoning-select__thumb" style={{ left: `${progress}%` }} />
+              {hoverIndex !== undefined && hoverLevel !== undefined ? (
+                <span className="dsh-reasoning-select__tip" style={{ left: `${stopPosition(hoverIndex, levels.length)}%` }}>
+                  {levelLabel(hoverLevel, ja)}
+                </span>
+              ) : null}
+              <span className="dsh-reasoning-select__thumb" style={{ left: `${progress}%` }}>
+                <MoveHorizontal size={14} strokeWidth={2.4} />
+              </span>
             </span>
           </div>
+          <button
+            type="button"
+            className="dsh-reasoning-select__model"
+            onClick={() => {
+              setOpen(false);
+              onOpenModelSettings();
+            }}
+            title={ja ? "モデル設定を開く" : "打开模型设置"}
+          >
+            <span>{model.model}</span>
+            <ChevronRight size={12} aria-hidden="true" />
+          </button>
         </div>
       ) : null}
     </div>
