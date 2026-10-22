@@ -5,6 +5,9 @@ import { KEYSTORE_MANAGED_API_KEY } from "../domain/llm";
 import { copyFor } from "../i18n/messages";
 import { LlmSettingsPanel } from "./LlmSettingsPanel";
 
+const fetchModelList = vi.hoisted(() => vi.fn<(request: unknown) => Promise<string[]>>());
+vi.mock("../services/model-list", () => ({ fetchModelList }));
+
 const copy = copyFor("zh-CN");
 const VALID_KEY = "sk-test-abcdefghijklmnopqrstuvwxyz0123";
 
@@ -240,6 +243,65 @@ describe("LlmSettingsPanel", () => {
       baseUrl: "https://api.openai.com/v1",
     });
     expect(onActivate).toHaveBeenCalledWith("openai~custom01");
+  });
+
+  it("fetches the endpoint model list in the custom form and picks a model from it", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn(async () => "openai~custom01");
+    fetchModelList.mockResolvedValueOnce(["gpt-4o", "qwen-turbo"]);
+    mount({ onSave });
+
+    await user.click(screen.getByRole("button", { name: "添加模型" }));
+    await user.click(screen.getByText("自定义模型"));
+    const fetchButton = screen.getByRole("button", { name: "获取模型列表" });
+    expect(fetchButton).toBeDisabled();
+
+    await user.type(screen.getByPlaceholderText("请输入服务商 API Key"), VALID_KEY);
+    await user.click(fetchButton);
+
+    expect(fetchModelList).toHaveBeenCalledWith({ baseUrl: "https://api.openai.com/v1", apiKey: VALID_KEY });
+    expect(screen.getByText("端点提供 2 个模型:")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "qwen-turbo" }));
+    expect(screen.getByLabelText("模型名称 (Model ID) *")).toHaveValue("qwen-turbo");
+
+    await user.click(screen.getByRole("button", { name: "保存并启用" }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ model: "qwen-turbo" }));
+  });
+
+  it("shows a hint when the model list cannot be fetched", async () => {
+    const user = userEvent.setup();
+    fetchModelList.mockRejectedValueOnce(new Error("Failed to list models (401)"));
+    mount();
+
+    await user.click(screen.getByRole("button", { name: "添加模型" }));
+    await user.click(screen.getByText("自定义模型"));
+    await user.type(screen.getByPlaceholderText("请输入服务商 API Key"), VALID_KEY);
+    await user.click(screen.getByRole("button", { name: "获取模型列表" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("获取模型列表失败");
+  });
+
+  it("edits a custom-endpoint config in the custom form and lists models with its stored key", async () => {
+    const user = userEvent.setup();
+    fetchModelList.mockResolvedValueOnce(["my-model"]);
+    mount({
+      entries: [
+        {
+          id: "openai~custom01",
+          provider: "openai",
+          apiKey: KEYSTORE_MANAGED_API_KEY,
+          model: "my-model",
+          baseUrl: "https://llm.example.com/v1",
+        },
+      ],
+    });
+
+    await user.click(screen.getByLabelText("编辑 my-model"));
+    expect(screen.getByText("配置自定义模型 (OpenAI Compatible)")).toBeInTheDocument();
+    expect(screen.getByLabelText("模型名称 (Model ID) *")).toHaveValue("my-model");
+
+    await user.click(screen.getByRole("button", { name: "获取模型列表" }));
+    expect(fetchModelList).toHaveBeenCalledWith({ baseUrl: "https://llm.example.com/v1", slot: "openai~custom01" });
   });
 
   it("opens edit config modal from table row", async () => {
