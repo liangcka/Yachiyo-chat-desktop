@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PluginsPanel } from "../../components/settings/PluginsPanel";
 import { getPluginSettings } from "../../services/plugin-settings";
 import { WhaleWidget } from "./WhaleWidget";
+import { installWhaleBowl } from "./bowl";
 import { ensureWhaleWidget } from "./runtime";
 
 const deepseekEntry = { id: "deepseek", provider: "deepseek" as const, apiKey: "sk-" + "w".repeat(40), model: "deepseek-flash" };
@@ -65,6 +66,20 @@ describe("头顶的盆", () => {
     expect(bowl).toHaveClass("yachiyo-whale-bowl--knock");
 
     document.removeEventListener("pointerdown", upstreamPointerDown, true);
+    root.remove();
+  });
+
+  it("重复安装只留一个盆", () => {
+    const body = document.createElement("div");
+    body.className = "dshwv-body";
+    const root = document.createElement("div");
+    root.className = "dshwv-root";
+    root.append(body);
+    document.body.append(root);
+
+    installWhaleBowl();
+    installWhaleBowl();
+    expect(body.querySelectorAll(".yachiyo-whale-bowl")).toHaveLength(1);
     root.remove();
   });
 

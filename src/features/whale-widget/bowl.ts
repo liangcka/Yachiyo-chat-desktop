@@ -39,6 +39,9 @@ function knock(bowl: HTMLElement): void {
  * 只有默认形象的头顶位置已知，换成其它角色时由样式隐藏。
  */
 export function installWhaleBowl(): void {
+  // 开发时模块热更新会重新安装，上游挂件节点却还在，先摘掉上一份盆，免得叠出两个
+  for (const stale of document.querySelectorAll(`.${BOWL_CLASS}`)) stale.remove();
+
   const bowl = document.createElement("button");
   bowl.type = "button";
   bowl.className = BOWL_CLASS;
