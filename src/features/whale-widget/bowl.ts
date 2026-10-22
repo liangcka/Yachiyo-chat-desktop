@@ -4,22 +4,27 @@ const KNOCK_CLASS = "yachiyo-whale-bowl--knock";
 const BOWL_SVG = `<svg viewBox="0 0 200 100" aria-hidden="true" focusable="false">
   <defs>
     <linearGradient id="yachiyo-whale-bowl-shell" x1="0" x2="1" y1="0" y2="0">
-      <stop offset="0" stop-color="#6b727c" />
-      <stop offset="0.28" stop-color="#c9ced6" />
-      <stop offset="0.42" stop-color="#f4f6f9" />
-      <stop offset="0.62" stop-color="#aab0b9" />
-      <stop offset="1" stop-color="#5d636c" />
+      <stop offset="0" stop-color="#555c66" />
+      <stop offset="0.1" stop-color="#9ea5ae" />
+      <stop offset="0.17" stop-color="#eef1f4" />
+      <stop offset="0.23" stop-color="#8d949e" />
+      <stop offset="0.4" stop-color="#cfd4da" />
+      <stop offset="0.5" stop-color="#ffffff" />
+      <stop offset="0.57" stop-color="#b3b9c1" />
+      <stop offset="0.76" stop-color="#737a84" />
+      <stop offset="0.87" stop-color="#c4c9cf" />
+      <stop offset="1" stop-color="#4f555e" />
     </linearGradient>
-    <linearGradient id="yachiyo-whale-bowl-rim" x1="0" x2="1" y1="0" y2="0">
-      <stop offset="0" stop-color="#5a6069" />
-      <stop offset="0.4" stop-color="#e2e6ec" />
-      <stop offset="1" stop-color="#565c65" />
+    <linearGradient id="yachiyo-whale-bowl-base" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#f6f8fa" />
+      <stop offset="0.6" stop-color="#b9bfc7" />
+      <stop offset="1" stop-color="#868d97" />
     </linearGradient>
   </defs>
-  <path d="M16 82C19 46 42 16 100 13c58 3 81 33 84 69z" fill="url(#yachiyo-whale-bowl-shell)" stroke="#4b5059" stroke-width="2" />
-  <ellipse cx="100" cy="15" rx="44" ry="6" fill="#d7dbe1" stroke="#4b5059" stroke-width="1.6" />
-  <path d="M60 30c-9 10-14 26-15 46" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.7" />
-  <ellipse cx="100" cy="84" rx="97" ry="11" fill="url(#yachiyo-whale-bowl-rim)" stroke="#4b5059" stroke-width="2" />
+  <path d="M14 85 C26 60 34 40 41 28 Q47 18 60 18 L140 18 Q153 18 159 28 C166 40 174 60 186 85 Z" fill="url(#yachiyo-whale-bowl-shell)" stroke="#434952" stroke-width="1.8" stroke-linejoin="round" />
+  <ellipse cx="100" cy="19" rx="50" ry="5.5" fill="url(#yachiyo-whale-bowl-base)" stroke="#434952" stroke-width="1.4" />
+  <ellipse cx="100" cy="19" rx="34" ry="3.4" fill="none" stroke="#8a919b" stroke-width="1" />
+  <ellipse cx="100" cy="86" rx="89" ry="6" fill="url(#yachiyo-whale-bowl-shell)" stroke="#434952" stroke-width="1.8" />
 </svg>`;
 
 let audio: AudioContext | null = null;
