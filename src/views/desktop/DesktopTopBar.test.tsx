@@ -119,7 +119,7 @@ describe("DesktopTopBar", () => {
     expect(screen.getByText("当前对话标题")).toBeInTheDocument();
     expect(screen.getByText("无项目")).toBeInTheDocument();
 
-    const editBtn = screen.getByTitle("重命名会话");
+    const editBtn = screen.getByTitle(/点击重命名/);
     await user.click(editBtn);
 
     const input = screen.getByLabelText("重命名当前会话");
@@ -149,13 +149,13 @@ describe("DesktopTopBar", () => {
       />,
     );
 
-    await user.click(screen.getByTitle("重命名会话"));
+    await user.click(screen.getByTitle(/点击重命名/));
     await user.clear(screen.getByLabelText("重命名当前会话"));
     await user.type(screen.getByLabelText("重命名当前会话"), "取消的标题{Escape}");
     expect(screen.queryByLabelText("重命名当前会话")).not.toBeInTheDocument();
     expect(onRename).not.toHaveBeenCalled();
 
-    await user.click(screen.getByTitle("重命名会话"));
+    await user.click(screen.getByTitle(/点击重命名/));
     await user.clear(screen.getByLabelText("重命名当前会话"));
     await user.type(screen.getByLabelText("重命名当前会话"), "失焦保存的标题");
     await user.click(document.body);

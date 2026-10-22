@@ -7,7 +7,6 @@ import {
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
-  Pencil,
   Search,
   Square,
   X,
@@ -275,17 +274,6 @@ export function DesktopTopBar({
             >
               <span className="desktop-topbar__title">{currentTitle}</span>
             </button>
-            {activeConversationId ? (
-              <button
-                type="button"
-                className="desktop-topbar__title-edit-btn"
-                onClick={handleStartEditTitle}
-                title={ja ? "会話の名前を変更" : "重命名会话"}
-                aria-label={ja ? "会話の名前を変更" : "重命名会话"}
-              >
-                <Pencil size={12} />
-              </button>
-            ) : null}
             <span
               className="desktop-topbar__project-name"
               title={ja ? `現在のプロジェクト：${projectDisplayName}` : `当前项目：${projectDisplayName}`}
