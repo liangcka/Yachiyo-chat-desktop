@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 export interface WhaleWidgetSettings {
   /** 是否在工作台显示余额小鲸鱼；挂件自身的外观、音效与提示设置由其菜单管理 */
   enabled: boolean;
+  /** 是否在小鲸鱼头顶扣上可敲的铁盆 */
+  bowl: boolean;
 }
 
 export interface PluginSettings {
@@ -14,16 +16,22 @@ const CHANGE_EVENT = "yachiyo-plugin-settings-changed";
 
 /** 插件一律默认关闭，由用户在设置的「插件」页主动开启 */
 export const DEFAULT_PLUGIN_SETTINGS: PluginSettings = {
-  whaleWidget: { enabled: false },
+  whaleWidget: { enabled: false, bowl: true },
 };
 
 function readStorage(): PluginSettings {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_PLUGIN_SETTINGS;
-    const parsed = JSON.parse(raw) as { whaleWidget?: { enabled?: unknown } };
-    const enabled = parsed.whaleWidget?.enabled;
-    return { whaleWidget: { enabled: typeof enabled === "boolean" ? enabled : DEFAULT_PLUGIN_SETTINGS.whaleWidget.enabled } };
+    const parsed = JSON.parse(raw) as { whaleWidget?: { enabled?: unknown; bowl?: unknown } };
+    const { enabled, bowl } = parsed.whaleWidget ?? {};
+    const defaults = DEFAULT_PLUGIN_SETTINGS.whaleWidget;
+    return {
+      whaleWidget: {
+        enabled: typeof enabled === "boolean" ? enabled : defaults.enabled,
+        bowl: typeof bowl === "boolean" ? bowl : defaults.bowl,
+      },
+    };
   } catch {
     return DEFAULT_PLUGIN_SETTINGS;
   }

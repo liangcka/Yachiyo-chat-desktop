@@ -67,6 +67,14 @@ describe("头顶的盆", () => {
     document.removeEventListener("pointerdown", upstreamPointerDown, true);
     root.remove();
   });
+
+  it("按设置切换盆的显隐", () => {
+    const view = render(<WhaleWidget entries={[]} phase="idle" messages={[]} bowl={false} />);
+    expect(document.documentElement).toHaveAttribute("data-whale-bowl-hidden");
+    view.rerender(<WhaleWidget entries={[]} phase="idle" messages={[]} bowl />);
+    expect(document.documentElement).not.toHaveAttribute("data-whale-bowl-hidden");
+    view.unmount();
+  });
 });
 
 describe("插件页", () => {
@@ -74,8 +82,15 @@ describe("插件页", () => {
     const onConfigureKey = vi.fn();
     render(<PluginsPanel locale="zh-CN" hasDeepSeekKey={false} onConfigureKey={onConfigureKey} />);
     expect(screen.queryByText("需要 DeepSeek 官方 API Key")).toBeNull();
+    expect(screen.queryByRole("switch", { name: "显示头顶的铁盆" })).toBeNull();
     fireEvent.click(screen.getByRole("switch", { name: "启用余额小鲸鱼" }));
     expect(getPluginSettings().whaleWidget.enabled).toBe(true);
+
+    const bowlToggle = screen.getByRole("switch", { name: "显示头顶的铁盆" });
+    expect(bowlToggle).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(bowlToggle);
+    expect(getPluginSettings().whaleWidget).toEqual({ enabled: true, bowl: false });
+    expect(bowlToggle).toHaveAttribute("aria-checked", "false");
     fireEvent.click(screen.getByRole("button", { name: "去配置" }));
     expect(onConfigureKey).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("switch", { name: "启用余额小鲸鱼" }));

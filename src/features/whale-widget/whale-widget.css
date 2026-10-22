@@ -28,7 +28,8 @@ html[data-whale-hidden] body > [class*="dshw"] {
   height: 100%;
 }
 
-.dshwv-img:not([data-whale-src^="/dsh-whale/image.png"]) ~ .yachiyo-whale-bowl {
+.dshwv-img:not([data-whale-src^="/dsh-whale/image.png"]) ~ .yachiyo-whale-bowl,
+html[data-whale-bowl-hidden] .yachiyo-whale-bowl {
   display: none;
 }
 
