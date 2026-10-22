@@ -24,6 +24,9 @@ const COPY = {
     whaleDesc: "完整移植 DeepSeek-Balance-Whale-Widget：窗口角落的鲸鱼娘显示 DeepSeek 余额、今日已用与峰谷时段，支持拖动吸附、自定义泡泡、音效、角色、余额预警、今日预算与每轮消耗提示。启用后点挂件右上角的菜单按钮（或右键挂件）进行设置。",
     assetNote: (version: string) => `挂件 v${version}，形象与音效版权归原作者，运行时从 jsDelivr 加载。`,
     toggle: "启用余额小鲸鱼",
+    bowlName: "头顶的铁盆",
+    bowlDesc: "在默认形象的头顶扣一个不锈钢盆，点一下会弹起晃动并「铛」一声。",
+    bowlToggle: "显示头顶的铁盆",
     keyName: "需要 DeepSeek 官方 API Key",
     keyDesc: "在「模型」中配置 DeepSeek 后，小鲸鱼才能查询余额。",
     configure: "去配置",
@@ -41,6 +44,9 @@ const COPY = {
     whaleDesc: "DeepSeek-Balance-Whale-Widget の完全移植です。ウィンドウの隅のクジラ娘が DeepSeek の残高、今日の利用額、ピーク時間帯を表示し、ドラッグ吸着、吹き出しのカスタマイズ、効果音、キャラクター、残高警告、日次予算、ターンごとの消費通知に対応します。有効化後はウィジェット右上のメニューボタン（または右クリック）から設定できます。ウィジェット内の表示は中国語です。",
     assetNote: (version: string) => `ウィジェット v${version}。イラストと効果音の権利は原作者にあり、実行時に jsDelivr から読み込みます。`,
     toggle: "残高クジラを有効にする",
+    bowlName: "頭の上の金だらい",
+    bowlDesc: "デフォルトのキャラクターの頭にステンレスのたらいを載せます。クリックすると跳ねて揺れ、「カーン」と鳴ります。",
+    bowlToggle: "頭の上の金だらいを表示する",
     keyName: "DeepSeek 公式 API Key が必要です",
     keyDesc: "「モデル」で DeepSeek を設定すると残高を取得できます。",
     configure: "設定する",
@@ -157,6 +163,27 @@ export function PluginsPanel({ locale, hasDeepSeekKey, onConfigureKey }: Plugins
             </button>
           </div>
         </div>
+
+        {whaleWidget.enabled ? (
+          <div className="settings-item-card">
+            <div className="settings-item-card__lead">
+              <strong className="settings-item-card__name">{t.bowlName}</strong>
+              <span className="settings-item-card__desc">{t.bowlDesc}</span>
+            </div>
+            <div className="settings-item-card__action">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={whaleWidget.bowl}
+                aria-label={t.bowlToggle}
+                className={`settings-toggle-switch ${whaleWidget.bowl ? "settings-toggle-switch--active" : ""}`}
+                onClick={() => saveWhaleWidgetSettings({ bowl: !whaleWidget.bowl })}
+              >
+                <span className="settings-toggle-knob" />
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {whaleWidget.enabled && !hasDeepSeekKey ? (
           <div className="settings-item-card">

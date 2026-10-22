@@ -6,6 +6,7 @@ import "./whale-widget.css";
 
 const WHALE_PATH_PREFIX = "/dsh-whale/";
 const HIDDEN_ATTRIBUTE = "data-whale-hidden";
+const BOWL_HIDDEN_ATTRIBUTE = "data-whale-bowl-hidden";
 
 let host: WhaleHost | null = null;
 
@@ -72,4 +73,8 @@ export function ensureWhaleWidget(): WhaleHost {
 export function setWhaleWidgetVisible(visible: boolean): void {
   document.documentElement.toggleAttribute(HIDDEN_ATTRIBUTE, !visible);
   host?.setContext({ paused: !visible });
+}
+
+export function setWhaleBowlVisible(visible: boolean): void {
+  document.documentElement.toggleAttribute(BOWL_HIDDEN_ATTRIBUTE, !visible);
 }
