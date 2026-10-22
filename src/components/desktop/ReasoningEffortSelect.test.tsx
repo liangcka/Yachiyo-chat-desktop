@@ -52,6 +52,35 @@ describe("ReasoningEffortSelect", () => {
     expect(slider).toHaveAttribute("aria-valuetext", "中");
   });
 
+  it("按住拖动时拇指连续跟手、档位随最近刻度切换，松手吸附到档位", async () => {
+    support.value = { levels: ["low", "medium", "high", "xhigh", "max"], defaultLevel: "medium" };
+    const user = userEvent.setup();
+    render(<ReasoningEffortSelect model={model} onOpenModelSettings={vi.fn()} />);
+    await user.click(await screen.findByRole("button", { name: "选择推理强度" }));
+
+    const slider = screen.getByRole("slider", { name: "选择推理强度" });
+    const rail = slider.querySelector<HTMLElement>(".dsh-reasoning-select__rail")!;
+    const thumb = slider.querySelector<HTMLElement>(".dsh-reasoning-select__thumb")!;
+    vi.spyOn(rail, "getBoundingClientRect").mockReturnValue({ left: 0, width: 200, top: 0, height: 28, right: 200, bottom: 28, x: 0, y: 0, toJSON: () => ({}) });
+
+    fireEvent.pointerDown(slider, { pointerId: 1, button: 0, clientX: 0 });
+    expect(slider).toHaveAttribute("aria-valuetext", "轻度");
+    fireEvent.pointerMove(slider, { pointerId: 1, clientX: 110 });
+    expect(parseFloat(thumb.style.left)).toBeCloseTo(55);
+    expect(slider).toHaveClass("dsh-reasoning-select__track--dragging");
+    expect(slider).toHaveAttribute("aria-valuetext", "高");
+    fireEvent.pointerMove(slider, { pointerId: 1, clientX: 400 });
+    expect(slider).toHaveAttribute("aria-valuetext", "Ultra");
+    fireEvent.pointerUp(slider, { pointerId: 1, clientX: 400 });
+    expect(slider).not.toHaveClass("dsh-reasoning-select__track--dragging");
+    expect(thumb.style.left).toBe("100%");
+    expect(readReasoningEffort(model)).toBe("max");
+
+    // 松手后的移动不再改档位
+    fireEvent.pointerMove(slider, { pointerId: 1, clientX: 0 });
+    expect(readReasoningEffort(model)).toBe("max");
+  });
+
   it("点击模型名打开模型设置", async () => {
     support.value = { levels: ["low", "high", "max"], defaultLevel: "high" };
     const onOpenModelSettings = vi.fn();

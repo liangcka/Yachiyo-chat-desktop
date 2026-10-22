@@ -47,6 +47,9 @@ export function ReasoningEffortSelect({ model, onOpenModelSettings, disabled = f
   const [loaded, setLoaded] = useState<{ key: string; support: ReasoningSupport }>();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const railRef = useRef<HTMLSpanElement | null>(null);
+  // 拖动中拇指跟随指针的连续位置（0~1）；松手时吸附到最近档位，未拖动时为 undefined
+  const [dragRatio, setDragRatio] = useState<number>();
+  const dragPointerRef = useRef<number | undefined>(undefined);
   const modelKey = model === undefined ? undefined : reasoningModelKey(model);
   // model 对象每次渲染都会新建，查询以其字段为依赖
   const provider = model?.provider;
@@ -95,23 +98,45 @@ export function ReasoningEffortSelect({ model, onOpenModelSettings, disabled = f
 
   const choose = (level: ReasoningLevel | undefined) => setChoices(writeReasoningEffort(model, level));
 
-  const levelAt = (clientX: number): ReasoningLevel | undefined => {
+  const ratioAt = (clientX: number): number | undefined => {
     const rect = railRef.current?.getBoundingClientRect();
     if (rect === undefined || rect.width === 0 || levels.length === 0) return undefined;
-    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-    return levels[Math.round(ratio * (levels.length - 1))];
+    return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+  };
+
+  const levelForRatio = (ratio: number): ReasoningLevel | undefined => levels[Math.round(ratio * (levels.length - 1))];
+
+  // 拖动时拇指连续跟手，档位随最近的刻度实时切换；不依赖 hasPointerCapture，部分 WebView 下它不可靠
+  const dragTo = (clientX: number) => {
+    const ratio = ratioAt(clientX);
+    if (ratio === undefined) return;
+    setDragRatio(ratio);
+    const level = levelForRatio(ratio);
+    if (level !== undefined && level !== effective) choose(level);
   };
 
   const onTrackPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    const level = levelAt(event.clientX);
-    if (level !== undefined) choose(level);
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.focus();
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // 不支持指针捕获时仍可在轨道内拖动
+    }
+    dragPointerRef.current = event.pointerId;
+    dragTo(event.clientX);
   };
 
   const onTrackPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!event.currentTarget.hasPointerCapture?.(event.pointerId)) return;
-    const level = levelAt(event.clientX);
-    if (level !== undefined && level !== effective) choose(level);
+    if (dragPointerRef.current !== event.pointerId) return;
+    dragTo(event.clientX);
+  };
+
+  const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragPointerRef.current !== event.pointerId) return;
+    dragPointerRef.current = undefined;
+    setDragRatio(undefined);
   };
 
   const onSliderKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -127,7 +152,8 @@ export function ReasoningEffortSelect({ model, onOpenModelSettings, disabled = f
   const unsupportedHint = ja ? "このモデルは推論の強さを調整できません" : "当前模型不支持调节推理强度";
   const triggerLabel = selected === undefined ? placeholder : `${ja ? "推論" : "推理强度"} · ${levelLabel(selected, ja)}`;
   const triggerDisabled = disabled || !supported;
-  const progress = stopPosition(effectiveIndex, levels.length);
+  const dragging = dragRatio !== undefined;
+  const progress = dragging ? dragRatio * 100 : stopPosition(effectiveIndex, levels.length);
 
   return (
     <div ref={rootRef} className="dsh-reasoning-select">
@@ -172,7 +198,7 @@ export function ReasoningEffortSelect({ model, onOpenModelSettings, disabled = f
             </button>
           </div>
           <div
-            className="dsh-reasoning-select__track"
+            className={`dsh-reasoning-select__track ${dragging ? "dsh-reasoning-select__track--dragging" : ""}`}
             role="slider"
             tabIndex={0}
             aria-label={placeholder}
@@ -182,6 +208,9 @@ export function ReasoningEffortSelect({ model, onOpenModelSettings, disabled = f
             aria-valuetext={levelLabel(effective, ja)}
             onPointerDown={onTrackPointerDown}
             onPointerMove={onTrackPointerMove}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+            onLostPointerCapture={endDrag}
             onKeyDown={onSliderKeyDown}
           >
             {/* 填充从轨道左端一直盖到拇指右缘；首档不填充 */}

@@ -121,10 +121,21 @@
   height: 28px;
   border-radius: 999px;
   background: var(--interactive-active);
-  cursor: pointer;
+  cursor: grab;
   touch-action: none;
+  user-select: none;
   outline: none;
   overflow: hidden;
+}
+
+/* 拖动中拇指与填充直接跟手，不做过渡动画 */
+.dsh-reasoning-select__track--dragging {
+  cursor: grabbing;
+}
+
+.dsh-reasoning-select__track--dragging .dsh-reasoning-select__fill,
+.dsh-reasoning-select__track--dragging .dsh-reasoning-select__thumb {
+  transition: none;
 }
 
 .dsh-reasoning-select__track:focus-visible {
