@@ -53,6 +53,8 @@ export const MAX_CHAT_BODY_BYTES = 3 * 1_024 * 1_024;
 const maximumMessages = 20;
 const maximumMessageCharacters = 4_000;
 const maximumTotalCharacters = 24_000;
+/** 上文的图随请求重发，模型才能回看；张数与客户端 maximumRequestImages 一致，总体积由请求体上限兜住 */
+const maximumImages = 4;
 const maximumImageBytes = 2 * 1_024 * 1_024;
 const maximumEncodedImageLength = Math.ceil(maximumImageBytes / 3) * 4;
 const allowedTopLevelKeys = new Set([
@@ -162,7 +164,8 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
   }
 
   let totalCharacters = 0;
-  const messages = rawMessages.map((message, index): ClientHistoryMessage => {
+  let imageCount = 0;
+  const messages = rawMessages.map((message): ClientHistoryMessage => {
     if (!isRecord(message) || !hasOnlyKeys(message, allowedMessageKeys)) {
       return invalid();
     }
@@ -182,11 +185,10 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
       return invalid();
     }
 
-    const isLastUserMessage =
-      index === rawMessages.length - 1 && message.role === "user";
     let imageDataUrl: string | undefined;
     if (message.imageDataUrl !== undefined) {
-      if (!isLastUserMessage) {
+      imageCount += 1;
+      if (message.role !== "user" || imageCount > maximumImages) {
         return invalid();
       }
       imageDataUrl = validateImageDataUrl(message.imageDataUrl);

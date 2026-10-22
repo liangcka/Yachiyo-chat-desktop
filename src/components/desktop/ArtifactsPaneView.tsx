@@ -9,10 +9,10 @@ import {
   Image as ImageIcon,
   Layers,
   Terminal,
-  X,
   XCircle,
 } from "lucide-react";
 import type { ChatMessage, ToolStep } from "../../domain/chat";
+import { ImageLightbox } from "../chat/ImageLightbox";
 
 export interface ArtifactsPaneViewProps {
   messages: ReadonlyArray<ChatMessage>;
@@ -242,35 +242,7 @@ export function ArtifactsPaneView({
         </div>
       )}
 
-      {/* 图像大图灯箱预览 */}
-      {previewImage ? (
-        <div
-          className="artifact-lightbox"
-          role="dialog"
-          aria-label={ja ? "画像の全画面プレビュー" : "图像全屏预览"}
-          aria-modal="true"
-        >
-          <button
-            type="button"
-            className="artifact-lightbox__backdrop"
-            onClick={() => setPreviewImage(null)}
-            aria-label={ja ? "全画面プレビューを閉じる" : "关闭全屏预览"}
-            tabIndex={-1}
-          />
-          <div className="artifact-lightbox__inner">
-            <img src={previewImage} alt={ja ? "プレビュー画像" : "预览图片"} className="artifact-lightbox__img" />
-            <button
-              type="button"
-              className="artifact-lightbox__close"
-              onClick={() => setPreviewImage(null)}
-              title={ja ? "プレビューを閉じる (Esc)" : "关闭预览 (Esc)"}
-              aria-label={ja ? "全画面プレビューを閉じる" : "关闭全屏预览"}
-            >
-              <X size={16} />
-            </button>
-          </div>
-        </div>
-      ) : null}
+      {previewImage ? <ImageLightbox src={previewImage} onClose={() => setPreviewImage(null)} /> : null}
     </div>
   );
 }

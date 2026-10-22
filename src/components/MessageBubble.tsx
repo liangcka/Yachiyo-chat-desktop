@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, Copy, Pencil, RotateCcw, RotateCw } from "lu
 import { memo, useEffect, useRef, useState } from "react";
 import type { ChatMessage, Locale } from "../domain/chat";
 import { copyFor } from "../i18n/messages";
+import { ImageLightbox } from "./chat/ImageLightbox";
 import { MarkdownContent } from "./chat/MarkdownContent";
 import { MessageContent } from "./chat/MessageContent";
 
@@ -58,6 +59,7 @@ export const MessageBubble = memo(function MessageBubble({
 }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(message.text);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [placement, setPlacement] = useState<"top" | "bottom">("top");
   const bubbleRef = useRef<HTMLElement>(null);
@@ -269,7 +271,17 @@ export const MessageBubble = memo(function MessageBubble({
     >
       {hasImage ? (
         imageUrl !== undefined ? (
-          <img alt="" className="message-bubble__image" onLoad={onImageLoad} src={imageUrl} />
+          <button
+            type="button"
+            className="message-bubble__image-button"
+            aria-label={locale === "ja-JP" ? "画像を拡大" : "放大图片"}
+            onClick={() => {
+              // 长按呼出菜单后的那次 click 交给气泡自身吞掉
+              if (!ignoreNextClickRef.current) setPreviewOpen(true);
+            }}
+          >
+            <img alt="" className="message-bubble__image" onLoad={onImageLoad} src={imageUrl} />
+          </button>
         ) : (
           <div aria-hidden="true" className="message-bubble__image message-bubble__image--loading" />
         )
@@ -406,6 +418,7 @@ export const MessageBubble = memo(function MessageBubble({
           ) : null}
         </div>
       )}
+      {previewOpen && imageUrl !== undefined ? <ImageLightbox src={imageUrl} onClose={() => setPreviewOpen(false)} /> : null}
     </article>
   );
 });

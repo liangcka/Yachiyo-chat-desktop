@@ -597,6 +597,22 @@
   margin-bottom: 0;
 }
 
+/* 点图放大：按钮接管气泡里的外边距，图片本身在按钮内总是最后一个子元素 */
+.message-bubble__image-button {
+  display: block;
+  max-width: 100%;
+  margin-bottom: 0.65rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--yx-radius-md);
+  background: none;
+  cursor: zoom-in;
+}
+
+.message-bubble__image-button:last-child {
+  margin-bottom: 0;
+}
+
 .message-bubble__image--loading {
   min-height: 8rem;
   background: var(--yx-alias-border-l1);
