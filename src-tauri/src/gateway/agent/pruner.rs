@@ -49,31 +49,91 @@ pub fn prune_tool_result_content(
     ))
 }
 
-/// 扫描 Agent 消息列表，将其中的超长 ToolResult 执行无模型修剪，返回用于组装 Prompt 的紧凑消息副本
+/// 判定是否属于只读探查类的工具名称，可以安全在多轮历史轮次中执行微压缩
+pub fn is_readonly_inspection_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "read_file"
+            | "list_directory"
+            | "glob"
+            | "grep"
+            | "git_status"
+            | "git_diff"
+            | "web_fetch"
+            | "web_search"
+    )
+}
+
+/// 对齐 Claude Code 微压缩（Micro-Compaction）与修剪规范：
+/// 1. 保护最近活跃轮次（倒数 1~2 个 Assistant 之后的新鲜工具结果）的完整性与细节；
+/// 2. 对更早历史轮次中的长只读工具输出执行微压缩（Micro-Compaction），折叠为语义摘要标记，防止上下文膨胀；
+/// 3. 错误信息与写入动作始终完整保留，供模型推理参考。
 pub fn prune_agent_messages(
     messages: &[AgentMessage],
     threshold_chars: usize,
     head_chars: usize,
     tail_chars: usize,
 ) -> Vec<AgentMessage> {
+    let assistant_indices: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, msg)| match msg {
+            AgentMessage::Assistant { .. } => Some(idx),
+            _ => None,
+        })
+        .collect();
+
+    // 倒数第 2 个 Assistant 之后的消息属于近期活跃轮次，更早的消息属于历史轮次
+    let active_boundary_index = if assistant_indices.len() >= 2 {
+        assistant_indices[assistant_indices.len() - 2]
+    } else {
+        0
+    };
+
+    const HISTORICAL_MICRO_COMPACT_THRESHOLD: usize = 300;
+
     messages
         .iter()
-        .map(|msg| match msg {
+        .enumerate()
+        .map(|(idx, msg)| match msg {
             AgentMessage::ToolResult {
                 tool_call_id,
                 name,
                 content,
             } => {
-                let pruned = prune_tool_result_content(
-                    content,
-                    threshold_chars,
-                    head_chars,
-                    tail_chars,
-                );
-                AgentMessage::ToolResult {
-                    tool_call_id: tool_call_id.clone(),
-                    name: name.clone(),
-                    content: pruned.unwrap_or_else(|| content.clone()),
+                let char_count = content.chars().count();
+                let is_historical = idx < active_boundary_index;
+                let is_error_like = content.starts_with("Error")
+                    || content.starts_with("Failed")
+                    || content.starts_with("错误")
+                    || content.starts_with("Access denied");
+
+                if is_historical
+                    && is_readonly_inspection_tool(name)
+                    && !is_error_like
+                    && char_count > HISTORICAL_MICRO_COMPACT_THRESHOLD
+                {
+                    let compacted = format!(
+                        "[历史工具输出微压缩: 工具 '{}' 执行完成 (原始约 {} 字符)。历史细节已折叠以优化上下文，若需最新内容请再次调用该工具]",
+                        name, char_count
+                    );
+                    AgentMessage::ToolResult {
+                        tool_call_id: tool_call_id.clone(),
+                        name: name.clone(),
+                        content: compacted,
+                    }
+                } else {
+                    let pruned = prune_tool_result_content(
+                        content,
+                        threshold_chars,
+                        head_chars,
+                        tail_chars,
+                    );
+                    AgentMessage::ToolResult {
+                        tool_call_id: tool_call_id.clone(),
+                        name: name.clone(),
+                        content: pruned.unwrap_or_else(|| content.clone()),
+                    }
                 }
             }
             other => other.clone(),
@@ -131,6 +191,62 @@ mod tests {
         match &pruned[1] {
             AgentMessage::ToolResult { content, .. } => {
                 assert!(content.contains("[... 工具输出过长"));
+            }
+            _ => panic!("Expected ToolResult"),
+        }
+    }
+
+    #[test]
+    fn test_micro_compaction_folds_older_readonly_tool_results() {
+        use crate::types::ToolInvocation;
+
+        let msgs = vec![
+            AgentMessage::User { text: "第一步".to_string(), image_data_url: None },
+            AgentMessage::Assistant {
+                text: "读文件".to_string(),
+                reasoning: String::new(),
+                tool_calls: vec![ToolInvocation { id: "c1".to_string(), name: "read_file".to_string(), arguments: serde_json::json!({}) }],
+                native: Vec::new(),
+            },
+            AgentMessage::ToolResult {
+                tool_call_id: "c1".to_string(),
+                name: "read_file".to_string(),
+                content: "a".repeat(1000), // 历史轮次超长输出，应被微压缩
+            },
+            AgentMessage::Assistant {
+                text: "第二步".to_string(),
+                reasoning: String::new(),
+                tool_calls: vec![ToolInvocation { id: "c2".to_string(), name: "grep".to_string(), arguments: serde_json::json!({}) }],
+                native: Vec::new(),
+            },
+            AgentMessage::ToolResult {
+                tool_call_id: "c2".to_string(),
+                name: "grep".to_string(),
+                content: "b".repeat(1000), // 倒数第二个 assistant 后的工具结果，属于活跃窗口，不应被完全折叠
+            },
+            AgentMessage::Assistant {
+                text: "第三步完成".to_string(),
+                reasoning: String::new(),
+                tool_calls: Vec::new(),
+                native: Vec::new(),
+            },
+        ];
+
+        let pruned = prune_agent_messages(&msgs, 8192, 4096, 1024);
+        assert_eq!(pruned.len(), 6);
+
+        // 验证更早的历史只读结果被微压缩为紧凑摘要
+        match &pruned[2] {
+            AgentMessage::ToolResult { content, .. } => {
+                assert!(content.contains("[历史工具输出微压缩: 工具 'read_file' 执行完成 (原始约 1000 字符)"));
+            }
+            _ => panic!("Expected ToolResult"),
+        }
+
+        // 验证活跃窗口内的结果依然保留原始内容
+        match &pruned[4] {
+            AgentMessage::ToolResult { content, .. } => {
+                assert_eq!(content, &"b".repeat(1000));
             }
             _ => panic!("Expected ToolResult"),
         }

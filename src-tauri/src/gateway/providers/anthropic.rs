@@ -205,7 +205,7 @@ pub fn build_anthropic_agent_body(
     system_prompt: &str,
     tools: &[serde_json::Value],
 ) -> serde_json::Value {
-    let anthropic_tools: Vec<serde_json::Value> = tools
+    let mut anthropic_tools: Vec<serde_json::Value> = tools
         .iter()
         .map(|t| {
             let function = &t["function"];
@@ -216,6 +216,12 @@ pub fn build_anthropic_agent_body(
             })
         })
         .collect();
+
+    // 对齐 Claude Code 缓存策略：在工具定义列表末尾添加 cache_control 断点，
+    // 使 System Prompt 与全部工具定义在后续多轮会话中 100% 命中缓存
+    if let Some(last_tool) = anthropic_tools.last_mut() {
+        last_tool["cache_control"] = json!({ "type": "ephemeral" });
+    }
 
     let mut mapped: Vec<serde_json::Value> = Vec::new();
     for msg in messages {
@@ -274,6 +280,21 @@ pub fn build_anthropic_agent_body(
                     }
                     _ => mapped.push(json!({ "role": "user", "content": [block] })),
                 }
+            }
+        }
+    }
+
+    // 对齐 Claude Code 消息断点缓存：在倒数第二条（上一轮末尾）或最后一条 user 消息末尾打上缓存断点，
+    // 使得多轮 Agent 交互中已完成的前 N-1 轮会话历史 100% 命中缓存
+    let user_indices: Vec<usize> = mapped
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, m)| if m["role"] == "user" { Some(idx) } else { None })
+        .collect();
+    if let Some(&target_idx) = user_indices.iter().rev().nth(1).or_else(|| user_indices.last()) {
+        if let Some(blocks) = mapped[target_idx]["content"].as_array_mut() {
+            if let Some(last_block) = blocks.last_mut() {
+                last_block["cache_control"] = json!({ "type": "ephemeral" });
             }
         }
     }

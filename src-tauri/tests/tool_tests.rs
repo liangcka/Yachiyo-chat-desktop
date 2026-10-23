@@ -555,3 +555,86 @@ fn test_run_command_schema_includes_vram_and_verification_hints() {
 
 
 
+
+
+#[tokio::test]
+async fn test_read_file_offset_limit_and_line_numbers() {
+    use yachiyo_desktop_lib::tools::execute_tool_with_context;
+    use yachiyo_desktop_lib::tools::ToolAuthorization;
+    let temp_dir = std::env::temp_dir().join("yachiyo_test_paged_read");
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let lines: Vec<String> = (1..=50).map(|i| format!("line content {}", i)).collect();
+    let file_body = lines.join("\n");
+    fs::write(temp_dir.join("lines.txt"), &file_body).unwrap();
+
+    let client = reqwest::Client::new();
+    let auth = ToolAuthorization::HumanInitiated;
+
+    // 1. 指定 offset=10, limit=5，验证行号与分页提示
+    let args = serde_json::json!({
+        "path": "lines.txt",
+        "offset": 10,
+        "limit": 5
+    });
+    let result = execute_tool_with_context("read_file", &args, Some(&temp_dir), &client, None, auth)
+        .await
+        .unwrap();
+
+    assert!(result.contains("10 | line content 10"));
+    assert!(result.contains("14 | line content 14"));
+    assert!(!result.contains("15 | line content 15"));
+    assert!(result.contains("[已展示第 10 至 14 行（共 50 行）"));
+    assert!(result.contains("offset=15, limit=5"));
+
+    // 2. raw=true 绕过行号与分页
+    let raw_args = serde_json::json!({
+        "path": "lines.txt",
+        "offset": 10,
+        "limit": 5,
+        "raw": true
+    });
+    let raw_result = execute_tool_with_context("read_file", &raw_args, Some(&temp_dir), &client, None, auth)
+        .await
+        .unwrap();
+    assert_eq!(raw_result, file_body);
+
+    fs::remove_dir_all(&temp_dir).ok();
+}
+
+#[test]
+fn test_edit_file_line_number_stripping_and_fuzzy_diagnosis() {
+    use yachiyo_desktop_lib::tools::fs::{edit_file_guarded, read_file_guarded, FsObservationTracker};
+
+    let temp_dir = std::env::temp_dir().join("yachiyo_test_edit_fuzzy");
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let initial = "function greet() {\n    const msg = \"hello\";\n    console.log(msg);\n}\n";
+    fs::write(temp_dir.join("test.js"), initial).unwrap();
+
+    let tracker = FsObservationTracker::new();
+    read_file_guarded("test.js", &temp_dir, Some(&tracker)).unwrap();
+
+    // 1. 模拟从带行号的查看输出复制（行号前缀 "  2 |     const msg = ..."）
+    let old_with_line_numbers = "  2 |     const msg = \"hello\";\n  3 |     console.log(msg);";
+    let new_string = "    const msg = \"hello world\";\n    console.info(msg);";
+
+    let res = edit_file_guarded("test.js", old_with_line_numbers, new_string, false, &temp_dir, &tracker)
+        .expect("Should strip line numbers and edit successfully");
+    assert!(res.contains("已自动识别并纠正行号前缀"));
+
+    let updated = read_file_guarded("test.js", &temp_dir, Some(&tracker)).unwrap();
+    assert!(updated.contains("hello world"));
+    assert!(updated.contains("console.info"));
+
+    // 2. 模拟缩进不一致（如文件中是 4 个空格，模型传入了 2 个空格），验证模糊诊断定位
+    let bad_indent = "  const msg = \"hello world\";\n  console.info(msg);";
+    let err = edit_file_guarded("test.js", bad_indent, "dummy", false, &temp_dir, &tracker)
+        .expect_err("Should fail with diagnostic hints");
+
+    assert!(err.contains("找不到精确的 old_string"));
+    assert!(err.contains("第 2 至 3 行检测到高度相似代码"));
+    assert!(err.contains("const msg = \"hello world\""));
+
+    fs::remove_dir_all(&temp_dir).ok();
+}

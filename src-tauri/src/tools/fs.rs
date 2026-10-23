@@ -246,6 +246,132 @@ pub fn write_file(path_str: &str, content: &str, workspace_root: &Path) -> Resul
     write_file_guarded(path_str, content, workspace_root, None)
 }
 
+/// 尝试剥离误带入的行号前缀（例如 "  12 | const a = 1;" 或 "12: const a = 1;"）
+fn strip_line_number_prefixes(text: &str) -> Option<String> {
+    let mut stripped_lines = Vec::new();
+    let mut found_any_prefix = false;
+    for line in text.lines() {
+        let trimmed_start = line.trim_start();
+        let mut chars = trimmed_start.chars().peekable();
+        let mut digits_len = 0;
+        while let Some(&c) = chars.peek() {
+            if c.is_ascii_digit() {
+                digits_len += 1;
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        if digits_len > 0 {
+            while chars.peek() == Some(&' ') {
+                chars.next();
+            }
+            if let Some(&sep) = chars.peek() {
+                if sep == '|' || sep == ':' {
+                    chars.next();
+                    if chars.peek() == Some(&' ') {
+                        chars.next();
+                    }
+                    found_any_prefix = true;
+                    let remaining: String = chars.collect();
+                    stripped_lines.push(remaining);
+                    continue;
+                }
+            }
+        }
+        stripped_lines.push(line.to_string());
+    }
+    if found_any_prefix {
+        Some(stripped_lines.join(if text.contains("\r\n") { "\r\n" } else { "\n" }))
+    } else {
+        None
+    }
+}
+
+/// 缩进与空白模糊诊断：按行忽略前置空白与后置空白，在文件中寻找相似行，
+/// 若找到则返回包含文件中的实际行号区间与真实代码片段的错误提示（对齐 Claude Code 规范）
+fn diagnose_fuzzy_match(content: &str, old_needle: &str) -> Option<String> {
+    // 若 needle 携带行号，先将行号剥除后再做空白归一化比较
+    let stripped_needle_holder = strip_line_number_prefixes(old_needle);
+    let effective_needle = stripped_needle_holder.as_deref().unwrap_or(old_needle);
+    let needle_lines: Vec<&str> = effective_needle.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+    if needle_lines.is_empty() {
+        return None;
+    }
+
+    let file_lines: Vec<&str> = content.lines().collect();
+    let file_trimmed: Vec<String> = file_lines.iter().map(|l| l.trim().to_string()).collect();
+
+    let needle_len = needle_lines.len();
+    if file_trimmed.len() < needle_len {
+        return None;
+    }
+
+    for i in 0..=(file_trimmed.len() - needle_len) {
+        let window = &file_trimmed[i..i + needle_len];
+        if window == needle_lines.as_slice() {
+            let start_line = i + 1;
+            let end_line = i + needle_len;
+            let actual_snippet = file_lines[i..i + needle_len].join("\n");
+            return Some(format!(
+                "找不到精确的 old_string。但在第 {} 至 {} 行检测到高度相似代码（疑似缩进或空白不一致）。\n文件中的实际内容为：\n```\n{}\n```\n请使用与文件中完全一致的代码和缩进重试 edit_file。",
+                start_line, end_line, actual_snippet
+            ));
+        }
+    }
+    None
+}
+
+/// 为文件内容生成带行号及分页的格式化文本（对齐 Claude Code 规范）
+pub fn format_file_content_with_lines(
+    content: &str,
+    offset: Option<usize>,
+    limit: Option<usize>,
+    line_numbers: bool,
+) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let total_lines = lines.len();
+    if total_lines == 0 {
+        return String::new();
+    }
+
+    let start_line = offset.unwrap_or(1).max(1);
+    let start_idx = (start_line - 1).min(total_lines);
+    let line_limit = limit.unwrap_or(2000);
+    let end_idx = (start_idx + line_limit).min(total_lines);
+
+    let selected = &lines[start_idx..end_idx];
+    let mut output = String::new();
+
+    if line_numbers {
+        let max_num = end_idx;
+        let width = max_num.to_string().len().max(4);
+        for (i, line) in selected.iter().enumerate() {
+            let line_num = start_idx + i + 1;
+            output.push_str(&format!("{:width$} | {}\n", line_num, line, width = width));
+        }
+    } else {
+        for line in selected {
+            output.push_str(line);
+            output.push('\n');
+        }
+    }
+
+    if start_idx > 0 || end_idx < total_lines {
+        let next_offset = end_idx + 1;
+        output.push_str(&format!(
+            "\n[已展示第 {} 至 {} 行（共 {} 行）。若需查看更多，请在 read_file 中传入 offset={}, limit={}]",
+            start_idx + 1,
+            end_idx,
+            total_lines,
+            next_offset,
+            line_limit
+        ));
+    }
+
+    output
+}
+
 /// 片段编辑不建立新的读取观察；匹配与落盘均基于调用方已观察的文件版本。
 pub fn edit_file_guarded(
     path_str: &str,
@@ -270,20 +396,44 @@ pub fn edit_file_guarded(
     };
     let old = align_newlines(old_string);
     let new = align_newlines(new_string);
-    let first = content.find(&old)
-        .ok_or("找不到 old_string，请重新读取文件后提供当前内容。")?;
+    let (target_old, target_new, was_stripped) = match content.find(&old) {
+        Some(_) => (old, new, false),
+        None => {
+            if let Some(stripped_old) = strip_line_number_prefixes(&old) {
+                if content.contains(&stripped_old) {
+                    let stripped_new = strip_line_number_prefixes(&new).unwrap_or(new);
+                    (stripped_old, stripped_new, true)
+                } else {
+                    let err = diagnose_fuzzy_match(&content, &stripped_old)
+                        .or_else(|| diagnose_fuzzy_match(&content, &old))
+                        .unwrap_or_else(|| "找不到 old_string，请重新读取文件后提供当前内容。".to_string());
+                    return Err(err);
+                }
+            } else {
+                let err = diagnose_fuzzy_match(&content, &old)
+                    .unwrap_or_else(|| "找不到 old_string，请重新读取文件后提供当前内容。".to_string());
+                return Err(err);
+            }
+        }
+    };
+
+    let first = content.find(&target_old).unwrap();
     // 从首个匹配的下一个字符继续查找，重叠匹配也构成定位歧义。
-    let after_first_char = first + old.chars().next().map_or(0, char::len_utf8);
-    if !replace_all && content[after_first_char..].contains(&old) {
+    let after_first_char = first + target_old.chars().next().map_or(0, char::len_utf8);
+    if !replace_all && content[after_first_char..].contains(&target_old) {
         return Err("old_string 出现多次，请补充上下文以唯一定位，或使用 replace_all。".to_string());
     }
-    let count = if replace_all { content.matches(&old).count() } else { 1 };
-    let mut edited = if replace_all { content.replace(&old, &new) } else { content.replacen(&old, &new, 1) };
+    let count = if replace_all { content.matches(&target_old).count() } else { 1 };
+    let mut edited = if replace_all { content.replace(&target_old, &target_new) } else { content.replacen(&target_old, &target_new, 1) };
     if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
         edited.insert(0, '\u{feff}');
     }
     write_file_guarded(path_str, &edited, workspace_root, Some(tracker))?;
-    Ok(format!("已编辑 '{path_str}'，替换了 {count} 处。"))
+    if was_stripped {
+        Ok(format!("已编辑 '{path_str}'，替换了 {count} 处（已自动识别并纠正行号前缀）。"))
+    } else {
+        Ok(format!("已编辑 '{path_str}'，替换了 {count} 处。"))
+    }
 }
 
 pub fn write_file_guarded(

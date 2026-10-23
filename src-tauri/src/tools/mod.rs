@@ -303,7 +303,9 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": "工作区内的相对或绝对文件路径；未选择项目时必须为用户提供的绝对路径" }
+                        "path": { "type": "string", "description": "工作区内的相对或绝对文件路径；未选择项目时必须为用户提供的绝对路径" },
+                        "offset": { "type": "integer", "minimum": 1, "description": "起始行号（1-based），默认 1。查看大文件指定片段时使用" },
+                        "limit": { "type": "integer", "minimum": 1, "description": "最多读取的行数，默认 2000 行" }
                     },
                     "required": ["path"]
                 }
@@ -528,12 +530,24 @@ pub async fn execute_tool_with_context(
     match name {
         "read_file" => {
             let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path' argument")?;
-            if let Some(root) = workspace_root {
-                fs::read_file_guarded(path, root, fs_tracker)
+            let raw_content = if let Some(root) = workspace_root {
+                fs::read_file_guarded(path, root, fs_tracker)?
             } else {
                 let target = fs::resolve_unbound_read_path(path)?;
                 let root = target.parent().ok_or("无效文件路径")?;
-                fs::read_file_guarded(&target.to_string_lossy(), root, fs_tracker)
+                fs::read_file_guarded(&target.to_string_lossy(), root, fs_tracker)?
+            };
+            let offset = args.get("offset").and_then(|v| v.as_u64()).map(|v| v as usize);
+            let limit = args.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize);
+            let line_numbers = args.get("line_numbers").and_then(|v| v.as_bool()).unwrap_or(false);
+            let raw = args.get("raw").and_then(|v| v.as_bool()).unwrap_or(false);
+
+            if raw {
+                Ok(raw_content)
+            } else if offset.is_some() || limit.is_some() || line_numbers || raw_content.lines().count() > 2000 {
+                Ok(fs::format_file_content_with_lines(&raw_content, offset, limit, true))
+            } else {
+                Ok(raw_content)
             }
         }
         "write_file" => {
