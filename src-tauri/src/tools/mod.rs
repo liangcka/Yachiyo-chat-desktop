@@ -430,7 +430,7 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
             "type": "function",
             "function": {
                 "name": "web_fetch",
-                "description": "Fetch content from a web URL. 抓取网络链接内容。",
+                "description": "Fetch a web page and return its title and readable text (HTML is stripped). 抓取网页，返回标题与正文文本。",
                 "parameters": {
                     "type": "object",
                     "properties": {

@@ -291,13 +291,47 @@
   box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
-/* 用户消息右对齐，限宽保证长文可读。 */
+.message-bubble--user.message-bubble--menu-open {
+  box-shadow: none;
+}
+
+.message-bubble--menu-open .message-bubble__user-bubble {
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+/* 用户消息右对齐，限宽保证长文可读：外层只负责纵向排列「图片卡片 → 文字气泡 → 操作条」，
+   气泡底色落在内层，图片与操作条因此独立于气泡之外 */
 .message-bubble--user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
   max-width: 78%;
+}
+
+.message-bubble__user-bubble {
+  max-width: 100%;
   padding: 0.72rem 1.1rem;
   border-radius: var(--yx-radius-md);
   background: var(--yx-specific-bubble-user);
   border: 1px solid var(--yx-specific-bubble-user-border);
+}
+
+/* 用户图片以独立圆角卡片呈现在文字气泡上方 */
+.message-bubble--user .message-bubble__image-button,
+.message-bubble--user .message-bubble__image {
+  margin-bottom: 0;
+  border-radius: 14px;
+}
+
+.message-bubble--user .message-bubble__image {
+  max-width: min(100%, 22rem);
+  max-height: 16rem;
+  object-fit: cover;
+}
+
+.message-bubble--user .message-bubble__image--loading {
+  width: 16rem;
 }
 
 /* 助手消息：Codex 式无底通栏纯文本，直接落于对话背景上 */
@@ -1376,6 +1410,8 @@
 [data-theme="light"] .chat-stage::before { display: none; }
 [data-theme="light"] .message-bubble--user {
   color: #0f172a;
+}
+[data-theme="light"] .message-bubble__user-bubble {
   background: var(--yx-specific-bubble-user);
   border: 1px solid var(--yx-specific-bubble-user-border);
 }

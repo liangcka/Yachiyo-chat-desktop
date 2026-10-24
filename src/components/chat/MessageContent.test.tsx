@@ -48,6 +48,28 @@ describe("MessageContent 过程摘要", () => {
     expect(screen.getByText("最终回答。")).toBeVisible();
   });
 
+  it("过程区里没有正文间隔的连续思考/工具合并为一条思考 + 一个工具组", () => {
+    const toolSteps = ["a", "b", "c"].map((id, index) => ({
+      id, name: "run_command", argumentsJson: `{"command":"${id}"}`,
+      result: { output: "x", isError: index === 1, durationMs: 1 },
+    }));
+    const message = agentMessage({ text: "最终回答。", thought: "一二三", toolSteps, contentSegments: [
+      { type: "thought", start: 0, end: 1, startedAtMs: 0, endedAtMs: 2000 },
+      { type: "tool", toolId: "a" },
+      { type: "thought", start: 1, end: 2, startedAtMs: 3000, endedAtMs: 5000 },
+      { type: "tool", toolId: "b" },
+      { type: "thought", start: 2, end: 3, startedAtMs: 6000, endedAtMs: 7000 },
+      { type: "tool", toolId: "c" },
+      { type: "text", start: 0, end: 5 },
+    ] });
+    const { container } = render(<MessageContent message={message} locale="zh-CN" hideCitations={false} />);
+    const process = container.querySelector(".message-process__content")!;
+    expect([...process.children].map((node) => node.textContent)).toEqual([
+      "思考了 5 秒", expect.stringContaining("已运行 3 步"),
+    ]);
+    expect(within(process as HTMLElement).getByText("1 步失败")).toBeInTheDocument();
+  });
+
   it("流式阶段保持逐段展示，完成后自动折叠", () => {
     const { rerender } = render(<MessageContent message={agentMessage({ status: "streaming" })} locale="zh-CN" hideCitations={false} />);
     expect(screen.getByText("先检查。")).toBeVisible();

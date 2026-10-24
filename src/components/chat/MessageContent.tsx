@@ -128,11 +128,43 @@ export function MessageContent({ message, locale, hideCitations, pendingPermissi
   const collapseProcess = message.status === "complete" && processSegments.length > 0;
   const changes = <FileChangeSummary paths={collectModifiedFiles(message)} locale={locale} />;
 
-  function renderSegments(parts: ReadonlyArray<MessageContentSegment>): ReactNode[] {
+  function thoughtDurationMs(segment: MessageContentSegment): number | undefined {
+    return segment.type === "thought" && segment.startedAtMs !== undefined && segment.endedAtMs !== undefined
+      ? Math.max(0, segment.endedAtMs - segment.startedAtMs) : undefined;
+  }
+
+  /**
+   * 折叠后的过程区里，Agent 连续“思考 → 调工具”的轮次会展开成几十行交替的条目。
+   * 中间没有正文的一段思考/工具合并为一条思考 + 一个工具组，思考放在首段思考所在的一侧。
+   */
+  function renderCoalescedRun(run: ReadonlyArray<MessageContentSegment>, key: number): ReactNode[] {
+    const steps = run.flatMap((segment) => {
+      const step = segment.type === "tool" ? tools.get(segment.toolId) : undefined;
+      return step ? [step] : [];
+    });
+    const thoughts = run.filter((segment) => segment.type === "thought");
+    const group = steps.length
+      ? <ToolGroup key={`${key}-tools`} steps={steps} locale={locale} streaming={false} /> : null;
+    if (thoughts.length === 0) return group ? [group] : [];
+    const text = thoughts.map((segment) => message.thought?.slice(segment.start, segment.end).trim() ?? "")
+      .filter(Boolean).join("\n\n");
+    const durations = thoughts.map(thoughtDurationMs).filter((value): value is number => value !== undefined);
+    const thinking = <ThinkingBlock key={`${key}-thought`} thought={text} locale={locale} hasText isStreaming={false}
+      durationMs={durations.length ? durations.reduce((sum, value) => sum + value, 0) : undefined} />;
+    return run[0]?.type === "thought" ? [thinking, group] : [group, thinking];
+  }
+
+  function renderSegments(parts: ReadonlyArray<MessageContentSegment>, coalesce = false): ReactNode[] {
     const content: ReactNode[] = [];
     for (let index = 0; index < parts.length; index++) {
       const segment = parts[index];
-      if (segment.type === "tool") {
+      if (coalesce && segment.type !== "text") {
+        const run: MessageContentSegment[] = [];
+        const key = index;
+        while (parts[index] !== undefined && parts[index].type !== "text") run.push(parts[index++]);
+        index--;
+        content.push(...renderCoalescedRun(run, key));
+      } else if (segment.type === "tool") {
         const steps: ToolStep[] = [];
         const key = index;
         let next: MessageContentSegment | undefined = segment;
@@ -145,8 +177,7 @@ export function MessageContent({ message, locale, hideCitations, pendingPermissi
         if (steps.length) content.push(<ToolGroup key={key} steps={steps} locale={locale} streaming={streaming} pendingStepId={pendingStepId} />);
       } else if (segment.type === "thought") {
         const active = streaming && index === parts.length - 1;
-        const durationMs = segment.startedAtMs !== undefined && segment.endedAtMs !== undefined
-          ? Math.max(0, segment.endedAtMs - segment.startedAtMs) : undefined;
+        const durationMs = thoughtDurationMs(segment);
         content.push(<ThinkingBlock key={index} thought={message.thought?.slice(segment.start, segment.end)}
           locale={locale} hasText={!active} isStreaming={active} durationMs={durationMs} />);
       } else {
@@ -179,7 +210,7 @@ export function MessageContent({ message, locale, hideCitations, pendingPermissi
         {failed > 0 ? <span className="message-process__error">{locale === "ja-JP" ? `· ${failed} ステップ失敗` : `· ${failed} 步失败`}</span> : null}
         <ChevronRight size={13} aria-hidden="true" />
       </summary>
-      <div className="message-process__content">{renderSegments(processSegments)}</div>
+      <div className="message-process__content">{renderSegments(processSegments, true)}</div>
     </details>
     {renderSegments(finalSegments)}
     {changes}

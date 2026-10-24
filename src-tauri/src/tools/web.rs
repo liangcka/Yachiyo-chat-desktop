@@ -150,6 +150,49 @@ pub async fn web_search(query: &str, client: &reqwest::Client) -> Result<String,
     ))
 }
 
+/// 从 HTML 提取可读正文（规则同 functions/_shared/web-search/page-text.ts，另剔除 <head>：标题由 extract_title 单独给出）。
+/// regex crate 不支持反向引用，非正文块按标签逐个剔除
+pub fn extract_page_text(html: &str) -> String {
+    static BLOCKS: OnceLock<Vec<Regex>> = OnceLock::new();
+    static PATTERNS: OnceLock<[Regex; 4]> = OnceLock::new();
+    let blocks = BLOCKS.get_or_init(|| {
+        ["head", "script", "style", "noscript", "svg", "template", "iframe", "nav", "header", "footer", "aside", "form"]
+            .iter()
+            .map(|tag| Regex::new(&format!(r"(?is)<{tag}\b.*?</{tag}\s*>")).expect("valid regex"))
+            .collect()
+    });
+    let [comment, line_break, block_end, tag] = PATTERNS.get_or_init(|| {
+        [
+            Regex::new(r"(?s)<!--.*?-->").expect("valid regex"),
+            Regex::new(r"(?i)<br\s*/?\s*>").expect("valid regex"),
+            Regex::new(r"(?i)</(?:p|div|li|ul|ol|tr|td|th|section|article|main|h[1-6]|blockquote|pre|figure|figcaption|dl|dt|dd)\s*>")
+                .expect("valid regex"),
+            Regex::new(r"<[^>]*>").expect("valid regex"),
+        ]
+    });
+    let mut text = comment.replace_all(html, " ").into_owned();
+    for block in blocks {
+        text = block.replace_all(&text, " ").into_owned();
+    }
+    let text = line_break.replace_all(&text, "\n");
+    let text = block_end.replace_all(&text, "\n");
+    let text = decode_html_entities(&tag.replace_all(&text, " "));
+    text.lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn extract_title(html: &str) -> Option<String> {
+    static TITLE: OnceLock<Regex> = OnceLock::new();
+    let re = TITLE.get_or_init(|| Regex::new(r"(?is)<title[^>]*>(.*?)</title\s*>").expect("valid regex"));
+    let title = decode_html_entities(re.captures(html)?.get(1)?.as_str()).split_whitespace().collect::<Vec<_>>().join(" ");
+    (!title.is_empty()).then_some(title)
+}
+
+/// 网页抓取：带浏览器请求头（不少资料站会拒绝无 UA 的请求），HTML 只回传标题与正文，
+/// 原始标记里大半是脚本与样式，直接截断会让模型拿不到正文
 pub async fn web_fetch(url: &str, client: &reqwest::Client) -> Result<String, String> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("Invalid URL: must start with http:// or https://".to_string());
@@ -157,6 +200,9 @@ pub async fn web_fetch(url: &str, client: &reqwest::Client) -> Result<String, St
 
     let res = client
         .get(url)
+        .header("accept", "text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.8")
+        .header("accept-language", "zh-CN,zh;q=0.9,ja;q=0.8,en;q=0.7")
+        .header("user-agent", BROWSER_USER_AGENT)
         .timeout(Duration::from_secs(15))
         .send()
         .await
@@ -166,12 +212,26 @@ pub async fn web_fetch(url: &str, client: &reqwest::Client) -> Result<String, St
         return Err(format!("HTTP error {}: {}", res.status(), url));
     }
 
-    let text = res
+    let is_html = res
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.contains("html"));
+    let body = res
         .text()
         .await
         .map_err(|e| format!("Failed to read response body: {}", e))?;
+    let text = if is_html {
+        let content = extract_page_text(&body);
+        match extract_title(&body) {
+            Some(title) => format!("标题：{}\n\n{}", title, content),
+            None => content,
+        }
+    } else {
+        body
+    };
 
-    let max_len = 16 * 1024;
+    let max_len = 24 * 1024;
     if text.len() > max_len {
         // 切片点必须先回退到字符边界：直接按字节切会在多字节字符中间 panic（CJK 页面必然命中）
         let cut = floor_char_boundary(&text, max_len);
@@ -199,6 +259,13 @@ mod tests {
         assert_eq!(results[0].title, "Rust & Tauri");
         assert_eq!(results[0].url, "https://example.com/a?x=1&y=2");
         assert_eq!(results[0].snippet, "中文 snippet");
+    }
+
+    #[test]
+    fn extract_page_text_keeps_body_and_drops_noise() {
+        let html = "<html><head><title>作品 &amp; 资料</title><style>.a{}</style></head><body><nav>菜单</nav><script>var x = '<p>';</script><h1>标题</h1><p>第一段<br>第二行</p><!-- 注释 --><div>品牌：<b>某社</b></div><footer>版权</footer></body></html>";
+        assert_eq!(extract_page_text(html), "标题\n第一段\n第二行\n品牌： 某社");
+        assert_eq!(extract_title(html).as_deref(), Some("作品 & 资料"));
     }
 
     #[test]

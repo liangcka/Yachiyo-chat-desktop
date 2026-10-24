@@ -1726,7 +1726,7 @@
   line-height: 1.7;
 }
 
-.desktop-chat-body .message-bubble--user {
+.desktop-chat-body .message-bubble__user-bubble {
   padding: 8px 14px;
   border-radius: 18px;
   font-size: 14px;

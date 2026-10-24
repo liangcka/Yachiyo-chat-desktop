@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "../domain/chat";
@@ -352,7 +352,7 @@ describe("reference chat components", () => {
     expect(conversation!.scrollTop).toBe(1_000);
   });
 
-  it("opens context menu with recall option on right-click or long-press for the latest user message", () => {
+  it("shows recall in the hover bar of the latest user message, right-click opens no custom menu, touch long-press does", () => {
     const onRecall = vi.fn();
     const messages: ChatMessage[] = [
       {
@@ -391,27 +391,27 @@ describe("reference chat components", () => {
 
     render(<ConversationView locale="zh-CN" messages={messages} onRecall={onRecall} />);
 
-    // Before right click, no menu is visible
+    const [firstUserBubble, latestUserBubble] = screen.getAllByRole("article", { name: "我的消息" });
+    expect(within(firstUserBubble!).queryByRole("button", { name: "撤回" })).not.toBeInTheDocument();
+    expect(within(latestUserBubble!).getByRole("button", { name: "复制" })).toBeInTheDocument();
+
+    fireEvent.contextMenu(latestUserBubble!);
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "撤回" })).not.toBeInTheDocument();
 
-    const userArticles = screen.getAllByRole("article", { name: "我的消息" });
-    const latestUserBubble = userArticles.at(-1)!;
-
-    // Right-click on latest user message
-    fireEvent.contextMenu(latestUserBubble);
-
-    expect(screen.getByRole("menu")).toBeInTheDocument();
-    const recallMenuItem = screen.getByRole("menuitem", { name: "撤回" });
-    expect(recallMenuItem).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "复制" })).toBeInTheDocument();
-
-    fireEvent.click(recallMenuItem);
+    fireEvent.click(within(latestUserBubble!).getByRole("button", { name: "撤回" }));
     expect(onRecall).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerDown(latestUserBubble!, { pointerType: "touch", clientX: 0, clientY: 0 });
+      act(() => vi.advanceTimersByTime(450));
+      expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: "撤回" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("copies message text to clipboard and calls onToast when copy menuitem is clicked", async () => {
+  it("copies message text to clipboard and calls onToast when the copy button is clicked", async () => {
     const onToast = vi.fn();
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, {
@@ -434,18 +434,13 @@ describe("reference chat components", () => {
     render(<ConversationView locale="zh-CN" messages={messages} onToast={onToast} />);
 
     const assistantBubble = screen.getByRole("article", { name: "八千代的回复" });
-    fireEvent.contextMenu(assistantBubble);
-
-    const copyBtn = screen.getByRole("menuitem", { name: "复制" });
-    expect(copyBtn).toBeInTheDocument();
-
-    await userEvent.click(copyBtn);
+    await userEvent.click(within(assistantBubble).getByRole("button", { name: "复制" }));
 
     expect(writeText).toHaveBeenCalledWith("这是八千代的回答");
     expect(onToast).toHaveBeenCalledWith("已复制");
   });
 
-  it("renders regenerate context menu item for the latest assistant message", async () => {
+  it("renders the regenerate button for the latest assistant message", async () => {
     const onRegenerate = vi.fn();
     const messages: ChatMessage[] = [
       {
@@ -474,15 +469,9 @@ describe("reference chat components", () => {
       />,
     );
 
-    // Right-click context menu on assistant bubble
     const assistantBubble = screen.getByRole("article", { name: "八千代的回复" });
-    fireEvent.contextMenu(assistantBubble);
-
-    const regenerateMenuItem = screen.getByRole("menuitem", { name: "重新生成" });
-    expect(regenerateMenuItem).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "复制" })).toBeInTheDocument();
-
-    fireEvent.click(regenerateMenuItem);
+    expect(within(assistantBubble).getByRole("button", { name: "复制" })).toBeInTheDocument();
+    fireEvent.click(within(assistantBubble).getByRole("button", { name: "重新生成" }));
     expect(onRegenerate).toHaveBeenCalledWith("assistant-1");
   });
 

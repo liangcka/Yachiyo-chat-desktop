@@ -63,19 +63,18 @@
   color: var(--text-primary);
 }
 
-/* 用户消息气泡（.message-bubble--user）：操作栏绝对定位在气泡左外侧，内部上下 padding 保持 0.68rem 完全对称 */
-.message-bubble--user {
-  position: relative;
-  padding: 0.68rem 1.05rem;
-}
-
+/* 用户消息：操作条（时间 · 复制 · 编辑 · 撤回）位于气泡下方右对齐，悬停时出现 */
 .message-bubble--user .message-bubble__actions {
-  position: absolute;
-  right: calc(100% + 8px);
-  bottom: 4px;
-  margin-top: 0;
+  gap: 2px;
   pointer-events: none;
   white-space: nowrap;
+}
+
+.message-bubble__time {
+  margin-right: 4px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .message-bubble--user:hover .message-bubble__actions,

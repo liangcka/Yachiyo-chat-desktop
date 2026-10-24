@@ -160,8 +160,9 @@ export const MessageBubble = memo(function MessageBubble({
     };
   }, [menuOpen]);
 
+  // 菜单只服务触屏长按；鼠标端的操作统一放在悬停操作条，避免右键与悬停重复两套入口
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0 && e.pointerType === "mouse") return;
+    if (e.pointerType === "mouse") return;
     pointerStartPosRef.current = { x: e.clientX, y: e.clientY };
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
     longPressTimerRef.current = setTimeout(() => {
@@ -193,13 +194,6 @@ export const MessageBubble = memo(function MessageBubble({
     setTimeout(() => {
       ignoreNextClickRef.current = false;
     }, 120);
-  };
-
-  const handleContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-    openMenu();
   };
 
   const handleCopy = async (e?: React.MouseEvent) => {
@@ -256,7 +250,6 @@ export const MessageBubble = memo(function MessageBubble({
       aria-label={messageLabel(message.role, locale)}
       className={`message-bubble message-bubble--${message.role}${isTyping ? " message-bubble--typing" : ""}${menuOpen ? " message-bubble--menu-open" : ""}${isLastAssistant ? " message-bubble--last-assistant" : ""}`}
       data-status={message.status}
-      onContextMenu={hasMenuOptions ? handleContextMenu : undefined}
       onPointerCancel={handlePointerUp}
       onPointerDown={hasMenuOptions ? handlePointerDown : undefined}
       onPointerMove={hasMenuOptions ? handlePointerMove : undefined}
@@ -287,7 +280,7 @@ export const MessageBubble = memo(function MessageBubble({
         )
       ) : null}
       {editing ? (
-        <form className="message-bubble__edit" onSubmit={(event) => { event.preventDefault(); if (editText.trim()) { onEdit?.(message.id, editText); setEditing(false); } }}>
+        <form className={`message-bubble__edit${message.role === "user" ? " message-bubble__user-bubble" : ""}`} onSubmit={(event) => { event.preventDefault(); if (editText.trim()) { onEdit?.(message.id, editText); setEditing(false); } }}>
           <textarea aria-label={locale === "ja-JP" ? "メッセージを編集" : "编辑消息"} value={editText} onChange={(event) => setEditText(event.target.value)} />
           <div><button type="button" onClick={() => setEditing(false)}>{locale === "ja-JP" ? "キャンセル" : "取消"}</button><button type="submit" disabled={!editText.trim()}>{locale === "ja-JP" ? "保存して再生成" : "保存并重新生成"}</button></div>
         </form>
@@ -296,6 +289,7 @@ export const MessageBubble = memo(function MessageBubble({
       ) : message.role === "assistant" ? (
         <MessageContent message={message} locale={locale} hideCitations={hideCitations} pendingPermission={pendingPermission} pendingToolName={pendingToolName} />
       ) : hasText ? (
+        <div className="message-bubble__user-bubble">
         <div
           ref={userContentRef}
           className={`message-bubble__user-content${
@@ -317,6 +311,7 @@ export const MessageBubble = memo(function MessageBubble({
               </button>
             </div>
           ) : null}
+        </div>
         </div>
       ) : null}
       {message.truncated === true ? (
@@ -349,8 +344,13 @@ export const MessageBubble = memo(function MessageBubble({
           ))}
         </div>
       ) : null}
-      {!editing && (showCopy || onEdit || showRegenerate || showVersions) ? (
+      {!editing && (showCopy || onEdit || showRegenerate || showVersions || onRecall) ? (
         <div className="message-bubble__actions">
+          {message.role === "user" ? (
+            <time className="message-bubble__time" dateTime={new Date(message.createdAt).toISOString()}>
+              {new Date(message.createdAt).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hour12: false })}
+            </time>
+          ) : null}
           {showVersions && versions ? (
             <div className="message-bubble__versions" aria-label={locale === "ja-JP" ? "メッセージのバージョン" : "消息版本"}>
               <button type="button" aria-label={locale === "ja-JP" ? "前のバージョン" : "上一个版本"} disabled={!onVersionChange || versions.indexOf(message.branchVersion ?? 1) <= 0} onClick={() => onVersionChange?.(message.id, versions[versions.indexOf(message.branchVersion ?? 1) - 1]!)}><ChevronLeft size={13} /></button>
@@ -364,6 +364,11 @@ export const MessageBubble = memo(function MessageBubble({
             </button>
           ) : null}
           {onEdit ? <button type="button" title={locale === "ja-JP" ? "メッセージを編集" : "编辑消息"} aria-label={locale === "ja-JP" ? "メッセージを編集" : "编辑消息"} onClick={() => { setEditText(message.text); setEditing(true); }}><Pencil size={13} /></button> : null}
+          {onRecall !== undefined ? (
+            <button type="button" onClick={handleRecallAction} title={copyFor(locale).recall} aria-label={copyFor(locale).recall}>
+              <RotateCcw size={13} />
+            </button>
+          ) : null}
           {showRegenerate ? (
             <button type="button" onClick={handleRegenerateAction} title={copyFor(locale).regenerate} aria-label={copyFor(locale).regenerate}>
               <RotateCw size={13} />

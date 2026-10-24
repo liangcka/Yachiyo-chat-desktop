@@ -658,9 +658,7 @@ describe("App flows", () => {
     expect(screen.getAllByText("这是一条要撤回的消息")[0]).toBeInTheDocument();
 
     const userBubble = screen.getByRole("article", { name: "我的消息" });
-    fireEvent.contextMenu(userBubble);
-
-    const recallBtn = screen.getByRole("menuitem", { name: "撤回" });
+    const recallBtn = within(userBubble).getByRole("button", { name: "撤回" });
     await user.click(recallBtn);
 
     await waitFor(() => {
@@ -682,9 +680,7 @@ describe("App flows", () => {
 
     // Test regenerating from the ASSISTANT reply bubble
     const assistantBubble = screen.getByRole("article", { name: "八千代的回复" });
-    fireEvent.contextMenu(assistantBubble);
-
-    const regenerateBtn = screen.getByRole("menuitem", { name: "重新生成" });
+    const regenerateBtn = within(assistantBubble).getByRole("button", { name: "重新生成" });
     await user.click(regenerateBtn);
 
     await waitFor(() => {
@@ -693,9 +689,7 @@ describe("App flows", () => {
 
     // Now recall from the user bubble
     const latestUserBubble = screen.getByRole("article", { name: "我的消息" });
-    fireEvent.contextMenu(latestUserBubble);
-
-    const recallBtn2 = screen.getByRole("menuitem", { name: "撤回" });
+    const recallBtn2 = within(latestUserBubble).getByRole("button", { name: "撤回" });
     await user.click(recallBtn2);
 
     await waitFor(() => {
