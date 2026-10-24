@@ -104,7 +104,7 @@ export function buildOpenAICompatBody(
   request: EnrichedChatRequest,
   model: string,
   options: OpenAICompatBodyOptions,
-): unknown {
+): Record<string, unknown> {
   const auxiliary = request.mode === "title" || request.mode === "summary";
   const containsImage = request.messages.some((message) => message.imageDataUrl !== undefined);
   const maxTokensField = options.maxCompletionTokens === true ? "max_completion_tokens" : "max_tokens";

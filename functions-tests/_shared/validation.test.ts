@@ -90,6 +90,41 @@ describe("validateChatRequest", () => {
     expect(validateChatRequest(withoutBaseUrl)).not.toHaveProperty("baseUrl");
   });
 
+  it("accepts custom model options with a baseUrl and rejects them otherwise", () => {
+    const base = {
+      ...(validRequest() as object),
+      provider: "openai",
+      apiKey: "sk-" + "a".repeat(40),
+      model: "my-model",
+      baseUrl: "https://relay.example.com/v1",
+    };
+    const customModel = {
+      apiFormat: "responses",
+      fullUrl: true,
+      family: "gpt",
+      maxOutputTokens: 4096,
+      thinking: "off",
+      temperature: 0.7,
+      topP: 0.9,
+      topK: 40,
+    };
+
+    expect(validateChatRequest({ ...base, customModel })).toMatchObject({ customModel });
+    expect(() => validateChatRequest({ ...base, baseUrl: undefined, customModel })).toThrow(ChatValidationError);
+    for (const invalid of [
+      { apiFormat: "gemini" },
+      { apiFormat: "responses", temperature: 2.5 },
+      { apiFormat: "responses", topP: -0.1 },
+      { apiFormat: "responses", topK: 1.5 },
+      { apiFormat: "responses", maxOutputTokens: 0 },
+      { apiFormat: "responses", thinking: "auto" },
+      { apiFormat: "responses", family: "llama" },
+      { apiFormat: "responses", unknown: true },
+    ]) {
+      expect(() => validateChatRequest({ ...base, customModel: invalid })).toThrow(ChatValidationError);
+    }
+  });
+
   it("rejects insecure, malformed, and oversized baseUrl values", () => {
     const base = {
       ...(validRequest() as object),

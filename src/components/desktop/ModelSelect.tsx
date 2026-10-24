@@ -1,13 +1,27 @@
 import { Check, ChevronDown, Cpu } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { PROVIDER_METADATA, findVendorForEntry, type ProviderId } from "../../domain/llm";
+import {
+  PROVIDER_METADATA,
+  entryDisplayModel,
+  findVendorForEntry,
+  type CustomModelSettings,
+  type ProviderId,
+} from "../../domain/llm";
 import { useLocale } from "../../i18n/locale-context";
 
 export interface ModelSelectProps {
   /** 当前使用的模型配置 id */
   activeEntryId?: string;
   activeModel?: string;
-  entries: readonly { id: string; provider: ProviderId; apiKey: string; model: string; baseUrl?: string; disabled?: boolean }[];
+  entries: readonly {
+    id: string;
+    provider: ProviderId;
+    apiKey: string;
+    model: string;
+    baseUrl?: string;
+    disabled?: boolean;
+    custom?: CustomModelSettings;
+  }[];
   onSelect: (id: string) => void;
   onOpenSettings: () => void;
   disabled?: boolean;
@@ -54,7 +68,7 @@ export function ModelSelect({
   const activeEntry = entries.find((e) => e.id === activeEntryId);
   const activeMeta = activeEntry ? PROVIDER_METADATA[activeEntry.provider] : undefined;
   const activeLabel = activeEntry ? entryLabel(activeEntry) : undefined;
-  const currentModel = activeEntry?.model || activeModel || activeMeta?.defaultModel;
+  const currentModel = (activeEntry !== undefined ? entryDisplayModel(activeEntry) : undefined) || activeModel || activeMeta?.defaultModel;
   const modelLabel = currentModel?.replace(/^glm-/i, "GLM-").replace(/-flash$/i, " Flash");
 
   const fullLabel = activeLabel
@@ -112,7 +126,7 @@ export function ModelSelect({
                   >
                     <div className="dsh-model-select__option-main">
                       <div className="dsh-model-select__option-name">{entryLabel(entry)}</div>
-                      <div className="dsh-model-select__option-model">{entry.model || meta.defaultModel}</div>
+                      <div className="dsh-model-select__option-model">{entryDisplayModel(entry) || meta.defaultModel}</div>
                     </div>
                     {isSelected ? <Check size={14} className="dsh-model-select__check" /> : null}
                   </button>

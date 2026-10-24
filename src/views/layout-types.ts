@@ -41,6 +41,8 @@ export interface SharedViewProps {
   onLlmClear: (id: string) => Promise<void>;
   onLlmActivate: (id: string) => Promise<void>;
   onLlmSetEnabled: (id: string, enabled: boolean) => Promise<void>;
+  /** 自定义模型保存前的连通性测试：发起一次真实的标题请求，失败时抛出带说明的错误 */
+  onLlmTestConnection: (draft: LlmEntryDraft) => Promise<void>;
   onSkillToggle: (id: string, next: boolean) => Promise<void>;
   onWebSearchSettingsChange: (partial: Partial<WebSearchSettings>) => void;
   showToast: (message: string, tone?: "info" | "error") => void;

@@ -5,7 +5,12 @@ import { DesktopUpdateNotice } from "./components/desktop/DesktopUpdateNotice";
 import { ConversationRepository } from "./data/conversation-repository";
 import { YachiyoDatabase } from "./data/db";
 import type { Conversation, Locale, StoredImage } from "./domain/chat";
-import { KEYSTORE_MANAGED_API_KEY, supportsImageInput, type ActiveLlmConfig } from "./domain/llm";
+import {
+  KEYSTORE_MANAGED_API_KEY,
+  customModelRequestOptions,
+  supportsImageInput,
+  type ActiveLlmConfig,
+} from "./domain/llm";
 import type { LlmEntryDraft, LlmProviderEntry } from "./components/LlmSettingsPanel";
 import {
   ImageProcessingError,
@@ -20,7 +25,7 @@ import { useOnlineStatus } from "./pwa/use-online-status";
 import { usePwaUpdate } from "./pwa/use-pwa-update";
 import { clearWebCaches } from "./services/api-origins";
 import { isDesktopApp, isNativeApp } from "./services/app-platform";
-import { streamChat } from "./services/chat-client";
+import { ChatClientError, streamChat } from "./services/chat-client";
 import { LlmSettingsService } from "./services/llm-settings";
 import { projectManager } from "./services/project-manager";
 import { SessionClient } from "./services/session-client";
@@ -132,6 +137,7 @@ export function App({ services, autoAiTitle }: AppProps) {
       model: entry.model,
       ...(entry.apiKey === KEYSTORE_MANAGED_API_KEY ? { keySlot: entry.id } : {}),
       ...(entry.baseUrl !== undefined ? { baseUrl: entry.baseUrl } : {}),
+      ...(entry.custom !== undefined ? { custom: entry.custom } : {}),
     };
   }, [llmActiveEntryId, llmEntries]);
 
@@ -203,6 +209,7 @@ export function App({ services, autoAiTitle }: AppProps) {
         model: record.model,
         ...(record.baseUrl !== undefined ? { baseUrl: record.baseUrl } : {}),
         ...(record.disabled === true ? { disabled: true } : {}),
+        ...(record.custom !== undefined ? { custom: record.custom } : {}),
       })),
     };
   }, [llmService]);
@@ -341,6 +348,33 @@ export function App({ services, autoAiTitle }: AppProps) {
       return record.id;
     },
     [llmService, refreshLlm],
+  );
+
+  const handleLlmTestConnection = useCallback(
+    async (draft: LlmEntryDraft): Promise<void> => {
+      try {
+        await activeServices.streamChat(
+          {
+            locale: controller.locale,
+            messages: [{ role: "user", text: "ping" }],
+            mode: "title",
+            provider: draft.provider,
+            apiKey: draft.apiKey,
+            model: draft.model,
+            ...(draft.baseUrl !== undefined ? { baseUrl: draft.baseUrl } : {}),
+            // 沿用已存 Key 时由桌面网关按配置 id 取用
+            ...(draft.apiKey === KEYSTORE_MANAGED_API_KEY && draft.id !== undefined ? { keySlot: draft.id } : {}),
+            ...(draft.custom !== undefined && draft.baseUrl !== undefined
+              ? { customModel: customModelRequestOptions(draft.custom) }
+              : {}),
+          },
+          { onDelta: () => undefined },
+        );
+      } catch (error) {
+        throw new Error(error instanceof ChatClientError ? error.detail ?? error.code : copy.genericFailure);
+      }
+    },
+    [activeServices, controller.locale, copy.genericFailure],
   );
 
   const handleLlmClear = useCallback(
@@ -709,6 +743,7 @@ export function App({ services, autoAiTitle }: AppProps) {
     onLlmClear: handleLlmClear,
     onLlmSetEnabled: handleLlmSetEnabled,
     onLlmSave: handleLlmSave,
+    onLlmTestConnection: handleLlmTestConnection,
     onLocale: handleLocale,
     onNewChat: handleNewChat,
     onRecall: handleRecall,

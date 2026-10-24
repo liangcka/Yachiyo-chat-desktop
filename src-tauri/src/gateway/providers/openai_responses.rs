@@ -1,6 +1,7 @@
 use crate::gateway::agent::messages::AgentMessage;
+use crate::gateway::prompt::build_system_prompt;
 use crate::gateway::providers::openai_compat::is_openai_reasoning_model;
-use crate::types::{ExtractedDelta, TokenUsage, ToolCallStreamDelta};
+use crate::types::{ChatLocale, ClientChatRequest, ExtractedDelta, TokenUsage, ToolCallStreamDelta};
 use serde_json::json;
 
 /// OpenAI Agent 走 Responses API：GPT-6 Astra 与 GPT-6.1 Sol 的 Chat Completions 不支持工具调用，
@@ -73,6 +74,49 @@ pub fn build_openai_responses_agent_body(
         body["include"] = json!(["reasoning.encrypted_content"]);
     }
     body
+}
+
+/// 普通聊天、标题与摘要请求体（自定义模型选择 Responses 格式时使用）：系统提示词放 instructions，不在上游留存对话
+pub fn build_openai_responses_body(request: &ClientChatRequest, model: &str) -> serde_json::Value {
+    let instructions = build_system_prompt(
+        request.locale,
+        request.mode,
+        request.web_search.unwrap_or(false),
+        request.current_time.as_deref(),
+    );
+    let input: Vec<serde_json::Value> = request
+        .messages
+        .iter()
+        .map(|msg| {
+            if msg.role != "user" {
+                return json!({ "role": msg.role, "content": msg.text });
+            }
+            let Some(url) = &msg.image_data_url else {
+                return json!({ "role": "user", "content": [{ "type": "input_text", "text": msg.text }] });
+            };
+            let text = if !msg.text.is_empty() {
+                msg.text.as_str()
+            } else if request.locale == ChatLocale::JaJp {
+                "この画像を見てください。"
+            } else {
+                "请看看这张图片。"
+            };
+            json!({
+                "role": "user",
+                "content": [
+                    { "type": "input_text", "text": text },
+                    { "type": "input_image", "image_url": url }
+                ]
+            })
+        })
+        .collect();
+    json!({
+        "model": model,
+        "instructions": instructions,
+        "input": input,
+        "store": false,
+        "stream": true
+    })
 }
 
 /// 解析 Responses 流事件：正文、推理摘要、函数调用（按 output_index 聚合）与用量

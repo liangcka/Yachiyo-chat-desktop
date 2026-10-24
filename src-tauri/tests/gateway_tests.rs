@@ -900,3 +900,82 @@ fn test_sse_decoder_splits_records_and_buffers_partial_tail() {
     assert_eq!(decoder.push(b"tial\n\ndata: [DONE]\n\n"), ["partial", "[DONE]"]);
     assert!(decoder.push(b"").is_empty());
 }
+
+fn custom_model_request(mode: &str, custom: &str) -> yachiyo_desktop_lib::types::ClientChatRequest {
+    let mode = if mode.is_empty() { String::new() } else { format!(r#","mode":"{}""#, mode) };
+    serde_json::from_str(&format!(
+        r#"{{"locale":"zh-CN","provider":"openai","baseUrl":"https://relay.example.com/v1","customModel":{},"messages":[{{"role":"user","text":"你好"}}]{}}}"#,
+        custom, mode
+    ))
+    .unwrap()
+}
+
+#[test]
+fn test_custom_model_formats_resolve_endpoint_headers_and_body() {
+    use yachiyo_desktop_lib::gateway::agent::runtime::WireProtocol;
+    use yachiyo_desktop_lib::gateway::build_upstream_request;
+
+    let chat = build_upstream_request(
+        &custom_model_request("", r#"{"apiFormat":"chat_completions","family":"qwen","thinking":"off","maxOutputTokens":2048,"topK":20}"#),
+        "sk-test",
+        "qwen3.8-max",
+    )
+    .unwrap();
+    assert_eq!(chat.url, "https://relay.example.com/v1/chat/completions");
+    assert_eq!(chat.protocol, WireProtocol::ChatCompletions);
+    assert_eq!(chat.headers.get("authorization").unwrap(), "Bearer sk-test");
+    let body: serde_json::Value = serde_json::from_str(&chat.body).unwrap();
+    assert_eq!(body["max_tokens"], 2048);
+    assert_eq!(body["enable_thinking"], false);
+    assert_eq!(body["top_k"], 20);
+    // 千问系列的强度字段与关闭思考互斥
+    assert!(body.get("reasoning_effort").is_none());
+
+    let responses = build_upstream_request(
+        &custom_model_request("title", r#"{"apiFormat":"responses","fullUrl":true,"thinking":"on","topK":5}"#),
+        "sk-test",
+        "gpt-x",
+    )
+    .unwrap();
+    assert_eq!(responses.url, "https://relay.example.com/v1");
+    assert_eq!(responses.protocol, WireProtocol::Responses);
+    let body: serde_json::Value = serde_json::from_str(&responses.body).unwrap();
+    assert_eq!(body["max_output_tokens"], 512);
+    assert_eq!(body["store"], false);
+    assert_eq!(body["input"][0]["content"][0]["type"], "input_text");
+    // 标题请求不强开思考，Responses 不发送 top_k
+    assert!(body.get("reasoning").is_none());
+    assert!(body.get("top_k").is_none());
+
+    let anthropic = build_upstream_request(
+        &custom_model_request("", r#"{"apiFormat":"anthropic_messages","thinking":"off","temperature":0.5}"#),
+        "sk-test",
+        "claude-sonnet-5-5",
+    )
+    .unwrap();
+    assert_eq!(anthropic.url, "https://relay.example.com/v1/messages");
+    assert_eq!(anthropic.headers.get("x-api-key").unwrap(), "sk-test");
+    assert!(anthropic.headers.get("anthropic-beta").is_none());
+    let body: serde_json::Value = serde_json::from_str(&anthropic.body).unwrap();
+    assert_eq!(body["max_tokens"], 16000);
+    assert_eq!(body["thinking"]["type"], "disabled");
+    assert_eq!(body["temperature"], 0.5);
+    assert!(body.get("fallbacks").is_none());
+}
+
+#[test]
+fn test_custom_model_options_require_base_url_and_valid_ranges() {
+    use yachiyo_desktop_lib::gateway::build_upstream_request;
+
+    let without_base: yachiyo_desktop_lib::types::ClientChatRequest = serde_json::from_str(
+        r#"{"locale":"zh-CN","provider":"openai","customModel":{"apiFormat":"responses"},"messages":[{"role":"user","text":"你好"}]}"#,
+    )
+    .unwrap();
+    assert!(build_upstream_request(&without_base, "sk-test", "gpt-x").is_err());
+    let out_of_range = custom_model_request("", r#"{"apiFormat":"chat_completions","temperature":3}"#);
+    assert!(build_upstream_request(&out_of_range, "sk-test", "m").is_err());
+    let unknown_field = serde_json::from_str::<yachiyo_desktop_lib::types::ClientChatRequest>(
+        r#"{"locale":"zh-CN","messages":[],"customModel":{"apiFormat":"responses","extra":1}}"#,
+    );
+    assert!(unknown_field.is_err());
+}

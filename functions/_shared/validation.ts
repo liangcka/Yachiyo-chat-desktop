@@ -23,6 +23,26 @@ export function isProviderId(value: unknown): value is ProviderId {
 
 export type RequestMode = "chat" | "summary" | "title";
 
+/** 自定义模型的线路协议；与前端 src/domain/llm.ts 的 ApiFormat 一致 */
+export type ApiFormat = "chat_completions" | "responses" | "anthropic_messages";
+
+/** 模型系列：决定思考开关的参数写法与 OpenAI 兼容厂商规则 */
+export type ModelFamily = "deepseek" | "qwen" | "glm" | "kimi" | "doubao" | "minimax" | "gpt" | "claude";
+
+/** 「自定义模型」随请求下发的协议与采样参数；只与 baseUrl 同时出现，缺省字段由上游决定 */
+export interface CustomModelOptions {
+  apiFormat: ApiFormat;
+  /** 按 baseUrl 原样请求，不补全协议路径 */
+  fullUrl?: boolean;
+  family?: ModelFamily;
+  maxOutputTokens?: number;
+  /** 缺省跟随模型默认配置，不发送思考字段 */
+  thinking?: "on" | "off";
+  temperature?: number;
+  topP?: number;
+  topK?: number;
+}
+
 export interface ClientChatRequest {
   locale: ChatLocale;
   messages: ClientHistoryMessage[];
@@ -32,6 +52,8 @@ export interface ClientChatRequest {
   model?: string;
   /** 自定义 OpenAI 兼容端点；仅用户自带 Key 路径有效 */
   baseUrl?: string;
+  /** 自定义模型的协议与参数；必须与 baseUrl 同时出现 */
+  customModel?: CustomModelOptions;
   webSearch?: boolean;
   /** 智能搜索：联网搜索开启时的双市场并行检索（结果更多、带发布日期） */
   smartSearch?: boolean;
@@ -65,11 +87,24 @@ const allowedTopLevelKeys = new Set([
   "apiKey",
   "model",
   "baseUrl",
+  "customModel",
   "webSearch",
   "smartSearch",
   "currentTime",
 ]);
 const allowedMessageKeys = new Set(["role", "text", "imageDataUrl"]);
+const allowedCustomModelKeys = new Set([
+  "apiFormat",
+  "fullUrl",
+  "family",
+  "maxOutputTokens",
+  "thinking",
+  "temperature",
+  "topP",
+  "topK",
+]);
+const apiFormats: readonly ApiFormat[] = ["chat_completions", "responses", "anthropic_messages"];
+const modelFamilies: readonly ModelFamily[] = ["deepseek", "qwen", "glm", "kimi", "doubao", "minimax", "gpt", "claude"];
 
 function invalid(): never {
   throw new ChatValidationError();
@@ -148,6 +183,54 @@ function validateImageDataUrl(value: unknown): string {
   }
 
   return value;
+}
+
+function optionalNumber(value: unknown, min: number, max: number, integer: boolean): number | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    (integer && !Number.isInteger(value)) ||
+    value < min ||
+    value > max
+  ) {
+    return invalid();
+  }
+  return value;
+}
+
+/** 范围与前端 CUSTOM_MODEL_LIMITS 一致；未知字段或越界值整体拒绝 */
+function validateCustomModel(value: unknown): CustomModelOptions {
+  if (!isRecord(value) || !hasOnlyKeys(value, allowedCustomModelKeys)) {
+    return invalid();
+  }
+  const { apiFormat, fullUrl, family, thinking } = value;
+  if (typeof apiFormat !== "string" || !(apiFormats as readonly string[]).includes(apiFormat)) {
+    return invalid();
+  }
+  if (fullUrl !== undefined && typeof fullUrl !== "boolean") {
+    return invalid();
+  }
+  if (family !== undefined && (typeof family !== "string" || !(modelFamilies as readonly string[]).includes(family))) {
+    return invalid();
+  }
+  if (thinking !== undefined && thinking !== "on" && thinking !== "off") {
+    return invalid();
+  }
+  const maxOutputTokens = optionalNumber(value.maxOutputTokens, 1, 1_000_000, true);
+  const temperature = optionalNumber(value.temperature, 0, 2, false);
+  const topP = optionalNumber(value.topP, 0, 1, false);
+  const topK = optionalNumber(value.topK, 1, 100, true);
+  return {
+    apiFormat: apiFormat as ApiFormat,
+    ...(fullUrl === true ? { fullUrl: true } : {}),
+    ...(family !== undefined ? { family: family as ModelFamily } : {}),
+    ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+    ...(thinking !== undefined ? { thinking } : {}),
+    ...(temperature !== undefined ? { temperature } : {}),
+    ...(topP !== undefined ? { topP } : {}),
+    ...(topK !== undefined ? { topK } : {}),
+  };
 }
 
 export function validateChatRequest(value: unknown): ClientChatRequest {
@@ -278,6 +361,11 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
     }
   }
   const baseUrl = value.baseUrl as string | undefined;
+  // 自定义模型参数只对自定义端点有意义，单独出现视为非法请求
+  if (value.customModel !== undefined && baseUrl === undefined) {
+    return invalid();
+  }
+  const customModel = value.customModel === undefined ? undefined : validateCustomModel(value.customModel);
 
   return {
     locale: value.locale,
@@ -290,6 +378,7 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
     apiKey: value.apiKey,
     model: value.model,
     ...(baseUrl !== undefined ? { baseUrl } : {}),
+    ...(customModel !== undefined ? { customModel } : {}),
   };
 }
 

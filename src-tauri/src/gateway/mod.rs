@@ -4,6 +4,7 @@ pub mod providers;
 pub mod stream;
 
 use crate::crypto::keys::KeyStore;
+use crate::gateway::agent::runtime::WireProtocol;
 use crate::gateway::providers::registry::get_provider_config;
 use crate::gateway::stream::{encode_client_event, OpenAiDeltaParser, SseDecoder};
 use crate::tools::WorkspaceManager;
@@ -19,6 +20,35 @@ pub struct BuiltRequest {
     pub headers: reqwest::header::HeaderMap,
     pub body: String,
     pub provider_id: ProviderId,
+    /// 上游流的线路协议，决定按哪种格式解析增量
+    pub protocol: WireProtocol,
+}
+
+/// 按线路协议写入鉴权头：Anthropic 用 x-api-key 与版本头，Gemini 用 x-goog-api-key，其余为 Bearer
+pub fn insert_auth_headers(
+    headers: &mut reqwest::header::HeaderMap,
+    protocol: WireProtocol,
+    api_key: &str,
+    anthropic_beta: Option<&'static str>,
+) -> Result<(), String> {
+    use reqwest::header::{HeaderName, HeaderValue};
+    match protocol {
+        WireProtocol::Anthropic => {
+            headers.insert(HeaderName::from_static("x-api-key"), HeaderValue::from_str(api_key).map_err(|e| e.to_string())?);
+            headers.insert(HeaderName::from_static("anthropic-version"), HeaderValue::from_static("2023-06-01"));
+            if let Some(beta) = anthropic_beta {
+                headers.insert(HeaderName::from_static("anthropic-beta"), HeaderValue::from_static(beta));
+            }
+        }
+        WireProtocol::Gemini => {
+            headers.insert(HeaderName::from_static("x-goog-api-key"), HeaderValue::from_str(api_key).map_err(|e| e.to_string())?);
+        }
+        WireProtocol::ChatCompletions | WireProtocol::Responses => {
+            let auth_val = format!("Bearer {}", api_key);
+            headers.insert(reqwest::header::AUTHORIZATION, HeaderValue::from_str(&auth_val).map_err(|e| e.to_string())?);
+        }
+    }
+    Ok(())
 }
 
 /// 请求自带的 Key 优先；否则取系统加密存储里的 Key，并要求请求的端点与保存时绑定的端点一致。
@@ -57,6 +87,7 @@ pub fn build_upstream_request(
     let provider_id = request.provider.unwrap_or(ProviderId::Stepfun);
     let config = get_provider_config(provider_id);
     let base_url = validated_base_url(request)?;
+    let custom = providers::custom_model::validated_custom_model(request)?;
 
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
@@ -68,7 +99,33 @@ pub fn build_upstream_request(
         reqwest::header::HeaderValue::from_static("text/event-stream"),
     );
 
-    let (url, body_json) = match provider_id {
+    // 自定义模型按所选 API 格式改用对应协议；校验已保证 customModel 与 baseUrl 同时出现
+    if let (Some(options), Some(base_url)) = (custom, base_url) {
+        use providers::custom_model;
+        let protocol = custom_model::protocol(options.api_format);
+        insert_auth_headers(&mut headers, protocol, api_key, None)?;
+        let mut body = match protocol {
+            WireProtocol::Responses => providers::openai_responses::build_openai_responses_body(request, model),
+            WireProtocol::Anthropic => providers::anthropic::build_anthropic_body(request, model),
+            WireProtocol::ChatCompletions | WireProtocol::Gemini => providers::openai_compat::build_openai_compat_body_for(
+                request,
+                model,
+                config,
+                custom_model::vendor(options, base_url),
+                options.family == Some(crate::types::ModelFamily::Deepseek),
+            ),
+        };
+        custom_model::apply_options(&mut body, protocol, options, request.mode, false);
+        return Ok(BuiltRequest {
+            url: custom_model::resolve_endpoint(base_url, options),
+            headers,
+            body: body.to_string(),
+            provider_id,
+            protocol,
+        });
+    }
+
+    let (url, body_json, protocol) = match provider_id {
         ProviderId::Stepfun | ProviderId::Deepseek | ProviderId::Glm | ProviderId::Openai => {
             let auth_val = format!("Bearer {}", api_key);
             headers.insert(
@@ -77,7 +134,7 @@ pub fn build_upstream_request(
                     .map_err(|e| e.to_string())?,
             );
             let body = providers::openai_compat::build_openai_compat_body(request, model, config);
-            (providers::openai_compat::resolve_chat_endpoint(base_url, config.endpoint), body)
+            (providers::openai_compat::resolve_chat_endpoint(base_url, config.endpoint), body, WireProtocol::ChatCompletions)
         }
         ProviderId::Claude => {
             headers.insert(
@@ -95,7 +152,7 @@ pub fn build_upstream_request(
                 );
             }
             let body = providers::anthropic::build_anthropic_body(request, model);
-            (config.endpoint.to_string(), body)
+            (config.endpoint.to_string(), body, WireProtocol::Anthropic)
         }
         ProviderId::Gemini => {
             headers.insert(
@@ -107,7 +164,7 @@ pub fn build_upstream_request(
                 config.endpoint, model
             );
             let body = providers::gemini::build_gemini_body(request);
-            (url, body)
+            (url, body, WireProtocol::Gemini)
         }
     };
 
@@ -116,6 +173,7 @@ pub fn build_upstream_request(
         headers,
         body: body_json.to_string(),
         provider_id,
+        protocol,
     })
 }
 
@@ -170,6 +228,7 @@ pub fn handle_chat_stream(
             }
         };
 
+        let protocol = built_req.protocol;
         let first_attempt = client
             .post(&built_req.url)
             .headers(built_req.headers.clone())
@@ -264,14 +323,15 @@ pub fn handle_chat_stream(
                     break;
                 }
 
-                let delta = match provider_id {
-                    ProviderId::Stepfun | ProviderId::Deepseek | ProviderId::Glm | ProviderId::Openai => {
-                        openai_parser.parse(&data_str)
+                let delta = match protocol {
+                    WireProtocol::ChatCompletions => openai_parser.parse(&data_str),
+                    WireProtocol::Responses => {
+                        providers::openai_responses::extract_openai_responses_delta(&data_str)
                     }
-                    ProviderId::Claude => {
+                    WireProtocol::Anthropic => {
                         providers::anthropic::extract_anthropic_delta(&data_str)
                     }
-                    ProviderId::Gemini => {
+                    WireProtocol::Gemini => {
                         providers::gemini::extract_gemini_delta(&data_str)
                     }
                 };

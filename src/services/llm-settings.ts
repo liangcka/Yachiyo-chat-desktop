@@ -1,6 +1,7 @@
 import type { YachiyoDatabase } from "../data/db";
 import {
   type ActiveLlmConfig,
+  type CustomModelSettings,
   type LlmSettingsRecord,
   type ProviderId,
   KEYSTORE_MANAGED_API_KEY,
@@ -9,6 +10,7 @@ import {
   newLlmEntryId,
   isValidApiKey,
   isValidBaseUrl,
+  normalizeCustomModelSettings,
 } from "../domain/llm";
 
 import { isDesktopApp } from "./app-platform";
@@ -82,6 +84,7 @@ export class LlmSettingsService {
       model: record.model,
       ...(record.apiKey === KEYSTORE_MANAGED_API_KEY ? { keySlot: record.id } : {}),
       ...(record.baseUrl !== undefined ? { baseUrl: record.baseUrl } : {}),
+      ...customSettingsOf(record),
     };
   }
 
@@ -102,6 +105,7 @@ export class LlmSettingsService {
         updatedAt: record.updatedAt,
         ...(record.baseUrl !== undefined ? { baseUrl: record.baseUrl } : {}),
         ...(enabled ? {} : { disabled: true }),
+        ...customSettingsOf(record),
       });
 
       const activeValue = (await this.db.settings.get(ACTIVE_ENTRY_KEY))?.value;
@@ -157,9 +161,17 @@ export class LlmSettingsService {
    * 带 baseUrl（自定义 OpenAI 兼容端点）时跳过模型白名单，模型名交由上游校验。
    * 桌面端 Key 连同端点一起写入系统加密存储（槽名为配置 id），成功后 IndexedDB 只记录占位符；
    * 传入占位符表示沿用该配置已保存的 Key，此时端点必须与保存时一致。
+   * custom（自定义模型设置）只随自定义端点保存，非法字段在边界处丢弃。
    */
   async saveEntry(
-    input: { id?: string; provider: ProviderId; apiKey: string; model: string; baseUrl?: string },
+    input: {
+      id?: string;
+      provider: ProviderId;
+      apiKey: string;
+      model: string;
+      baseUrl?: string;
+      custom?: CustomModelSettings;
+    },
     options: { activate?: boolean } = {},
   ): Promise<LlmSettingsRecord> {
     const { provider } = input;
@@ -198,6 +210,7 @@ export class LlmSettingsService {
       updatedAt: Date.now(),
       ...(baseUrl !== undefined ? { baseUrl } : {}),
       ...(existing?.disabled === true ? { disabled: true } : {}),
+      ...(baseUrl !== undefined ? customSettingsOf(input) : {}),
     };
     await this.db.transaction("rw", this.db.llmEntries, this.db.settings, async () => {
       const currentActive = await this.db.settings.get(ACTIVE_ENTRY_KEY);
@@ -209,6 +222,12 @@ export class LlmSettingsService {
     });
     return record;
   }
+}
+
+/** 读取记录上的自定义模型设置；IndexedDB 内容可能来自旧版本或被篡改，统一经过校验 */
+function customSettingsOf(record: { custom?: unknown }): { custom?: CustomModelSettings } {
+  const custom = normalizeCustomModelSettings(record.custom);
+  return custom !== undefined ? { custom } : {};
 }
 
 /** 供 UI 在没有数据库实例时使用的静态模型列表查询 */

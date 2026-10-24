@@ -108,6 +108,52 @@ describe("LlmSettingsService", () => {
     expect(record.baseUrl).toBe("https://ark.cn-beijing.volces.com/api/v3");
   });
 
+  it("persists custom model settings with a custom endpoint and keeps them across enable toggles", async () => {
+    const record = await service.saveEntry({
+      provider: "openai",
+      apiKey: VALID_KEY,
+      model: "relay-model",
+      baseUrl: "https://relay.example.com/v1",
+      custom: { apiFormat: "responses", displayName: "中转", maxToolRounds: 80, supportsImage: false, temperature: 0.4 },
+    });
+    expect(record.custom).toEqual({
+      apiFormat: "responses",
+      displayName: "中转",
+      maxToolRounds: 80,
+      supportsImage: false,
+      temperature: 0.4,
+    });
+
+    await service.setEnabled(record.id, false);
+    expect((await service.get(record.id))?.custom?.apiFormat).toBe("responses");
+    await service.setEnabled(record.id, true);
+    await service.setActive(record.id);
+    expect((await service.getActiveConfig())?.custom).toMatchObject({ apiFormat: "responses", maxToolRounds: 80 });
+  });
+
+  it("drops custom settings without an endpoint and sanitizes stored values", async () => {
+    const native = await service.saveEntry({
+      provider: "openai",
+      apiKey: VALID_KEY,
+      model: "gpt-6-luna",
+      custom: { apiFormat: "responses" },
+    });
+    expect(native.custom).toBeUndefined();
+
+    // 旧版本或被篡改的记录：非法字段在读取时丢弃，未知协议回退为 Chat Completions
+    await db.llmEntries.put({
+      id: "openai~legacy01",
+      provider: "openai",
+      apiKey: VALID_KEY,
+      model: "m",
+      updatedAt: 1,
+      baseUrl: "https://relay.example.com/v1",
+      custom: { apiFormat: "grpc", temperature: 9, topK: 40 } as never,
+    });
+    await service.setActive("openai~legacy01");
+    expect((await service.getActiveConfig())?.custom).toEqual({ apiFormat: "chat_completions", topK: 40 });
+  });
+
   it("normalizes an empty base URL to undefined and keeps the whitelist fallback", async () => {
     const record = await save(service, "openai", VALID_KEY, "gpt-5.6-luna", { baseUrl: "   " });
 

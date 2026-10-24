@@ -1608,6 +1608,7 @@ async fn test_rejected_reasoning_effort_retries_without_it_and_notifies() {
         tools_schema: Vec::new(),
         reasoning_effort: Some("max"),
         effort_rejected: Arc::new(AtomicBool::new(false)),
+        custom_model: None,
     };
     let (sink, events) = collector();
     let messages = vec![AgentMessage::User { text: "hi".to_string(), image_data_url: None }];
@@ -1691,4 +1692,73 @@ fn test_upstream_error_summary_prefers_upstream_message() {
     let summary = upstream_error_summary(&long);
     assert_eq!(summary.chars().count(), 301);
     assert!(summary.ends_with('…'));
+}
+
+/// 本地假上游（Anthropic Messages 协议）：记录请求路径、鉴权头与请求体，返回一段正常的流式回复
+async fn anthropic_upstream() -> (String, Arc<Mutex<Vec<(String, Option<String>, serde_json::Value)>>>) {
+    use axum::{body::Body, extract::State, http::{HeaderMap, Uri}, response::Response, routing::post, Json, Router};
+    type Seen = Arc<Mutex<Vec<(String, Option<String>, serde_json::Value)>>>;
+    let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+    async fn handle(State(seen): State<Seen>, uri: Uri, headers: HeaderMap, Json(body): Json<serde_json::Value>) -> Response {
+        let key = headers.get("x-api-key").and_then(|v| v.to_str().ok()).map(String::from);
+        seen.lock().unwrap().push((uri.path().to_string(), key, body));
+        let sse = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":5}}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"好的\"}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}\n\n",
+        );
+        Response::builder().header("content-type", "text/event-stream").body(Body::from(sse)).unwrap()
+    }
+    let app = Router::new().route("/v1/messages", post(handle)).with_state(Arc::clone(&seen));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (format!("http://{addr}/v1"), seen)
+}
+
+#[tokio::test]
+async fn test_custom_model_agent_turn_uses_selected_anthropic_format() {
+    use yachiyo_desktop_lib::gateway::agent::runtime::HttpTurnExecutor;
+    use yachiyo_desktop_lib::types::CustomModelOptions;
+
+    let (base_url, seen) = anthropic_upstream().await;
+    let custom: CustomModelOptions = serde_json::from_value(serde_json::json!({
+        "apiFormat": "anthropic_messages",
+        "maxOutputTokens": 4000,
+        "thinking": "on",
+        "temperature": 0.4,
+        "topP": 0.9
+    }))
+    .unwrap();
+    let executor = HttpTurnExecutor {
+        client: reqwest::Client::new(),
+        fallback_client: None,
+        provider_id: ProviderId::Openai,
+        base_url: Some(base_url),
+        api_key: "test-key".to_string(),
+        model: "relay-claude".to_string(),
+        system_prompt: "system".to_string(),
+        tools_schema: Vec::new(),
+        reasoning_effort: None,
+        effort_rejected: Arc::new(AtomicBool::new(false)),
+        custom_model: Some(custom),
+    };
+    let (sink, _events) = collector();
+    let messages = vec![AgentMessage::User { text: "hi".to_string(), image_data_url: None }];
+
+    let outcome = executor.execute(&messages, &sink).await.expect("自定义 Anthropic 格式应按 Messages 协议解析");
+    assert_eq!(outcome.text, "好的");
+    let requests = seen.lock().unwrap();
+    let (path, key, body) = &requests[0];
+    assert_eq!(path, "/v1/messages");
+    assert_eq!(key.as_deref(), Some("test-key"));
+    assert_eq!(body["max_tokens"], 4000);
+    assert_eq!(body["thinking"], serde_json::json!({ "type": "enabled", "budget_tokens": 2000 }));
+    assert_eq!(body["top_p"], 0.9);
+    // 开启思考时不再发送 temperature，也不带官方 Claude 专属的 effort 与服务端回退
+    assert!(body.get("temperature").is_none());
+    assert!(body.get("output_config").is_none());
+    assert!(body.get("fallbacks").is_none());
 }

@@ -3,7 +3,12 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ChatMessage, ChatSource, Conversation, Locale, MessageContentSegment, StoredImage, TokenUsage, ToolStep } from "../domain/chat";
 import { archiveBranch, restoreBranch } from "../domain/message-branches";
 import { appendContentSegment, finishThoughtSegment } from "../domain/message-content";
-import { supportsImageInput, type ActiveLlmConfig } from "../domain/llm";
+import {
+  DEFAULT_MAX_TOOL_ROUNDS,
+  customModelRequestOptions,
+  supportsImageInput,
+  type ActiveLlmConfig,
+} from "../domain/llm";
 import type { SkillDefinition } from "../skills";
 import { desktopFileReader, expandFileReferences, hasFileReferences } from "../features/file-reference/expand-file-references";
 
@@ -697,6 +702,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
                     ? { baseUrl: activeConfig.baseUrl }
                     : {}),
                   ...(activeConfig.keySlot !== undefined ? { keySlot: activeConfig.keySlot } : {}),
+                  ...(activeConfig.custom !== undefined && activeConfig.baseUrl !== undefined
+                    ? { customModel: customModelRequestOptions(activeConfig.custom) }
+                    : {}),
                 }
               : {}),
           },
@@ -965,6 +973,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
                     ? { baseUrl: activeConfig.baseUrl }
                     : {}),
                   ...(activeConfig.keySlot !== undefined ? { keySlot: activeConfig.keySlot } : {}),
+                  ...(activeConfig.custom !== undefined && activeConfig.baseUrl !== undefined
+                    ? { customModel: customModelRequestOptions(activeConfig.custom) }
+                    : {}),
                 }
               : {}),
             ...(webSearchEnabledRef.current === true ? { webSearch: true } : {}),
@@ -980,6 +991,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
                     workspace: projectManager.getState().activeProject ?? undefined,
                     // 只有能收图的模型才会拿到 look 截图工具
                     vision: activeConfig !== undefined && supportsImageInput(activeConfig),
+                    ...(activeConfig?.custom !== undefined
+                      ? { maxTurns: activeConfig.custom.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS }
+                      : {}),
                   },
                 }
               : {}),
@@ -1247,6 +1261,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
                     ? { baseUrl: activeConfig.baseUrl }
                     : {}),
                   ...(activeConfig.keySlot !== undefined ? { keySlot: activeConfig.keySlot } : {}),
+                  ...(activeConfig.custom !== undefined && activeConfig.baseUrl !== undefined
+                    ? { customModel: customModelRequestOptions(activeConfig.custom) }
+                    : {}),
                 }
               : {}),
           },

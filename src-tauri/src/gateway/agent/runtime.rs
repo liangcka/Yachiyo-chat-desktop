@@ -492,6 +492,8 @@ pub struct HttpTurnExecutor {
     pub reasoning_effort: Option<&'static str>,
     /// 上游拒绝过该档位后置位，本次运行（含子 Agent）后续轮次不再携带强度字段
     pub effort_rejected: Arc<AtomicBool>,
+    /// 自定义模型的线路协议与采样参数；仅与 base_url 同时生效
+    pub custom_model: Option<crate::types::CustomModelOptions>,
 }
 
 impl TurnExecutor for HttpTurnExecutor {
@@ -514,13 +516,41 @@ impl TurnExecutor for HttpTurnExecutor {
         let tools_schema = self.tools_schema.clone();
         let reasoning_effort = self.reasoning_effort.filter(|_| !self.effort_rejected.load(Ordering::Relaxed));
         let effort_rejected = Arc::clone(&self.effort_rejected);
+        let custom_model = self.custom_model.clone().filter(|_| base_url.is_some());
         let messages = messages.to_vec();
         let sink = Arc::clone(sink);
         Box::pin(async move {
+            use crate::gateway::providers::custom_model;
             let config = get_provider_config(provider_id);
-            let protocol = WireProtocol::resolve(provider_id, base_url.as_deref());
+            let protocol = custom_model
+                .as_ref()
+                .map(|options| custom_model::protocol(options.api_format))
+                .unwrap_or_else(|| WireProtocol::resolve(provider_id, base_url.as_deref()));
+            let vendor = match (custom_model.as_ref(), base_url.as_deref()) {
+                (Some(options), Some(base)) => custom_model::vendor(options, base),
+                _ => CompatVendor::resolve(base_url.as_deref(), config.endpoint),
+            };
 
-            let (url, mut body) = match protocol {
+            let (url, mut body) = if let (Some(options), Some(base)) = (custom_model.as_ref(), base_url.as_deref()) {
+                let mut body = match protocol {
+                    WireProtocol::Responses => crate::gateway::providers::openai_responses::build_openai_responses_agent_body(
+                        &model, &messages, &system_prompt, &tools_schema,
+                    ),
+                    WireProtocol::Anthropic => crate::gateway::providers::anthropic::build_anthropic_agent_body(
+                        &model, &messages, &system_prompt, &tools_schema,
+                    ),
+                    WireProtocol::ChatCompletions | WireProtocol::Gemini => {
+                        crate::gateway::providers::openai_compat::build_openai_agent_body_for(
+                            vendor,
+                            options.family == Some(crate::types::ModelFamily::Deepseek),
+                            &model, &messages, &system_prompt, &tools_schema,
+                        )
+                    }
+                };
+                custom_model::apply_options(&mut body, protocol, options, None, true);
+                (custom_model::resolve_endpoint(base, options), body)
+            } else {
+                match protocol {
                 WireProtocol::ChatCompletions => (
                     crate::gateway::providers::openai_compat::resolve_chat_endpoint(base_url.as_deref(), config.endpoint),
                     crate::gateway::providers::openai_compat::build_openai_agent_body(
@@ -545,6 +575,7 @@ impl TurnExecutor for HttpTurnExecutor {
                         &model, &messages, &system_prompt, &tools_schema,
                     ),
                 ),
+                }
             };
 
             // 保留不带强度字段的原始请求体：档位被上游拒绝时用它重发
@@ -557,22 +588,11 @@ impl TurnExecutor for HttpTurnExecutor {
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert(reqwest::header::CONTENT_TYPE, reqwest::header::HeaderValue::from_static("application/json"));
             headers.insert(reqwest::header::ACCEPT, reqwest::header::HeaderValue::from_static("text/event-stream"));
-            match provider_id {
-                ProviderId::Claude => {
-                    headers.insert(reqwest::header::HeaderName::from_static("x-api-key"), reqwest::header::HeaderValue::from_str(&api_key).map_err(|e| e.to_string())?);
-                    headers.insert(reqwest::header::HeaderName::from_static("anthropic-version"), reqwest::header::HeaderValue::from_static("2023-06-01"));
-                    if let Some(beta) = crate::gateway::providers::anthropic::anthropic_beta_header(&model) {
-                        headers.insert(reqwest::header::HeaderName::from_static("anthropic-beta"), reqwest::header::HeaderValue::from_static(beta));
-                    }
-                }
-                ProviderId::Gemini => {
-                    headers.insert(reqwest::header::HeaderName::from_static("x-goog-api-key"), reqwest::header::HeaderValue::from_str(&api_key).map_err(|e| e.to_string())?);
-                }
-                _ => {
-                    let auth_val = format!("Bearer {}", api_key);
-                    headers.insert(reqwest::header::AUTHORIZATION, reqwest::header::HeaderValue::from_str(&auth_val).map_err(|e| e.to_string())?);
-                }
-            }
+            // 服务端回退的 beta 头只对官方 Claude 端点有效
+            let anthropic_beta = (provider_id == ProviderId::Claude && custom_model.is_none())
+                .then(|| crate::gateway::providers::anthropic::anthropic_beta_header(&model))
+                .flatten();
+            crate::gateway::insert_auth_headers(&mut headers, protocol, &api_key, anthropic_beta)?;
 
             let mut attempt: u32 = 0;
             'attempts: loop {
@@ -642,7 +662,7 @@ impl TurnExecutor for HttpTurnExecutor {
                 }
 
                 let mut agg = crate::gateway::agent::stream_agg::ToolCallAggregator::new();
-                let mut native = NativeTurnCollector::for_protocol(protocol, CompatVendor::resolve(base_url.as_deref(), config.endpoint));
+                let mut native = NativeTurnCollector::for_protocol(protocol, vendor);
                 let mut openai_parser = crate::gateway::stream::OpenAiDeltaParser::default();
                 let mut full_text = String::new();
                 let mut reasoning = String::new();
@@ -911,6 +931,14 @@ pub fn run_agent_chat_stream(
                 return;
             }
         };
+        let custom_model = match crate::gateway::providers::custom_model::validated_custom_model(&request) {
+            Ok(options) => options.cloned(),
+            Err(error) => {
+                tracing::warn!("Agent 自定义模型参数无效: {}", error);
+                yield Ok(encode_client_event(&ClientStreamEvent::Error { code: "INVALID_REQUEST".to_string() }));
+                return;
+            }
+        };
 
         // 取消哨兵：SSE 流 Drop（客户端断开）时置位
         let cancelled = Arc::new(AtomicBool::new(false));
@@ -970,7 +998,12 @@ pub fn run_agent_chat_stream(
                 .is_some_and(|name| name.starts_with(crate::computer::TOOL_PREFIX))
         });
         let system_prompt = build_agent_system_prompt(request.locale, root.as_deref(), desktop_control, web_search);
-        let reasoning_effort = request.reasoning_effort.and_then(|level| {
+        // 档位映射只覆盖 Chat Completions 兼容厂商；自定义模型显式关闭思考或改用其他协议时不再携带强度字段
+        let custom_allows_effort = custom_model.as_ref().map_or(true, |options| {
+            options.api_format == crate::types::ApiFormat::ChatCompletions
+                && options.thinking != Some(crate::types::ThinkingMode::Off)
+        });
+        let reasoning_effort = request.reasoning_effort.filter(|_| custom_allows_effort).and_then(|level| {
             crate::gateway::providers::reasoning::native_effort(provider_id, base_url.as_deref(), &model, level)
         });
         let executor = HttpTurnExecutor {
@@ -984,6 +1017,7 @@ pub fn run_agent_chat_stream(
             tools_schema,
             reasoning_effort,
             effort_rejected: Arc::new(AtomicBool::new(false)),
+            custom_model,
         };
 
         let agent_config = request.agent.as_ref()

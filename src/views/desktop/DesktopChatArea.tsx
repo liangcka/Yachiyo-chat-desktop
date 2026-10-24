@@ -717,6 +717,9 @@ export function DesktopChatArea({
               compressedUpTo={controller.activeConversation?.compressedUpTo}
               summary={controller.activeConversation?.summary}
               locale={controller.locale}
+              {...(activeLlmEntry?.custom?.contextWindow !== undefined
+                ? { contextLimit: activeLlmEntry.custom.contextWindow }
+                : {})}
             />
 
             {/* 生成期间保留停止入口。 */}

@@ -80,6 +80,19 @@ pub fn build_openai_compat_body(
     model: &str,
     config: &ProviderConfig,
 ) -> serde_json::Value {
+    let vendor = CompatVendor::resolve(request.base_url.as_deref(), config.endpoint);
+    build_openai_compat_body_for(request, model, config, vendor, config.id == ProviderId::Deepseek)
+}
+
+/// 指定兼容厂商规则构造请求体：自定义模型按所选模型系列而不是端点主机名套用规则；
+/// deepseek 为真时辅助请求按 DeepSeek 约定关闭思考
+pub fn build_openai_compat_body_for(
+    request: &ClientChatRequest,
+    model: &str,
+    config: &ProviderConfig,
+    vendor: Option<CompatVendor>,
+    deepseek: bool,
+) -> serde_json::Value {
     let messages = build_openai_messages(request);
     let mut body = json!({
         "model": model,
@@ -111,12 +124,11 @@ pub fn build_openai_compat_body(
     // 标题与摘要的输出预算很小，DeepSeek 默认开启的思考会先耗尽预算导致正文为空，
     // 辅助请求一律关闭思考（对齐 DSH 辅助调用的 thinking.disabled）
     let auxiliary = matches!(request.mode, Some(RequestMode::Summary | RequestMode::Title));
-    if config.id == ProviderId::Deepseek && auxiliary {
+    if deepseek && auxiliary {
         body["thinking"] = json!({ "type": "disabled" });
     }
 
     let purpose = if auxiliary { RequestPurpose::Auxiliary } else { RequestPurpose::Chat };
-    let vendor = CompatVendor::resolve(request.base_url.as_deref(), config.endpoint);
     for (field, value) in compat_vendor::body_patch(vendor, model, purpose) {
         body[field] = value;
     }
@@ -133,8 +145,19 @@ pub fn build_openai_agent_body(
     system_prompt: &str,
     tools: &[serde_json::Value],
 ) -> serde_json::Value {
-    let deepseek = provider == ProviderId::Deepseek;
     let vendor = CompatVendor::resolve(base_url, get_provider_config(provider).endpoint);
+    build_openai_agent_body_for(vendor, provider == ProviderId::Deepseek, model, messages, system_prompt, tools)
+}
+
+/// 指定兼容厂商规则构造 Agent 请求体；deepseek 为真时按 DeepSeek 约定回传思维链并放大输出预算
+pub fn build_openai_agent_body_for(
+    vendor: Option<CompatVendor>,
+    deepseek: bool,
+    model: &str,
+    messages: &[AgentMessage],
+    system_prompt: &str,
+    tools: &[serde_json::Value],
+) -> serde_json::Value {
     let passback = if deepseek {
         // DeepSeek 思考模式要求 assistant 消息回传 reasoning_content，工具轮次缺失会被上游 400 拒绝；
         // 客户端重放的历史不含思维链时回传空串（对齐 DSH reasoning passback 与 pi-ai 的 DeepSeek 兼容规则）

@@ -220,52 +220,170 @@ describe("LlmSettingsPanel", () => {
     });
   });
 
-  it("opens custom model config and saves custom model", async () => {
+  /** 打开「自定义模型」表单 */
+  async function openCustomForm(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole("button", { name: "添加模型" }));
+    await user.click(screen.getByText("自定义模型"));
+  }
+
+  /** 弹窗内的提交按钮（与管理页顶部的「添加模型」同名） */
+  function submitButton() {
+    return within(screen.getByRole("dialog", { name: "配置模型" })).getByRole("button", { name: "添加模型" });
+  }
+
+  /** 长文本用粘贴输入：逐字键入在全量并行运行时可能超过默认超时 */
+  async function fill(user: ReturnType<typeof userEvent.setup>, label: string, text: string) {
+    await user.click(screen.getByLabelText(label));
+    await user.paste(text);
+  }
+
+  async function fillRequired(user: ReturnType<typeof userEvent.setup>) {
+    await fill(user, "自定义请求地址", "https://relay.example.com/v1");
+    await fill(user, "模型 ID", "my-model");
+    await fill(user, "API 密钥", VALID_KEY);
+  }
+
+  it("opens the custom model form and saves the basic fields with default format", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn(async () => "openai~custom01");
     const onActivate = vi.fn(async () => undefined);
     mount({ onSave, onActivate });
 
-    await user.click(screen.getByRole("button", { name: "添加模型" }));
-    await user.click(screen.getByText("自定义模型"));
-
+    await openCustomForm(user);
     expect(screen.getByRole("dialog", { name: "配置模型" })).toBeInTheDocument();
-    expect(screen.getByText(/配置自定义模型/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "自定义模型" })).toBeInTheDocument();
+    expect(screen.getByLabelText("API 格式")).toHaveValue("chat_completions");
+    expect(screen.getByText(/\/chat\/completions 将会被补充/u)).toBeInTheDocument();
 
-    const keyInput = screen.getByPlaceholderText("请输入服务商 API Key");
-    await user.type(keyInput, VALID_KEY);
-    await user.click(screen.getByRole("button", { name: "保存并启用" }));
+    await fillRequired(user);
+    await user.type(screen.getByLabelText("模型展示名称"), "我的模型");
+    expect(screen.getByText("4/64")).toBeInTheDocument();
+    await user.click(submitButton());
 
     expect(onSave).toHaveBeenCalledWith({
       provider: "openai",
       apiKey: VALID_KEY,
-      model: "ox-alpha",
-      baseUrl: "https://api.openai.com/v1",
+      model: "my-model",
+      baseUrl: "https://relay.example.com/v1",
+      custom: { apiFormat: "chat_completions", displayName: "我的模型", maxToolRounds: 500 },
     });
     expect(onActivate).toHaveBeenCalledWith("openai~custom01");
   });
 
-  it("fetches the endpoint model list in the custom form and picks a model from it", async () => {
+  it("validates required fields, trailing slash and numeric ranges before saving", async () => {
     const user = userEvent.setup();
-    const onSave = vi.fn(async () => "openai~custom01");
-    fetchModelList.mockResolvedValueOnce(["gpt-4o", "qwen-turbo"]);
+    const onSave = vi.fn(async () => "id");
     mount({ onSave });
 
-    await user.click(screen.getByRole("button", { name: "添加模型" }));
-    await user.click(screen.getByText("自定义模型"));
+    await openCustomForm(user);
+    await user.click(submitButton());
+    expect(screen.getAllByText("此项为必填项")).toHaveLength(3);
+
+    await fillRequired(user);
+    await user.type(screen.getByLabelText("自定义请求地址"), "/");
+    expect(screen.getByText("请求地址不要以斜杠结尾")).toBeInTheDocument();
+    await user.click(screen.getByRole("switch", { name: "完整 URL" }));
+    expect(screen.queryByText("请求地址不要以斜杠结尾")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /高级配置/u }));
+    await user.type(screen.getByLabelText("Temperature"), "3");
+    expect(screen.getByText("请输入 0 ~ 2 之间的数值")).toBeInTheDocument();
+    await user.click(submitButton());
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("saves the API format, full URL switch and advanced settings", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn(async () => "id");
+    mount({ onSave });
+
+    await openCustomForm(user);
+    await user.selectOptions(screen.getByLabelText("API 格式"), "anthropic_messages");
+    expect(screen.getByText(/\/messages 将会被补充/u)).toBeInTheDocument();
+    await fillRequired(user);
+    await user.click(screen.getByRole("switch", { name: "完整 URL" }));
+
+    await user.click(screen.getByRole("button", { name: /高级配置/u }));
+    await user.selectOptions(screen.getByLabelText("模型系列"), "claude");
+    await user.click(screen.getByRole("button", { name: "输入 填入 256k" }));
+    await user.click(screen.getByRole("button", { name: "输出 填入 32k" }));
+    await user.clear(screen.getByLabelText("工具调用轮数"));
+    await user.type(screen.getByLabelText("工具调用轮数"), "80");
+    await user.click(screen.getByLabelText("不支持"));
+    await user.click(screen.getByLabelText("关闭"));
+    await user.type(screen.getByLabelText("Temperature"), "0.6");
+    await user.type(screen.getByLabelText("Top P"), "0.9");
+    await user.type(screen.getByLabelText("Top K"), "40");
+    await user.click(submitButton());
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        custom: {
+          apiFormat: "anthropic_messages",
+          fullUrl: true,
+          family: "claude",
+          contextWindow: 262_144,
+          maxOutputTokens: 32_768,
+          maxToolRounds: 80,
+          supportsImage: false,
+          thinking: "off",
+          temperature: 0.6,
+          topP: 0.9,
+          topK: 40,
+        },
+      }),
+    );
+  });
+
+  it("runs the connectivity test before saving and keeps the form open when it fails", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn(async () => "id");
+    const onTestConnection = vi
+      .fn<(draft: unknown) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("PROVIDER_STREAM_ERROR"))
+      .mockResolvedValueOnce(undefined);
+    mount({ onSave, onTestConnection });
+
+    await openCustomForm(user);
+    await fillRequired(user);
+    await user.click(submitButton());
+
+    expect(onTestConnection).toHaveBeenCalledWith(expect.objectContaining({ model: "my-model" }));
+    expect(await screen.findByText("连通性测试失败：PROVIDER_STREAM_ERROR")).toBeInTheDocument();
+    expect(onSave).not.toHaveBeenCalled();
+
+    await user.click(submitButton());
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it("resets the form to its initial values", async () => {
+    const user = userEvent.setup();
+    mount();
+
+    await openCustomForm(user);
+    await fillRequired(user);
+    await user.click(screen.getByRole("button", { name: "重置" }));
+    expect(screen.getByLabelText("模型 ID")).toHaveValue("");
+    expect(screen.getByLabelText("自定义请求地址")).toHaveValue("");
+  });
+
+  it("fetches the endpoint model list in the custom form and picks a model from it", async () => {
+    const user = userEvent.setup();
+    fetchModelList.mockResolvedValueOnce(["gpt-4o", "qwen-turbo"]);
+    mount();
+
+    await openCustomForm(user);
     const fetchButton = screen.getByRole("button", { name: "获取模型列表" });
     expect(fetchButton).toBeDisabled();
 
-    await user.type(screen.getByPlaceholderText("请输入服务商 API Key"), VALID_KEY);
+    await fill(user, "自定义请求地址", "https://api.openai.com/v1");
+    await fill(user, "API 密钥", VALID_KEY);
     await user.click(fetchButton);
 
     expect(fetchModelList).toHaveBeenCalledWith({ baseUrl: "https://api.openai.com/v1", apiKey: VALID_KEY });
     expect(screen.getByText("端点提供 2 个模型:")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "qwen-turbo" }));
-    expect(screen.getByLabelText("模型名称 (Model ID) *")).toHaveValue("qwen-turbo");
-
-    await user.click(screen.getByRole("button", { name: "保存并启用" }));
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ model: "qwen-turbo" }));
+    expect(screen.getByLabelText("模型 ID")).toHaveValue("qwen-turbo");
   });
 
   it("shows a hint when the model list cannot be fetched", async () => {
@@ -273,18 +391,20 @@ describe("LlmSettingsPanel", () => {
     fetchModelList.mockRejectedValueOnce(new Error("Failed to list models (401)"));
     mount();
 
-    await user.click(screen.getByRole("button", { name: "添加模型" }));
-    await user.click(screen.getByText("自定义模型"));
-    await user.type(screen.getByPlaceholderText("请输入服务商 API Key"), VALID_KEY);
+    await openCustomForm(user);
+    await fill(user, "自定义请求地址", "https://api.openai.com/v1");
+    await fill(user, "API 密钥", VALID_KEY);
     await user.click(screen.getByRole("button", { name: "获取模型列表" }));
 
     expect(screen.getByRole("alert")).toHaveTextContent("获取模型列表失败");
   });
 
-  it("edits a custom-endpoint config in the custom form and lists models with its stored key", async () => {
+  it("edits a legacy custom-endpoint config as a Chat Completions custom model with its stored key", async () => {
     const user = userEvent.setup();
+    const onSave = vi.fn(async () => "openai~custom01");
     fetchModelList.mockResolvedValueOnce(["my-model"]);
     mount({
+      onSave,
       entries: [
         {
           id: "openai~custom01",
@@ -297,11 +417,35 @@ describe("LlmSettingsPanel", () => {
     });
 
     await user.click(screen.getByLabelText("编辑 my-model"));
-    expect(screen.getByText("配置自定义模型 (OpenAI Compatible)")).toBeInTheDocument();
-    expect(screen.getByLabelText("模型名称 (Model ID) *")).toHaveValue("my-model");
+    expect(screen.getByRole("heading", { name: "编辑自定义模型" })).toBeInTheDocument();
+    expect(screen.getByLabelText("模型 ID")).toHaveValue("my-model");
+    expect(screen.getByLabelText("API 格式")).toHaveValue("chat_completions");
 
     await user.click(screen.getByRole("button", { name: "获取模型列表" }));
     expect(fetchModelList).toHaveBeenCalledWith({ baseUrl: "https://llm.example.com/v1", slot: "openai~custom01" });
+
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "openai~custom01", apiKey: KEYSTORE_MANAGED_API_KEY }),
+    );
+  });
+
+  it("shows the display name of a custom model in the table", () => {
+    mount({
+      entries: [
+        {
+          id: "openai~custom02",
+          provider: "openai",
+          apiKey: VALID_KEY,
+          model: "relay-model-v2",
+          baseUrl: "https://relay.example.com/v1",
+          custom: { apiFormat: "responses", displayName: "中转模型" },
+        },
+      ],
+    });
+
+    expect(screen.getByText("中转模型")).toBeInTheDocument();
+    expect(screen.queryByText("relay-model-v2")).not.toBeInTheDocument();
   });
 
   it("opens edit config modal from table row", async () => {

@@ -9,6 +9,11 @@ import {
   getProviderMeta,
   isProviderId,
   isValidApiKey,
+  customModelRequestOptions,
+  entryDisplayModel,
+  normalizeCustomModelSettings,
+  resolveCustomEndpoint,
+  supportsImageInput,
 } from "./llm";
 
 describe("ProviderId", () => {
@@ -139,5 +144,71 @@ describe("findVendorForEntry", () => {
 
   it("returns undefined for an endpoint no card presets", () => {
     expect(findVendorForEntry("openai", "https://my-proxy.example.com/v1")).toBeUndefined();
+  });
+});
+
+describe("custom model settings", () => {
+  it("defaults to Chat Completions and drops invalid fields", () => {
+    expect(normalizeCustomModelSettings(undefined)).toBeUndefined();
+    expect(normalizeCustomModelSettings({})).toEqual({ apiFormat: "chat_completions" });
+    expect(
+      normalizeCustomModelSettings({
+        apiFormat: "anthropic_messages",
+        fullUrl: true,
+        displayName: "  展示名  ",
+        family: "llama",
+        contextWindow: 131_072,
+        maxOutputTokens: 1.5,
+        maxToolRounds: 0,
+        supportsImage: false,
+        thinking: "auto",
+        temperature: 2,
+        topP: 1.2,
+        topK: 100,
+      }),
+    ).toEqual({
+      apiFormat: "anthropic_messages",
+      fullUrl: true,
+      displayName: "展示名",
+      contextWindow: 131_072,
+      supportsImage: false,
+      temperature: 2,
+      topK: 100,
+    });
+  });
+
+  it("sends only backend-relevant options with the request", () => {
+    expect(
+      customModelRequestOptions({
+        apiFormat: "responses",
+        fullUrl: true,
+        displayName: "x",
+        contextWindow: 200_000,
+        maxToolRounds: 10,
+        supportsImage: false,
+        thinking: "on",
+        topP: 0.5,
+      }),
+    ).toEqual({ apiFormat: "responses", fullUrl: true, thinking: "on", topP: 0.5 });
+  });
+
+  it("resolves the request endpoint per format unless the full URL switch is on", () => {
+    expect(resolveCustomEndpoint("https://a.example.com/v1/", "chat_completions", false)).toBe(
+      "https://a.example.com/v1/chat/completions",
+    );
+    expect(resolveCustomEndpoint("https://a.example.com/v1", "responses", false)).toBe("https://a.example.com/v1/responses");
+    expect(resolveCustomEndpoint("https://a.example.com/v1", "anthropic_messages", false)).toBe(
+      "https://a.example.com/v1/messages",
+    );
+    expect(resolveCustomEndpoint("https://a.example.com/x", "responses", true)).toBe("https://a.example.com/x");
+  });
+
+  it("honors the image switch and display name of custom models", () => {
+    const base = { provider: "openai" as const, apiKey: "k", model: "m", baseUrl: "https://a.example.com/v1" };
+    expect(supportsImageInput(base)).toBe(true);
+    expect(supportsImageInput({ ...base, custom: { apiFormat: "chat_completions" } })).toBe(true);
+    expect(supportsImageInput({ ...base, custom: { apiFormat: "chat_completions", supportsImage: false } })).toBe(false);
+    expect(entryDisplayModel(base)).toBe("m");
+    expect(entryDisplayModel({ ...base, custom: { apiFormat: "responses", displayName: "展示" } })).toBe("展示");
   });
 });

@@ -1470,6 +1470,42 @@ describe("useChatController", () => {
     expect(typeof assistantMsg?.latencyMs).toBe("number");
   });
 
+  it("sends the custom model protocol options with a custom endpoint", async () => {
+    const repository = repositoryWith();
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta("好的");
+      return { truncated: false };
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        activeLlmConfig: {
+          apiKey: "sk-test-12345678901234567890",
+          model: "relay-model",
+          provider: "openai",
+          baseUrl: "https://relay.example.com/v1",
+          custom: { apiFormat: "anthropic_messages", displayName: "中转", maxToolRounds: 20, temperature: 0.3 },
+        },
+        id: ids("user-1", "assistant-1"),
+        now: () => 1000,
+        repository,
+        streamChat: stream,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => {
+      await result.current.send("你好");
+    });
+
+    // 展示名与轮数等界面专用设置不随请求下发
+    expect(stream.mock.calls[0]?.[0]).toMatchObject({
+      baseUrl: "https://relay.example.com/v1",
+      customModel: { apiFormat: "anthropic_messages", temperature: 0.3 },
+    });
+    expect(stream.mock.calls[0]?.[0].customModel).not.toHaveProperty("displayName");
+  });
+
   it("windows initial history and loads earlier pages on demand with an exclusive boundary", async () => {
     // 60 条历史（createdAt 10..69）：初始窗口应只保留最近 50 条，更早 10 条经上翻加载
     const pool: ChatMessage[] = Array.from({ length: 60 }, (_, index) => ({

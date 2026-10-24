@@ -128,6 +128,62 @@ pub struct ClientChatRequest {
     /// 用户在对话框选择的思考档位；缺省或模型不支持时沿用各厂商的默认规则
     #[serde(rename = "reasoningEffort", skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningLevel>,
+    /// 「自定义模型」的线路协议与采样参数；只与 baseUrl 同时出现（与 Web 端 customModel 契约一致）
+    #[serde(rename = "customModel", skip_serializing_if = "Option::is_none")]
+    pub custom_model: Option<CustomModelOptions>,
+}
+
+/// 自定义模型的线路协议
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiFormat {
+    ChatCompletions,
+    Responses,
+    AnthropicMessages,
+}
+
+/// 模型系列：决定思考开关的参数写法与 OpenAI 兼容厂商规则
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelFamily {
+    Deepseek,
+    Qwen,
+    Glm,
+    Kimi,
+    Doubao,
+    Minimax,
+    Gpt,
+    Claude,
+}
+
+/// 显式的思考开关；缺省跟随模型默认配置
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThinkingMode {
+    On,
+    Off,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CustomModelOptions {
+    #[serde(rename = "apiFormat")]
+    pub api_format: ApiFormat,
+    /// 按 baseUrl 原样请求，不补全协议路径
+    #[serde(rename = "fullUrl", default)]
+    pub full_url: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub family: Option<ModelFamily>,
+    #[serde(rename = "maxOutputTokens", skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ThinkingMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    #[serde(rename = "topP", skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f64>,
+    #[serde(rename = "topK", skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<u32>,
 }
 
 /// 界面统一的思考档位（轻度 / 中 / 高 / 极高 / Ultra），按思考深度递增；各厂商原生取值见 `gateway::providers::reasoning`

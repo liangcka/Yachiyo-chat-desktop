@@ -911,6 +911,69 @@ describe("POST /api/chat", () => {
     expect(events.at(-1)).toEqual({ type: "done", truncated: false });
   });
 
+  it("routes a custom model in Anthropic Messages format to the completed endpoint", async () => {
+    const apiKey = "sk-" + "a".repeat(40);
+    let upstreamUrl: string | undefined;
+    let upstreamHeaders: Headers | undefined;
+    let upstreamBody: Record<string, unknown> | undefined;
+    providerFetch.mockImplementationOnce(async (input, init) => {
+      const request = await toRequest(input, init);
+      upstreamUrl = request.url;
+      upstreamHeaders = request.headers;
+      upstreamBody = JSON.parse(await request.clone().text()) as Record<string, unknown>;
+      const sse = [
+        { type: "message_start", message: { usage: { input_tokens: 12 } } },
+        { type: "content_block_delta", delta: { type: "text_delta", text: "彩叶~" } },
+        { type: "message_delta", usage: { output_tokens: 3 } },
+      ]
+        .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+        .join("");
+      return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+    });
+
+    const response = await invoke(
+      await chatRequest(
+        {
+          locale: "zh-CN",
+          messages: [{ role: "user", text: "你好" }],
+          mode: "title",
+          provider: "openai",
+          apiKey,
+          model: "my-claude",
+          baseUrl: "https://relay.example.com/v1",
+          customModel: { apiFormat: "anthropic_messages", maxOutputTokens: 600, temperature: 0.5 },
+        },
+        "custom-anthropic-session",
+      ),
+    );
+    const events = await collectClientEvents(response.body!);
+
+    expect(upstreamUrl).toBe("https://relay.example.com/v1/messages");
+    expect(upstreamHeaders?.get("x-api-key")).toBe(apiKey);
+    expect(upstreamHeaders?.get("anthropic-version")).toBe("2023-06-01");
+    expect(upstreamBody).toMatchObject({ model: "my-claude", max_tokens: 600, temperature: 0.5, stream: true });
+    expect(events).toContainEqual({ type: "delta", text: "彩叶~" });
+  });
+
+  it("rejects custom model options without a custom base URL", async () => {
+    const response = await invoke(
+      await chatRequest(
+        {
+          locale: "zh-CN",
+          messages: [{ role: "user", text: "你好" }],
+          provider: "openai",
+          apiKey: "sk-" + "a".repeat(40),
+          model: "gpt-6-luna",
+          customModel: { apiFormat: "responses" },
+        },
+        "custom-without-base-session",
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
   it("rejects a custom base URL for providers without an OpenAI-compatible adapter", async () => {
     const response = await invoke(
       await chatRequest(

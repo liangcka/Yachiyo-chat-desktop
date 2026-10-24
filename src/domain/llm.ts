@@ -173,6 +173,131 @@ export function newLlmEntryId(provider: ProviderId): string {
   return `${provider}~${suffix}`;
 }
 
+/** 自定义模型的线路协议；缺省（含旧版保存的自定义端点）为 Chat Completions */
+export type ApiFormat = "chat_completions" | "responses" | "anthropic_messages";
+
+export const API_FORMATS: readonly ApiFormat[] = ["chat_completions", "responses", "anthropic_messages"];
+
+/** 各协议在 Base URL 后补全的路径；开启「完整 URL」时不拼接 */
+export const API_FORMAT_PATHS: Readonly<Record<ApiFormat, string>> = {
+  chat_completions: "/chat/completions",
+  responses: "/responses",
+  anthropic_messages: "/messages",
+};
+
+/** 模型系列：决定思考开关的参数写法与厂商兼容规则；缺省按端点主机名识别 */
+export type ModelFamily = "deepseek" | "qwen" | "glm" | "kimi" | "doubao" | "minimax" | "gpt" | "claude";
+
+export const MODEL_FAMILIES: readonly ModelFamily[] = ["deepseek", "qwen", "glm", "kimi", "doubao", "minimax", "gpt", "claude"];
+
+/** 思考模式：缺省跟随模型默认配置，不下发任何思考字段 */
+export type ThinkingMode = "on" | "off";
+
+/** 工具调用轮数缺省值；Agent 达到上限后按截断结束 */
+export const DEFAULT_MAX_TOOL_ROUNDS = 500;
+
+/** 自定义模型各数值字段的合法范围（含端点），前后端校验一致 */
+export const CUSTOM_MODEL_LIMITS = {
+  displayName: 64,
+  contextWindow: { min: 1_024, max: 10_000_000 },
+  maxOutputTokens: { min: 1, max: 1_000_000 },
+  maxToolRounds: { min: 1, max: 10_000 },
+  temperature: { min: 0, max: 2 },
+  topP: { min: 0, max: 1 },
+  topK: { min: 1, max: 100 },
+} as const;
+
+/** 「自定义模型」表单保存的全部设置；只存在于自定义模型配置上，其余配置沿用厂商规则 */
+export interface CustomModelSettings {
+  readonly apiFormat: ApiFormat;
+  /** 按填写的地址原样请求，不再补全协议路径 */
+  readonly fullUrl?: boolean;
+  readonly displayName?: string;
+  readonly family?: ModelFamily;
+  /** 输入上下文窗口（Token），用于界面上下文用量估算 */
+  readonly contextWindow?: number;
+  readonly maxOutputTokens?: number;
+  readonly maxToolRounds?: number;
+  /** 缺省视为支持图片输入 */
+  readonly supportsImage?: boolean;
+  readonly thinking?: ThinkingMode;
+  readonly temperature?: number;
+  readonly topP?: number;
+  readonly topK?: number;
+}
+
+/** 随聊天请求下发给后端的自定义模型参数（界面专用的展示名、上下文窗口、轮数与图片能力不下发） */
+export interface CustomModelRequestOptions {
+  readonly apiFormat: ApiFormat;
+  readonly fullUrl?: true;
+  readonly family?: ModelFamily;
+  readonly maxOutputTokens?: number;
+  readonly thinking?: ThinkingMode;
+  readonly temperature?: number;
+  readonly topP?: number;
+  readonly topK?: number;
+}
+
+type NumericLimit = { readonly min: number; readonly max: number };
+
+function inRange(value: unknown, limit: NumericLimit, integer: boolean): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    (!integer || Number.isInteger(value)) &&
+    value >= limit.min &&
+    value <= limit.max
+  );
+}
+
+function isOneOf<T extends string>(value: unknown, options: readonly T[]): value is T {
+  return typeof value === "string" && (options as readonly string[]).includes(value);
+}
+
+/**
+ * 从 IndexedDB 等边界数据还原自定义模型设置：非法字段逐个丢弃而不是整条作废，
+ * 未知或缺失的协议回退为 Chat Completions；非对象返回 undefined
+ */
+export function normalizeCustomModelSettings(value: unknown): CustomModelSettings | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const limits = CUSTOM_MODEL_LIMITS;
+  const displayName = typeof raw.displayName === "string" ? raw.displayName.trim() : "";
+  return {
+    apiFormat: isOneOf(raw.apiFormat, API_FORMATS) ? raw.apiFormat : "chat_completions",
+    ...(raw.fullUrl === true ? { fullUrl: true } : {}),
+    ...(displayName.length > 0 ? { displayName: [...displayName].slice(0, limits.displayName).join("") } : {}),
+    ...(isOneOf(raw.family, MODEL_FAMILIES) ? { family: raw.family } : {}),
+    ...(inRange(raw.contextWindow, limits.contextWindow, true) ? { contextWindow: raw.contextWindow } : {}),
+    ...(inRange(raw.maxOutputTokens, limits.maxOutputTokens, true) ? { maxOutputTokens: raw.maxOutputTokens } : {}),
+    ...(inRange(raw.maxToolRounds, limits.maxToolRounds, true) ? { maxToolRounds: raw.maxToolRounds } : {}),
+    ...(raw.supportsImage === false ? { supportsImage: false } : {}),
+    ...(raw.thinking === "on" || raw.thinking === "off" ? { thinking: raw.thinking } : {}),
+    ...(inRange(raw.temperature, limits.temperature, false) ? { temperature: raw.temperature } : {}),
+    ...(inRange(raw.topP, limits.topP, false) ? { topP: raw.topP } : {}),
+    ...(inRange(raw.topK, limits.topK, true) ? { topK: raw.topK } : {}),
+  };
+}
+
+export function customModelRequestOptions(settings: CustomModelSettings): CustomModelRequestOptions {
+  return {
+    apiFormat: settings.apiFormat,
+    ...(settings.fullUrl === true ? { fullUrl: true } : {}),
+    ...(settings.family !== undefined ? { family: settings.family } : {}),
+    ...(settings.maxOutputTokens !== undefined ? { maxOutputTokens: settings.maxOutputTokens } : {}),
+    ...(settings.thinking !== undefined ? { thinking: settings.thinking } : {}),
+    ...(settings.temperature !== undefined ? { temperature: settings.temperature } : {}),
+    ...(settings.topP !== undefined ? { topP: settings.topP } : {}),
+    ...(settings.topK !== undefined ? { topK: settings.topK } : {}),
+  };
+}
+
+/** 实际请求地址：完整 URL 原样使用，否则剥掉尾部斜杠后补全协议路径（与后端解析一致） */
+export function resolveCustomEndpoint(baseUrl: string, apiFormat: ApiFormat, fullUrl: boolean): string {
+  const trimmed = baseUrl.trim();
+  return fullUrl ? trimmed : `${trimmed.replace(/\/+$/u, "")}${API_FORMAT_PATHS[apiFormat]}`;
+}
+
 /** IndexedDB llmEntries 表中的一条模型配置；同一厂商可有多条，各用各的 Key */
 export interface LlmSettingsRecord {
   /** 配置 id，兼作桌面端密钥槽名：旧版迁移来的记录为厂商名，新建的为“厂商名~随机后缀” */
@@ -185,6 +310,8 @@ export interface LlmSettingsRecord {
   readonly baseUrl?: string;
   /** 停用后不出现在聊天区模型选择器中；缺省视为启用 */
   readonly disabled?: boolean;
+  /** 「自定义模型」表单的设置；只与 baseUrl 一同存在 */
+  readonly custom?: CustomModelSettings;
 }
 
 /** 发送聊天请求时携带的激活配置（未配置 Key 时为 undefined，走服务端 fallback） */
@@ -195,13 +322,20 @@ export interface ActiveLlmConfig {
   readonly apiKey: string;
   readonly model: string;
   readonly baseUrl?: string;
+  readonly custom?: CustomModelSettings;
+}
+
+/** 配置在列表与模型选择器中的名称：自定义模型优先用展示名 */
+export function entryDisplayModel(entry: { readonly model: string; readonly custom?: CustomModelSettings }): string {
+  return entry.custom?.displayName ?? entry.model;
 }
 
 /**
- * 当前配置能否发送图片：内置预设模型按白名单判断；自定义端点或非内置模型交由上游判定；
- * 未配置（服务端 fallback）视为支持
+ * 当前配置能否发送图片：自定义模型按其「支持图片输入」设置；内置预设模型按白名单判断；
+ * 其余自定义端点或非内置模型交由上游判定；未配置（服务端 fallback）视为支持
  */
 export function supportsImageInput(config: ActiveLlmConfig | undefined): boolean {
+  if (config?.custom !== undefined) return config.custom.supportsImage !== false;
   if (config === undefined || config.baseUrl !== undefined) return true;
   const meta = PROVIDER_METADATA[config.provider];
   return !meta.models.includes(config.model) || meta.imageModels.includes(config.model);

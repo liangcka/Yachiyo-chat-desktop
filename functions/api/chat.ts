@@ -35,6 +35,7 @@ import {
   isAllowedModel,
   isValidApiKey,
 } from "../_shared/providers/registry";
+import { buildCustomModelAdapter } from "../_shared/providers/custom-model";
 
 interface ChatContext {
   request: Request;
@@ -218,12 +219,17 @@ async function handleUserKeyRequest(
   context: ChatContext,
   request: ClientChatRequest,
 ): Promise<Response> {
-  const provider = getProvider(request.provider!);
+  const nativeProvider = getProvider(request.provider!);
   const hasBaseUrl = request.baseUrl !== undefined;
-  // 自定义端点仅支持 OpenAI 兼容协议（Claude/Gemini 为原生协议适配器）
-  if (hasBaseUrl && !provider.isOpenAICompat) {
+  // 自定义端点只挂在 OpenAI 兼容厂商的配置上（Claude/Gemini 为原生协议适配器）
+  if (hasBaseUrl && !nativeProvider.isOpenAICompat) {
     return problemResponse("INVALID_REQUEST", 400);
   }
+  // 自定义模型按所选 API 格式改用对应协议；校验已保证 customModel 与 baseUrl 同时出现
+  const provider =
+    request.customModel !== undefined
+      ? buildCustomModelAdapter(nativeProvider.id, request.customModel)
+      : nativeProvider;
   // 自定义端点信任用户填写的模型名，跳过厂商白名单；原生路径维持白名单约束
   if (!hasBaseUrl && !isAllowedModel(provider, request.model)) {
     return problemResponse("INVALID_REQUEST", 400);

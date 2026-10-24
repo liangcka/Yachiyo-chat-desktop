@@ -72,6 +72,7 @@ describe("SettingsModal", () => {
     onImage: vi.fn(),
     onLlmActivate: vi.fn().mockResolvedValue(undefined),
     onLlmSetEnabled: vi.fn().mockResolvedValue(undefined),
+    onLlmTestConnection: vi.fn().mockResolvedValue(undefined),
     onLlmClear: vi.fn().mockResolvedValue(undefined),
     onLlmSave: vi.fn().mockResolvedValue(undefined),
     onLocale: vi.fn().mockResolvedValue(undefined),

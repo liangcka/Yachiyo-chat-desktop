@@ -1,5 +1,5 @@
 import type { ChatSource, Locale, TokenUsage } from "../domain/chat";
-import { KEYSTORE_MANAGED_API_KEY, type ProviderId } from "../domain/llm";
+import { KEYSTORE_MANAGED_API_KEY, type CustomModelRequestOptions, type ProviderId } from "../domain/llm";
 import { apiCredentials } from "./app-platform";
 import { apiFetch } from "./api-origins";
 import type { ReasoningLevel } from "./reasoning-effort";
@@ -29,6 +29,8 @@ export interface StreamChatRequest {
   baseUrl?: string;
   /** 桌面端：Key 由网关从加密存储取用时指明配置对应的密钥槽 */
   keySlot?: string;
+  /** 自定义模型的线路协议与采样参数；仅与 baseUrl 同时出现 */
+  customModel?: CustomModelRequestOptions;
   /** 开启后服务端先执行联网搜索并下发 sources 事件（仅普通聊天，summary 不携带） */
   webSearch?: boolean;
   /** 智能搜索：联网搜索开启时启用双市场并行检索（结果更多、带发布日期） */

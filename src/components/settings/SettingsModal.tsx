@@ -886,6 +886,7 @@ export function SettingsModal({
                 onClose={onClose}
                 onSave={shared.onLlmSave}
                 onSetEnabled={shared.onLlmSetEnabled}
+                onTestConnection={shared.onLlmTestConnection}
                 open={true}
               />
             </div>

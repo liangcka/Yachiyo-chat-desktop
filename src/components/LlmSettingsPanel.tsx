@@ -1,7 +1,6 @@
 import {
   Boxes,
   ChevronRight,
-  Download,
   Edit3,
   Eye,
   EyeOff,
@@ -19,17 +18,19 @@ import {
   KEYSTORE_MANAGED_API_KEY,
   MODEL_VENDORS,
   PROVIDER_METADATA,
+  entryDisplayModel,
   findVendorForEntry,
   getProviderMeta,
   isValidApiKey,
   isValidBaseUrl,
+  type CustomModelSettings,
   type ModelVendorItem,
   type ProviderId,
 } from "../domain/llm";
 import type { Locale } from "../domain/chat";
 import { useLocale } from "../i18n/locale-context";
 import type { UiCopy } from "../i18n/messages";
-import { fetchModelList } from "../services/model-list";
+import { CustomModelForm } from "./settings/CustomModelForm";
 
 export interface LlmProviderEntry {
   /** 配置 id：同一厂商可有多条配置，各自独立的 Key */
@@ -39,6 +40,8 @@ export interface LlmProviderEntry {
   model: string;
   baseUrl?: string;
   disabled?: boolean;
+  /** 「自定义模型」表单的设置；存在即表示该配置按自定义模型编辑 */
+  custom?: CustomModelSettings;
 }
 
 /** 保存表单提交的配置；id 缺省表示新建一条，不覆盖已有配置 */
@@ -48,6 +51,7 @@ export interface LlmEntryDraft {
   apiKey: string;
   model: string;
   baseUrl?: string;
+  custom?: CustomModelSettings;
 }
 
 export interface LlmSettingsPanelProps {
@@ -62,6 +66,8 @@ export interface LlmSettingsPanelProps {
   onClear: (id: string) => Promise<void>;
   onActivate: (id: string) => Promise<void>;
   onSetEnabled: (id: string, enabled: boolean) => Promise<void>;
+  /** 自定义模型保存前的连通性测试；失败时抛出带说明的错误 */
+  onTestConnection?: (draft: LlmEntryDraft) => Promise<void>;
 }
 
 const zhCopy = {
@@ -99,7 +105,6 @@ const zhCopy = {
   customModel: "自定义模型",
   configureModel: "配置模型",
   closeConfigBackdrop: "关闭配置遮罩",
-  configureCustom: "配置自定义模型 (OpenAI Compatible)",
   configureVendor: (name: string) => `配置 ${name}`,
   vendorFallback: "服务商",
   closeConfig: "关闭配置弹窗",
@@ -111,14 +116,8 @@ const zhCopy = {
   keySource: (source: string) => `在 ${source} 获取 API Key`,
   keySourceFallback: "在服务商开放平台获取 API Key",
   modelId: "模型名称 (Model ID) *",
-  customModelPlaceholder: "如 ox-alpha / qwen-turbo",
   modelIdPlaceholder: "模型 ID",
   presets: "可选推荐:",
-  fetchModels: "获取模型列表",
-  fetchingModels: "获取中…",
-  fetchedModels: (count: number) => `端点提供 ${count} 个模型:`,
-  fetchModelsEmpty: "端点未返回模型，请直接填写模型名称",
-  fetchModelsFailed: "获取模型列表失败，请检查 API 端点与 Key，或直接填写模型名称",
   baseUrl: "API 端点 (Base URL)",
   baseUrlPlaceholder: "如 https://api.openai.com/v1",
   cancel: "取消",
@@ -163,7 +162,6 @@ const jaCopy: PanelCopy = {
   customModel: "カスタムモデル",
   configureModel: "モデルを設定",
   closeConfigBackdrop: "設定の背景を閉じる",
-  configureCustom: "カスタムモデルを設定 (OpenAI 互換)",
   configureVendor: (name) => `${name} を設定`,
   vendorFallback: "プロバイダー",
   closeConfig: "設定ダイアログを閉じる",
@@ -175,14 +173,8 @@ const jaCopy: PanelCopy = {
   keySource: (source) => `${source} で API キーを取得できます`,
   keySourceFallback: "プロバイダーの開発者コンソールで API キーを取得できます",
   modelId: "モデル名 (Model ID) *",
-  customModelPlaceholder: "例: ox-alpha / qwen-turbo",
   modelIdPlaceholder: "モデル ID",
   presets: "おすすめ:",
-  fetchModels: "モデル一覧を取得",
-  fetchingModels: "取得中…",
-  fetchedModels: (count) => `エンドポイントのモデル（${count} 件）:`,
-  fetchModelsEmpty: "エンドポイントからモデルが返されませんでした。モデル名を直接入力してください",
-  fetchModelsFailed: "モデル一覧を取得できませんでした。API エンドポイントとキーを確認するか、モデル名を直接入力してください",
   baseUrl: "API エンドポイント (Base URL)",
   baseUrlPlaceholder: "例: https://api.openai.com/v1",
   cancel: "キャンセル",
@@ -212,6 +204,7 @@ export function LlmSettingsPanel({
   onClear,
   onActivate,
   onSetEnabled,
+  onTestConnection,
 }: LlmSettingsPanelProps) {
   const t = PANEL_COPY[useLocale()];
   const activeEntry = entries.find((entry) => entry.id === activeEntryId);
@@ -231,10 +224,6 @@ export function LlmSettingsPanel({
   const [targetVendor, setTargetVendor] = useState<ModelVendorItem | null>(null);
   const [isCustomModel, setIsCustomModel] = useState(false);
   const [customBaseUrl, setCustomBaseUrl] = useState("");
-  const [customModelName, setCustomModelName] = useState("");
-  // 自定义端点 /models 返回的模型列表；undefined 表示尚未获取
-  const [fetchedModels, setFetchedModels] = useState<readonly string[]>();
-  const [modelsStatus, setModelsStatus] = useState<"idle" | "loading" | "error">("idle");
   // 配置弹窗正在编辑的配置 id；undefined 表示新建一条
   const [editingId, setEditingId] = useState<string>();
 
@@ -291,11 +280,6 @@ export function LlmSettingsPanel({
     }
   };
 
-  const resetFetchedModels = () => {
-    setFetchedModels(undefined);
-    setModelsStatus("idle");
-  };
-
   const handleOpenAddModal = () => {
     setModalMode("add");
     setTargetVendor(null);
@@ -312,7 +296,6 @@ export function LlmSettingsPanel({
     setApiKeyInput("");
     setModelInput(vendor.defaultModel);
     setCustomBaseUrl(vendor.defaultBaseUrl ?? "");
-    resetFetchedModels();
     setModalMode("config");
   };
 
@@ -320,13 +303,6 @@ export function LlmSettingsPanel({
     setIsCustomModel(true);
     setTargetVendor(null);
     setEditingId(undefined);
-    setSelectedProvider("openai");
-    setPrevSyncKey({ provider: "openai", entries });
-    setApiKeyInput("");
-    setCustomModelName("ox-alpha");
-    setModelInput("ox-alpha");
-    setCustomBaseUrl("https://api.openai.com/v1");
-    resetFetchedModels();
     setModalMode("config");
   };
 
@@ -334,40 +310,27 @@ export function LlmSettingsPanel({
     const entry = entries.find((item) => item.id === id);
     if (entry === undefined) return;
     const matchedVendor = findVendorForEntry(entry.provider, entry.baseUrl);
-    // 端点不属于任何服务商卡片的配置来自「自定义模型」，按自定义表单编辑
-    const isCustom = matchedVendor === undefined && entry.baseUrl !== undefined;
+    // 带自定义模型设置、或端点不属于任何服务商卡片（旧版自定义模型）的配置，按自定义表单编辑
+    const isCustom = entry.custom !== undefined || (matchedVendor === undefined && entry.baseUrl !== undefined);
     const vendor =
       matchedVendor ??
       MODEL_VENDORS.find((v) => v.mappedProvider === entry.provider) ??
       MODEL_VENDORS[0];
     setTargetVendor(isCustom ? null : vendor);
     setIsCustomModel(isCustom);
-    setCustomModelName(entry.model);
     setEditingId(id);
     setSelectedProvider(entry.provider);
     setPrevSyncKey({ provider: entry.provider, entries });
     setApiKeyInput(keyInputFor(entry));
     setModelInput(entry.model || vendor.defaultModel);
     setCustomBaseUrl(entry.baseUrl ?? vendor.defaultBaseUrl ?? "");
-    resetFetchedModels();
     setModalMode("config");
   };
 
-  const handleSaveModal = async () => {
-    const finalModel = isCustomModel
-      ? customModelName.trim() || "custom-model"
-      : modelInput.trim();
-    // Base URL 仅在自定义模型或带默认端点的厂商配置中采集，其余保持 undefined 走原生端点
-    const finalBaseUrl = customBaseUrl.trim() || undefined;
+  const saveAndActivate = async (draft: LlmEntryDraft) => {
     await runAction(
       async () => {
-        const savedId = await onSave({
-          ...(editingId !== undefined ? { id: editingId } : {}),
-          provider: selectedProvider,
-          apiKey: keyToSave,
-          model: finalModel,
-          ...(finalBaseUrl !== undefined ? { baseUrl: finalBaseUrl } : {}),
-        });
+        const savedId = await onSave(draft);
         await onActivate(savedId);
       },
       copy.llmSaved,
@@ -375,20 +338,16 @@ export function LlmSettingsPanel({
     setModalMode(null);
   };
 
-  const handleFetchModels = async () => {
-    setModelsStatus("loading");
-    try {
-      const models = await fetchModelList({
-        baseUrl: customBaseUrl,
-        ...(keyToSave !== KEYSTORE_MANAGED_API_KEY ? { apiKey: keyToSave } : {}),
-        ...(editingId !== undefined ? { slot: editingId } : {}),
-      });
-      setFetchedModels(models);
-      setModelsStatus("idle");
-    } catch {
-      setFetchedModels(undefined);
-      setModelsStatus("error");
-    }
+  const handleSaveModal = async () => {
+    // Base URL 仅在带默认端点的厂商配置中采集，其余保持 undefined 走原生端点
+    const finalBaseUrl = customBaseUrl.trim() || undefined;
+    await saveAndActivate({
+      ...(editingId !== undefined ? { id: editingId } : {}),
+      provider: selectedProvider,
+      apiKey: keyToSave,
+      model: modelInput.trim(),
+      ...(finalBaseUrl !== undefined ? { baseUrl: finalBaseUrl } : {}),
+    });
   };
 
   const handleToggleEnabled = (id: string, enabled: boolean) => {
@@ -413,10 +372,12 @@ export function LlmSettingsPanel({
     isEnabled: boolean;
   }> = entries.map((entry) => ({
     id: entry.id,
-    modelName: entry.model || getProviderMeta(entry.provider).defaultModel,
+    modelName: entryDisplayModel(entry) || getProviderMeta(entry.provider).defaultModel,
     // 原生端点沿用厂商名；OpenAI 兼容的自定义端点显示各自服务商名（Kimi、通义等），便于区分同厂商的多条配置
     providerLabel:
-      entry.baseUrl === undefined
+      entry.custom !== undefined
+        ? t.customModel
+        : entry.baseUrl === undefined
         ? PROVIDER_METADATA[entry.provider].label
         : findVendorForEntry(entry.provider, entry.baseUrl)?.name ?? PROVIDER_METADATA[entry.provider].label,
     providerId: entry.provider,
@@ -737,10 +698,20 @@ export function LlmSettingsPanel({
             onClick={() => setModalMode(null)}
             aria-label={t.closeConfigBackdrop}
           />
+          {isCustomModel ? (
+            <CustomModelForm
+              entry={entries.find((entry) => entry.id === editingId)}
+              busy={busy}
+              onBack={() => setModalMode("add")}
+              onClose={() => setModalMode(null)}
+              onSubmit={saveAndActivate}
+              {...(onTestConnection !== undefined ? { onTestConnection } : {})}
+            />
+          ) : (
           <div className="model-modal-card model-modal-card--form">
             <div className="model-modal-card__header">
               <h3 className="model-modal-card__title">
-                {isCustomModel ? t.configureCustom : t.configureVendor(targetVendor?.name ?? t.vendorFallback)}
+                {t.configureVendor(targetVendor?.name ?? t.vendorFallback)}
               </h3>
               <button
                 type="button"
@@ -787,90 +758,37 @@ export function LlmSettingsPanel({
               {/* 模型选择 / 自定义输入 */}
               <div className="model-form-field">
                 <label htmlFor="model-cfg-model-name" className="model-form-label">{t.modelId}</label>
-                {isCustomModel ? (
-                  <div className="model-form-input-row">
-                    <input
-                      id="model-cfg-model-name"
-                      type="text"
-                      className="model-form-input"
-                      placeholder={t.customModelPlaceholder}
-                      value={customModelName}
-                      onChange={(e) => setCustomModelName(e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="settings-btn settings-btn--ghost model-form-fetch-btn"
-                      disabled={
-                        modelsStatus === "loading" || trimmedBaseUrl.length === 0 || !isBaseUrlValid || !isKeyValid
-                      }
-                      onClick={() => void handleFetchModels()}
-                    >
-                      <Download size={14} />
-                      <span>{modelsStatus === "loading" ? t.fetchingModels : t.fetchModels}</span>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="model-form-input-wrap">
-                    <input
-                      id="model-cfg-model-name"
-                      type="text"
-                      className="model-form-input"
-                      value={modelInput}
-                      onChange={(e) => setModelInput(e.target.value)}
-                      placeholder={targetVendor?.defaultModel || t.modelIdPlaceholder}
-                    />
-                  </div>
-                )}
-                {isCustomModel && modelsStatus === "error" && (
-                  <span className="model-form-hint" role="alert">{t.fetchModelsFailed}</span>
-                )}
-                {isCustomModel && fetchedModels !== undefined && fetchedModels.length === 0 && (
-                  <span className="model-form-hint">{t.fetchModelsEmpty}</span>
-                )}
-                {isCustomModel && fetchedModels !== undefined && fetchedModels.length > 0 && (
-                  <div className="model-preset-tags model-preset-tags--scroll">
+                <div className="model-form-input-wrap">
+                  <input
+                    id="model-cfg-model-name"
+                    type="text"
+                    className="model-form-input"
+                    value={modelInput}
+                    onChange={(e) => setModelInput(e.target.value)}
+                    placeholder={targetVendor?.defaultModel || t.modelIdPlaceholder}
+                  />
+                </div>
+                {targetVendor?.models && targetVendor.models.length > 0 && (
+                  <div className="model-preset-tags">
                     <span style={{ fontSize: 11, color: "var(--dsw-alias-label-tertiary)" }}>
-                      {t.fetchedModels(fetchedModels.length)}
+                      {t.presets}
                     </span>
-                    {fetchedModels.map((m) => (
+                    {targetVendor.models.slice(0, 8).map((m) => (
                       <button
                         key={m}
                         type="button"
-                        className={`model-tag-pill ${customModelName === m ? "model-tag-pill--active" : ""}`}
-                        onClick={() => setCustomModelName(m)}
+                        className={`model-tag-pill ${modelInput === m ? "model-tag-pill--active" : ""}`}
+                        onClick={() => setModelInput(m)}
                       >
                         {m}
                       </button>
                     ))}
                   </div>
                 )}
-                {targetVendor?.models && targetVendor.models.length > 0 && (
-                  <div className="model-preset-tags">
-                    <span style={{ fontSize: 11, color: "var(--dsw-alias-label-tertiary)" }}>
-                      {t.presets}
-                    </span>
-                    {targetVendor.models.slice(0, 8).map((m) => {
-                      const isActive = (isCustomModel ? customModelName : modelInput) === m;
-                      return (
-                        <button
-                          key={m}
-                          type="button"
-                          className={`model-tag-pill ${isActive ? "model-tag-pill--active" : ""}`}
-                          onClick={() => {
-                            if (isCustomModel) setCustomModelName(m);
-                            else setModelInput(m);
-                          }}
-                        >
-                          {m}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
 
-              {/* Base URL (针对自定义或中转) */}
-              {(isCustomModel || targetVendor?.defaultBaseUrl) && (
+              {/* Base URL（带默认端点的中转厂商） */}
+              {targetVendor?.defaultBaseUrl && (
                 <div className="model-form-field">
                   <label htmlFor="model-cfg-base-url" className="model-form-label">{t.baseUrl}</label>
                   <input
@@ -909,6 +827,7 @@ export function LlmSettingsPanel({
               </div>
             </div>
           </div>
+          )}
         </div>
       )}
     </div>
