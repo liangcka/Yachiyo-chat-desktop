@@ -252,7 +252,7 @@ describe("LlmSettingsPanel", () => {
     await openCustomForm(user);
     expect(screen.getByRole("dialog", { name: "配置模型" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "自定义模型" })).toBeInTheDocument();
-    expect(screen.getByLabelText("API 格式")).toHaveValue("chat_completions");
+    expect(screen.getByLabelText("API 格式")).toHaveTextContent("OpenAI Chat Completions 格式");
     expect(screen.getByText(/\/chat\/completions 将会被补充/u)).toBeInTheDocument();
 
     await fillRequired(user);
@@ -298,13 +298,15 @@ describe("LlmSettingsPanel", () => {
     mount({ onSave });
 
     await openCustomForm(user);
-    await user.selectOptions(screen.getByLabelText("API 格式"), "anthropic_messages");
+    await user.click(screen.getByLabelText("API 格式"));
+    await user.click(screen.getByRole("option", { name: "Anthropic Messages 格式" }));
     expect(screen.getByText(/\/messages 将会被补充/u)).toBeInTheDocument();
     await fillRequired(user);
     await user.click(screen.getByRole("switch", { name: "完整 URL" }));
 
     await user.click(screen.getByRole("button", { name: /高级配置/u }));
-    await user.selectOptions(screen.getByLabelText("模型系列"), "claude");
+    await user.click(screen.getByLabelText("模型系列"));
+    await user.click(screen.getByRole("option", { name: "Claude（Anthropic）" }));
     await user.click(screen.getByRole("button", { name: "输入 填入 256k" }));
     await user.click(screen.getByRole("button", { name: "输出 填入 32k" }));
     await user.clear(screen.getByLabelText("工具调用轮数"));
@@ -419,7 +421,7 @@ describe("LlmSettingsPanel", () => {
     await user.click(screen.getByLabelText("编辑 my-model"));
     expect(screen.getByRole("heading", { name: "编辑自定义模型" })).toBeInTheDocument();
     expect(screen.getByLabelText("模型 ID")).toHaveValue("my-model");
-    expect(screen.getByLabelText("API 格式")).toHaveValue("chat_completions");
+    expect(screen.getByLabelText("API 格式")).toHaveTextContent("OpenAI Chat Completions 格式");
 
     await user.click(screen.getByRole("button", { name: "获取模型列表" }));
     expect(fetchModelList).toHaveBeenCalledWith({ baseUrl: "https://llm.example.com/v1", slot: "openai~custom01" });

@@ -35,7 +35,7 @@ describe("MessageContent 过程摘要", () => {
     fireEvent.click(summary);
     const process = container.querySelector(".message-process__content")!;
     expect([...process.children].map((node) => node.textContent)).toEqual([
-      "思考了不到 1 秒", "先检查。", expect.stringContaining("已运行 1 步"),
+      "思考了不到 1 秒", "先检查。", expect.stringContaining("读取 config.ts"),
       "已检查。", expect.stringContaining("1 步失败"), "思考了 1 秒",
     ]);
     expect(screen.getByText("先检查。")).toBeVisible();
@@ -184,11 +184,27 @@ describe("MessageContent 过程摘要", () => {
     expect(screen.queryByText(/0 秒で処理/)).not.toBeInTheDocument();
   });
 
+  it("只有命令步骤收进「已运行」组，搜索与读规则等步骤直接成行并保持顺序", () => {
+    const done = { output: "ok", isError: false, durationMs: 1 };
+    const message = agentMessage({ status: "streaming", text: "", thought: "", toolSteps: [
+      { id: "s", name: "web_search", argumentsJson: '{"query":"galgame 存档界面"}', result: done },
+      { id: "a", name: "run_command", argumentsJson: '{"command":"a"}', result: done },
+      { id: "b", name: "run_command", argumentsJson: '{"command":"b"}', result: done },
+      { id: "g", name: "read_guideline", argumentsJson: '{"id":"search_instructions"}', result: done },
+    ], contentSegments: ["s", "a", "b", "g"].map((toolId) => ({ type: "tool" as const, toolId })) });
+    const { container } = render(<MessageContent message={message} locale="zh-CN" hideCitations={false} />);
+    expect([...container.children].map((node) => node.className)).toEqual([
+      "message-tool-step", "message-tool-group", "message-tool-step",
+    ]);
+    expect(container.querySelector(".message-tool-group")).toHaveTextContent("已运行 2 步");
+    expect(screen.getByText(/联网搜索「galgame 存档界面」/u)).toBeVisible();
+  });
+
   it("工具组运行中显示正在运行 N 步，结束后显示已运行 N 步", () => {
     const streamingMessage = agentMessage({
       status: "streaming",
       toolSteps: [
-        { id: "one", name: "read_file", argumentsJson: '{"path":"config.ts"}' },
+        { id: "one", name: "run_command", argumentsJson: '{"command":"check"}' },
       ],
       contentSegments: [
         { type: "tool", toolId: "one" },
@@ -203,7 +219,7 @@ describe("MessageContent 过程摘要", () => {
     const completedMessage = agentMessage({
       status: "streaming",
       toolSteps: [
-        { id: "one", name: "read_file", argumentsJson: '{"path":"config.ts"}', result: { output: "ok", isError: false, durationMs: 10 } },
+        { id: "one", name: "run_command", argumentsJson: '{"command":"check"}', result: { output: "ok", isError: false, durationMs: 10 } },
       ],
       contentSegments: [
         { type: "tool", toolId: "one" },

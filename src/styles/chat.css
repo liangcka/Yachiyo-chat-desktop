@@ -317,21 +317,24 @@
   border: 1px solid var(--yx-specific-bubble-user-border);
 }
 
-/* 用户图片以独立圆角卡片呈现在文字气泡上方 */
+/* 用户图片以固定尺寸的圆角缩略卡片呈现在文字气泡上方，裁切填满，点开再看原图；
+   不定尺寸时按钮会按图片原始宽度撑开，缩小后的图片在按钮里靠左，与气泡右缘错位 */
 .message-bubble--user .message-bubble__image-button,
 .message-bubble--user .message-bubble__image {
+  width: 12.5rem;
+  max-width: 100%;
+  height: 6.75rem;
   margin-bottom: 0;
   border-radius: 14px;
 }
 
 .message-bubble--user .message-bubble__image {
-  max-width: min(100%, 22rem);
-  max-height: 16rem;
+  max-height: none;
   object-fit: cover;
 }
 
 .message-bubble--user .message-bubble__image--loading {
-  width: 16rem;
+  min-height: 0;
 }
 
 /* 助手消息：Codex 式无底通栏纯文本，直接落于对话背景上 */

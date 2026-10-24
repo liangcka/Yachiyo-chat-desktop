@@ -513,23 +513,25 @@ export function DesktopChatArea({
         {/* 图片附件预览轨道 */}
         {pendingImageDataUrl || controller.pendingImage ? (
           <div className="dsh-composer-card__attachment">
-            <img
-              src={pendingImageDataUrl || "blob:mock-image"}
-              alt={isJapanese ? "送信予定の画像" : "待发送图片"}
-              className="dsh-composer-card__attachment-img"
-            />
-            <button
-              type="button"
-              className="dsh-composer-card__attachment-remove"
-              onClick={() => {
-                controller.setPendingImage(undefined);
-                setPendingImageDataUrl(undefined);
-              }}
-              title={isJapanese ? "画像を削除" : "移除图片"}
-              aria-label={isJapanese ? "画像を削除" : "移除图片"}
-            >
-              &times;
-            </button>
+            <div className="dsh-composer-card__attachment-thumb">
+              <img
+                src={pendingImageDataUrl || "blob:mock-image"}
+                alt={isJapanese ? "送信予定の画像" : "待发送图片"}
+                className="dsh-composer-card__attachment-img"
+              />
+              <button
+                type="button"
+                className="dsh-composer-card__attachment-remove"
+                onClick={() => {
+                  controller.setPendingImage(undefined);
+                  setPendingImageDataUrl(undefined);
+                }}
+                title={isJapanese ? "画像を削除" : "移除图片"}
+                aria-label={isJapanese ? "画像を削除" : "移除图片"}
+              >
+                <X size={11} strokeWidth={2.6} aria-hidden="true" />
+              </button>
+            </div>
           </div>
         ) : null}
 

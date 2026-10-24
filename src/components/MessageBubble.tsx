@@ -28,6 +28,9 @@ export interface MessageBubbleProps {
   pendingToolName?: string;
 }
 
+/** 与 .message-bubble__edit--closing 的退场动画时长一致 */
+const EDIT_EXIT_MS = 140;
+
 function messageLabel(role: ChatMessage["role"], locale: Locale): string {
   if (locale === "ja-JP") return role === "assistant" ? "八千代の返事" : "あなたのメッセージ";
   return role === "assistant" ? "八千代的回复" : "我的消息";
@@ -58,11 +61,15 @@ export const MessageBubble = memo(function MessageBubble({
   pendingToolName,
 }: MessageBubbleProps) {
   const [editing, setEditing] = useState(false);
+  const [editClosing, setEditClosing] = useState(false);
+  const [bubbleReturning, setBubbleReturning] = useState(false);
   const [editText, setEditText] = useState(message.text);
+  const editCloseTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [placement, setPlacement] = useState<"top" | "bottom">("top");
   const bubbleRef = useRef<HTMLElement>(null);
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pointerStartPosRef = useRef<{ x: number; y: number } | null>(null);
   const ignoreNextClickRef = useRef(false);
@@ -91,6 +98,52 @@ export const MessageBubble = memo(function MessageBubble({
       setIsLongUserMessage(false);
     }
   }, [displayText, message.role]);
+
+  // 进入编辑即聚焦并把光标放到末尾
+  useEffect(() => {
+    if (!editing) return;
+    const el = editTextareaRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [editing]);
+
+  // 编辑框随内容增高，超出上限后在框内滚动。先量出目标高度再从旧高度起跳，CSS 的 height 过渡才有起点；
+  // 未到上限时隐藏滚动条，否则过渡途中内容暂时高于框体会闪出滚动条
+  useEffect(() => {
+    const el = editTextareaRef.current;
+    if (!editing || !el) return;
+    const previous = el.style.height;
+    el.style.height = "auto";
+    const target = el.scrollHeight;
+    const next = `${target}px`;
+    if (previous && previous !== next) {
+      el.style.height = previous;
+      void el.offsetHeight;
+    }
+    el.style.height = next;
+    el.style.overflowY = target > parseFloat(window.getComputedStyle(el).maxHeight) ? "auto" : "hidden";
+  }, [editing, editText]);
+
+  useEffect(() => () => clearTimeout(editCloseTimerRef.current), []);
+
+  const openEdit = () => {
+    clearTimeout(editCloseTimerRef.current);
+    setEditClosing(false);
+    setEditText(message.text);
+    setEditing(true);
+  };
+
+  // 收起编辑框先播放退场动画，结束后换回气泡并让气泡做一次回弹入场
+  const closeEdit = () => {
+    if (editClosing) return;
+    setEditClosing(true);
+    editCloseTimerRef.current = setTimeout(() => {
+      setEditing(false);
+      setEditClosing(false);
+      setBubbleReturning(true);
+    }, EDIT_EXIT_MS);
+  };
 
   const hasText = displayText.trim().length > 0;
   const hasImage = message.imageId !== undefined;
@@ -160,7 +213,7 @@ export const MessageBubble = memo(function MessageBubble({
     };
   }, [menuOpen]);
 
-  // 菜单只服务触屏长按；鼠标端的操作统一放在悬停操作条，避免右键与悬停重复两套入口
+  // 长按菜单只服务触屏：鼠标端的撤回已在悬停操作条里，右键不再弹出重复的菜单
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.pointerType === "mouse") return;
     pointerStartPosRef.current = { x: e.clientX, y: e.clientY };
@@ -194,6 +247,12 @@ export const MessageBubble = memo(function MessageBubble({
     setTimeout(() => {
       ignoreNextClickRef.current = false;
     }, 120);
+  };
+
+  const submitEdit = () => {
+    if (!editText.trim() || editClosing) return;
+    onEdit?.(message.id, editText);
+    closeEdit();
   };
 
   const handleCopy = async (e?: React.MouseEvent) => {
@@ -238,7 +297,7 @@ export const MessageBubble = memo(function MessageBubble({
           : message.status === "complete" && hasToolSteps && endedOnTool
             ? copyFor(locale).runNoFinalAnswer
             : undefined;
-  const hasMenuOptions = onRecall !== undefined || (!isStreamingMessage && (onRegenerate !== undefined || hasText));
+  const hasMenuOptions = onRecall !== undefined;
   const showVersions = Boolean(hasVersions && !isGenerating && !isStreamingMessage);
   const showCopy = Boolean(hasText && !isStreamingMessage);
   const showRegenerate = Boolean(onRegenerate !== undefined && !isStreamingMessage);
@@ -280,16 +339,38 @@ export const MessageBubble = memo(function MessageBubble({
         )
       ) : null}
       {editing ? (
-        <form className={`message-bubble__edit${message.role === "user" ? " message-bubble__user-bubble" : ""}`} onSubmit={(event) => { event.preventDefault(); if (editText.trim()) { onEdit?.(message.id, editText); setEditing(false); } }}>
-          <textarea aria-label={locale === "ja-JP" ? "メッセージを編集" : "编辑消息"} value={editText} onChange={(event) => setEditText(event.target.value)} />
-          <div><button type="button" onClick={() => setEditing(false)}>{locale === "ja-JP" ? "キャンセル" : "取消"}</button><button type="submit" disabled={!editText.trim()}>{locale === "ja-JP" ? "保存して再生成" : "保存并重新生成"}</button></div>
+        <form className={`message-bubble__edit${editClosing ? " message-bubble__edit--closing" : ""}`} onSubmit={(event) => { event.preventDefault(); submitEdit(); }}>
+          <textarea
+            ref={editTextareaRef}
+            aria-label={locale === "ja-JP" ? "メッセージを編集" : "编辑消息"}
+            rows={1}
+            value={editText}
+            onChange={(event) => setEditText(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                // 只退出编辑，不让外层的 Escape 监听（停止生成、关弹窗）一并触发
+                event.stopPropagation();
+                closeEdit();
+              } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                event.preventDefault();
+                submitEdit();
+              }
+            }}
+          />
+          <div className="message-bubble__edit-actions">
+            <button type="button" className="message-bubble__edit-cancel" onClick={closeEdit}>{locale === "ja-JP" ? "キャンセル" : "取消"}</button>
+            <button type="submit" className="message-bubble__edit-save" disabled={!editText.trim()}>{locale === "ja-JP" ? "保存して再生成" : "保存并重新生成"}</button>
+          </div>
         </form>
       ) : isEmpty && message.status === "failed" && message.role === "assistant" ? (
         <p>{locale === "ja-JP" ? "返信を生成できませんでした。" : "本次回复未生成。"}</p>
       ) : message.role === "assistant" ? (
         <MessageContent message={message} locale={locale} hideCitations={hideCitations} pendingPermission={pendingPermission} pendingToolName={pendingToolName} />
       ) : hasText ? (
-        <div className="message-bubble__user-bubble">
+        <div
+          className={`message-bubble__user-bubble${bubbleReturning ? " message-bubble__user-bubble--returning" : ""}`}
+          onAnimationEnd={() => setBubbleReturning(false)}
+        >
         <div
           ref={userContentRef}
           className={`message-bubble__user-content${
@@ -363,7 +444,7 @@ export const MessageBubble = memo(function MessageBubble({
               <Copy size={13} />
             </button>
           ) : null}
-          {onEdit ? <button type="button" title={locale === "ja-JP" ? "メッセージを編集" : "编辑消息"} aria-label={locale === "ja-JP" ? "メッセージを編集" : "编辑消息"} onClick={() => { setEditText(message.text); setEditing(true); }}><Pencil size={13} /></button> : null}
+          {onEdit ? <button type="button" title={locale === "ja-JP" ? "メッセージを編集" : "编辑消息"} aria-label={locale === "ja-JP" ? "メッセージを編集" : "编辑消息"} onClick={openEdit}><Pencil size={13} /></button> : null}
           {onRecall !== undefined ? (
             <button type="button" onClick={handleRecallAction} title={copyFor(locale).recall} aria-label={copyFor(locale).recall}>
               <RotateCcw size={13} />
@@ -382,45 +463,16 @@ export const MessageBubble = memo(function MessageBubble({
           className={`message-bubble__context-menu message-bubble__context-menu--${message.role} message-bubble__context-menu--${placement}`}
           role="menu"
         >
-          {showRegenerate ? (
-            <button
-              aria-label={copyFor(locale).regenerate}
-              className="message-bubble__context-item message-bubble__context-item--regenerate"
-              onClick={handleRegenerateAction}
-              role="menuitem"
-              type="button"
-            >
-              <RotateCw aria-hidden="true" size={13} strokeWidth={2.2} />
-              <span>{copyFor(locale).regenerate}</span>
-            </button>
-          ) : null}
-          {onRecall !== undefined ? (
-            <button
-              aria-label={copyFor(locale).recall}
-              className="message-bubble__context-item message-bubble__context-item--recall"
-              onClick={handleRecallAction}
-              role="menuitem"
-              type="button"
-            >
-              <RotateCcw aria-hidden="true" size={13} strokeWidth={2.2} />
-              <span>{copyFor(locale).recall}</span>
-            </button>
-          ) : null}
-          {(showRegenerate || onRecall !== undefined) && showCopy ? (
-            <span aria-hidden="true" className="message-bubble__context-divider" />
-          ) : null}
-          {showCopy ? (
-            <button
-              aria-label={copyFor(locale).copyText}
-              className="message-bubble__context-item"
-              onClick={handleCopy}
-              role="menuitem"
-              type="button"
-            >
-              <Copy aria-hidden="true" size={13} strokeWidth={2.2} />
-              <span>{copyFor(locale).copyText}</span>
-            </button>
-          ) : null}
+          <button
+            aria-label={copyFor(locale).recall}
+            className="message-bubble__context-item message-bubble__context-item--recall"
+            onClick={handleRecallAction}
+            role="menuitem"
+            type="button"
+          >
+            <RotateCcw aria-hidden="true" size={13} strokeWidth={2.2} />
+            <span>{copyFor(locale).recall}</span>
+          </button>
         </div>
       )}
       {previewOpen && imageUrl !== undefined ? <ImageLightbox src={imageUrl} onClose={() => setPreviewOpen(false)} /> : null}

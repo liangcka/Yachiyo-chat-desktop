@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "../domain/chat";
 import { MessageBubble } from "./MessageBubble";
 
@@ -25,5 +25,22 @@ describe("MessageBubble", () => {
 
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "图像全屏预览" })).not.toBeInTheDocument();
+  });
+
+  it("edits in place: focuses the textarea, Esc cancels and Ctrl+Enter saves", async () => {
+    const user = userEvent.setup();
+    const onEdit = vi.fn();
+    render(<MessageBubble locale="zh-CN" message={imageMessage} imageUrl="blob:image-1" onEdit={onEdit} />);
+
+    await user.click(screen.getByRole("button", { name: "编辑消息" }));
+    expect(screen.getByRole("textbox", { name: "编辑消息" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "编辑消息" })).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "编辑消息" }));
+    await user.keyboard("吗{Control>}{Enter}{/Control}");
+    expect(onEdit).toHaveBeenCalledOnce();
+    expect(onEdit).toHaveBeenCalledWith("user-1", "看看这张吗");
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "编辑消息" })).not.toBeInTheDocument());
   });
 });

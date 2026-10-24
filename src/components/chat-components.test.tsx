@@ -204,7 +204,7 @@ describe("reference chat components", () => {
       status: "streaming",
       text: "",
       toolSteps: [
-        { id: "step1", name: "read_file", argumentsJson: JSON.stringify({ path: "test.txt" }) },
+        { id: "step1", name: "run_command", argumentsJson: JSON.stringify({ command: "check" }) },
       ],
       contentSegments: [{ type: "tool", toolId: "step1" }],
     });
@@ -218,8 +218,8 @@ describe("reference chat components", () => {
       toolSteps: [
         {
           id: "step1",
-          name: "read_file",
-          argumentsJson: JSON.stringify({ path: "test.txt" }),
+          name: "run_command",
+          argumentsJson: JSON.stringify({ command: "check" }),
           result: { output: "content", isError: false, durationMs: 12 },
         },
       ],
@@ -352,7 +352,7 @@ describe("reference chat components", () => {
     expect(conversation!.scrollTop).toBe(1_000);
   });
 
-  it("shows recall in the hover bar of the latest user message, right-click opens no custom menu, touch long-press does", () => {
+  it("shows recall in the hover bar of the latest user message; right-click opens no custom menu, touch long-press does", () => {
     const onRecall = vi.fn();
     const messages: ChatMessage[] = [
       {

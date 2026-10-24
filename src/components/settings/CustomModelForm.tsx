@@ -18,6 +18,7 @@ import type { Locale } from "../../domain/chat";
 import { useLocale } from "../../i18n/locale-context";
 import { fetchModelList } from "../../services/model-list";
 import type { LlmEntryDraft, LlmProviderEntry } from "../LlmSettingsPanel";
+import { FormSelect } from "./FormSelect";
 
 const zhCopy = {
   title: "自定义模型",
@@ -498,16 +499,12 @@ export function CustomModelForm({ entry, busy, onBack, onClose, onSubmit, onTest
       <div className="model-modal-card__body model-config-form">
         <div className="model-form-field">
           <label htmlFor="custom-model-format" className="model-form-label model-form-label--required">{t.apiFormat}</label>
-          <select
+          <FormSelect
             id="custom-model-format"
-            className="model-form-input model-form-select"
             value={form.apiFormat}
-            onChange={(e) => update("apiFormat", e.target.value as ApiFormat)}
-          >
-            {API_FORMATS.map((format) => (
-              <option key={format} value={format}>{t.formats[format]}</option>
-            ))}
-          </select>
+            options={API_FORMATS.map((format) => ({ value: format, label: t.formats[format] }))}
+            onChange={(format) => update("apiFormat", format)}
+          />
         </div>
 
         <div className="model-form-field">
@@ -654,17 +651,15 @@ export function CustomModelForm({ entry, busy, onBack, onClose, onSubmit, onTest
               <div className="model-form-field">
                 <label htmlFor="custom-model-family" className="model-form-label">{t.family}</label>
                 <span className="model-form-hint">{t.familyHint}</span>
-                <select
+                <FormSelect<ModelFamily | "">
                   id="custom-model-family"
-                  className="model-form-input model-form-select"
                   value={form.family}
-                  onChange={(e) => update("family", e.target.value as ModelFamily | "")}
-                >
-                  <option value="">{t.familyDefault}</option>
-                  {MODEL_FAMILIES.map((family) => (
-                    <option key={family} value={family}>{t.families[family]}</option>
-                  ))}
-                </select>
+                  options={[
+                    { value: "", label: t.familyDefault },
+                    ...MODEL_FAMILIES.map((family) => ({ value: family, label: t.families[family] })),
+                  ]}
+                  onChange={(family) => update("family", family)}
+                />
               </div>
 
               <div className="model-form-field">

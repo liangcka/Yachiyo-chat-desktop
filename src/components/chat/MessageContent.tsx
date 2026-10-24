@@ -61,6 +61,14 @@ function resolvePendingStepId(
   return unfinished[0]?.id;
 }
 
+/**
+ * 只有执行命令/脚本才收进「已运行 N 步」：它的输出要展开看才有意义。
+ * 搜索、读规则、读写文件等步骤的标题本身已说明做了什么，直接成行
+ */
+function isCommandTool(name: string): boolean {
+  return name === "run_command";
+}
+
 function ToolGroup({ steps, streaming, locale, pendingStepId }: {
   steps: ReadonlyArray<ToolStep>; streaming: boolean; locale: Locale; pendingStepId?: string;
 }) {
@@ -143,15 +151,40 @@ export function MessageContent({ message, locale, hideCitations, pendingPermissi
       return step ? [step] : [];
     });
     const thoughts = run.filter((segment) => segment.type === "thought");
-    const group = steps.length
-      ? <ToolGroup key={`${key}-tools`} steps={steps} locale={locale} streaming={false} /> : null;
-    if (thoughts.length === 0) return group ? [group] : [];
+    const toolNodes = renderToolSteps(steps, false);
+    if (thoughts.length === 0) return toolNodes;
     const text = thoughts.map((segment) => message.thought?.slice(segment.start, segment.end).trim() ?? "")
       .filter(Boolean).join("\n\n");
     const durations = thoughts.map(thoughtDurationMs).filter((value): value is number => value !== undefined);
     const thinking = <ThinkingBlock key={`${key}-thought`} thought={text} locale={locale} hasText isStreaming={false}
       durationMs={durations.length ? durations.reduce((sum, value) => sum + value, 0) : undefined} />;
-    return run[0]?.type === "thought" ? [thinking, group] : [group, thinking];
+    return run[0]?.type === "thought" ? [thinking, ...toolNodes] : [...toolNodes, thinking];
+  }
+
+  /** 连续的命令步骤收进同一个「已运行 N 步」组，其余步骤各占一行，保持原有先后顺序 */
+  function renderToolSteps(steps: ReadonlyArray<ToolStep>, live: boolean): ReactNode[] {
+    const nodes: ReactNode[] = [];
+    let commands: ToolStep[] = [];
+    const flushCommands = () => {
+      if (commands.length) {
+        nodes.push(<ToolGroup key={`group-${commands[0]!.id}`} steps={commands} locale={locale} streaming={live} pendingStepId={pendingStepId} />);
+      }
+      commands = [];
+    };
+    for (const step of steps) {
+      if (isCommandTool(step.name)) {
+        commands.push(step);
+        continue;
+      }
+      flushCommands();
+      nodes.push(<div key={step.id} className="message-tool-step">
+        <ToolCard toolName={step.name} args={parseArguments(step.argumentsJson)} output={step.result?.output}
+          isError={step.result?.isError} isRunning={live && step.result === undefined}
+          isWaitingForApproval={step.id === pendingStepId} locale={locale} />
+      </div>);
+    }
+    flushCommands();
+    return nodes;
   }
 
   function renderSegments(parts: ReadonlyArray<MessageContentSegment>, coalesce = false): ReactNode[] {
@@ -166,7 +199,6 @@ export function MessageContent({ message, locale, hideCitations, pendingPermissi
         content.push(...renderCoalescedRun(run, key));
       } else if (segment.type === "tool") {
         const steps: ToolStep[] = [];
-        const key = index;
         let next: MessageContentSegment | undefined = segment;
         while (next?.type === "tool") {
           const step = tools.get(next.toolId);
@@ -174,7 +206,7 @@ export function MessageContent({ message, locale, hideCitations, pendingPermissi
           next = parts[++index];
         }
         index--;
-        if (steps.length) content.push(<ToolGroup key={key} steps={steps} locale={locale} streaming={streaming} pendingStepId={pendingStepId} />);
+        content.push(...renderToolSteps(steps, streaming));
       } else if (segment.type === "thought") {
         const active = streaming && index === parts.length - 1;
         const durationMs = thoughtDurationMs(segment);

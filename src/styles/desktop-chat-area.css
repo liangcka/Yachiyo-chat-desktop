@@ -127,6 +127,15 @@
   border-left: 1px solid var(--border-l1);
 }
 
+/* 不进命令组的单个步骤直接成行：左移抵掉卡片内边距，让箭头与「思考了」「已运行」对齐 */
+.message-tool-step {
+  margin: 4px 0 4px -6px;
+}
+
+.message-tool-step .tool-card__description {
+  font-size: 12px;
+}
+
 .message-tool-group__error {
   color: var(--danger);
 }
@@ -371,10 +380,29 @@
 .message-bubble__expand-wrapper { position: absolute; bottom: 0; left: 0; right: 0; display: flex; justify-content: flex-end; padding-top: 18px; background: linear-gradient(to bottom, transparent, var(--yx-specific-bubble-user) 70%); }
 .message-bubble__expand-btn { display: inline-flex; align-items: center; justify-content: center; padding: 2px 10px; border: 1px solid var(--border-l1); border-radius: 4px; background: var(--surface-card); color: var(--text-primary); font-size: 12px; cursor: pointer; transition: background var(--ds-transition-duration-fast) var(--ds-ease-hover), color var(--ds-transition-duration-fast) var(--ds-ease-hover); }
 .message-bubble__expand-btn:hover { background: var(--interactive-active); color: var(--text-primary); }
-.message-bubble__edit { display: grid; gap: 8px; min-width: min(480px, 50vw); }
-.message-bubble__edit textarea { min-height: 100px; width: 100%; resize: vertical; padding: 10px; border: 1px solid var(--border-l1); border-radius: 8px; background: var(--surface-card); color: var(--text-primary); font: inherit; }
-.message-bubble__edit > div { display: flex; justify-content: flex-end; gap: 8px; }
-.message-bubble__edit button { border: 0; border-radius: 5px; padding: 5px 8px; background: var(--interactive-hover); color: var(--text-secondary); cursor: pointer; }
+/* 编辑消息：与输入框同款的单层卡片，正文无框直排，主次按钮靠右；宽度写死再由 max-width 收住，避免百分比宽度在自适应气泡里循环计算 */
+.message-bubble__edit { display: flex; flex-direction: column; gap: 10px; width: 560px; max-width: 100%; box-sizing: border-box; padding: 12px 14px 10px; border: 1px solid var(--border-l2); border-radius: 18px; background: var(--dsw-specific-input-major); transition: border-color var(--ds-transition-duration-fast) var(--ds-ease-in-out); }
+.message-bubble__edit:focus-within { border-color: var(--composer-border-focus); }
+/* 编辑框从气泡所在的右上角展开、收起；退场时长与 MessageBubble 的 EDIT_EXIT_MS 保持一致 */
+.message-bubble__edit { transform-origin: top right; animation: motion-edit-in 200ms var(--ds-ease-out) both; }
+.message-bubble__edit--closing { pointer-events: none; animation: motion-edit-out 140ms var(--ds-ease-in-out) both; }
+.message-bubble__user-bubble--returning { transform-origin: top right; animation: motion-bubble-return 220ms var(--ds-ease-out) both; }
+@media (prefers-reduced-motion: reduce) {
+  .message-bubble__edit,
+  .message-bubble__edit--closing,
+  .message-bubble__user-bubble--returning { animation: none; }
+}
+.message-bubble__edit textarea,
+.message-bubble__edit textarea:focus,
+.message-bubble__edit textarea:focus-visible { width: 100%; min-height: 24px; max-height: 320px; padding: 0; border: none !important; outline: none !important; box-shadow: none !important; resize: none; background: transparent; color: var(--text-primary); font: inherit; font-size: 14px; line-height: 1.7; transition: height 140ms var(--ds-ease-out); }
+@media (prefers-reduced-motion: reduce) { .message-bubble__edit textarea { transition: none; } }
+.message-bubble__edit-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.message-bubble__edit-actions button { height: 30px; padding: 0 14px; border: 0; border-radius: 999px; font-size: 13px; cursor: pointer; transition: background var(--ds-transition-duration-fast) var(--ds-ease-hover), color var(--ds-transition-duration-fast) var(--ds-ease-hover), opacity var(--ds-transition-duration-fast) var(--ds-ease-hover); }
+.message-bubble__edit-cancel { background: transparent; color: var(--text-secondary); }
+.message-bubble__edit-cancel:hover { background: var(--interactive-hover); color: var(--text-primary); }
+.message-bubble__edit-save { background: var(--text-primary); color: var(--surface-card); }
+.message-bubble__edit-save:hover:not(:disabled) { opacity: 0.88; }
+.message-bubble__edit-save:disabled { background: var(--interactive-active); color: var(--text-dim); cursor: default; }
 .message-bubble__versions { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--text-muted); margin: 0 4px 0 0; }
 .message-bubble__versions button { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-dim); cursor: pointer; }
 .message-bubble__versions button:hover:not(:disabled) { background: var(--interactive-hover); color: var(--text-primary); }
