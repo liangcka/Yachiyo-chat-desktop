@@ -2,6 +2,7 @@ import {
   ArrowUp,
   Check,
   ChevronRight,
+  Film,
   Globe,
   Paperclip,
   Plus,
@@ -19,13 +20,15 @@ import { PlanStrip } from "../../components/desktop/PlanStrip";
 import { ReasoningEffortSelect } from "../../components/desktop/ReasoningEffortSelect";
 import { ProjectSelector } from "../../components/desktop/ProjectSelector";
 import { PermissionCard } from "../../components/tools/PermissionCard";
-import { appendAttachments, COMPOSER_CHARACTER_LIMIT, readTextAttachment, type TextAttachment } from "../../features/file-reference/attachments";
+import { appendAttachments, COMPOSER_CHARACTER_LIMIT, readTextAttachment, type ComposerAttachment, type VideoAttachment } from "../../features/file-reference/attachments";
+import { isVideoPath } from "../../features/file-reference/video-links";
+import { ImageProcessingError, maximumSourceBytes } from "../../features/capture/image-processor";
 import { extractLatestTodos } from "../../domain/chat";
 import { copyFor } from "../../i18n/messages";
 import { isRetryableChatErrorCode } from "../../services/chat-client";
 import { SKILLS, skillLabel } from "../../skills";
 
-import { controllerErrorMessage, type SharedViewProps } from "../layout-types";
+import { controllerErrorMessage, imageErrorMessage, type SharedViewProps } from "../layout-types";
 import type { SettingsTabKey } from "../../components/settings/SettingsModal";
 import { FileReferencePicker } from "../../components/chat/FileReferencePicker";
 import {
@@ -35,11 +38,12 @@ import {
   type SlashItem,
 } from "../../components/chat/SlashCommandPicker";
 import { isDesktopApp } from "../../services/app-platform";
-import { searchWorkspaceFiles } from "../../services/desktop-bridge";
+import { allowAssetFiles, assetUrl, searchWorkspaceFiles } from "../../services/desktop-bridge";
 import { useProjectState } from "../../services/project-manager";
 import "../../styles/desktop-chat-area.css";
 import { DesktopWelcome } from "./DesktopWelcome";
 import { useComposerDockTransition } from "./use-composer-dock-transition";
+import { useFileDrop } from "./use-file-drop";
 
 export interface DesktopChatAreaProps extends SharedViewProps {
   onOpenSettings?: (tab?: SettingsTabKey) => void;
@@ -109,9 +113,9 @@ export function DesktopChatArea({
   const conversationId = controller.activeConversation?.id;
   const activeConversationIdRef = useRef(conversationId);
   useLayoutEffect(() => { activeConversationIdRef.current = conversationId; }, [conversationId]);
-  const [attachmentDraft, setAttachmentDraft] = useState<{ conversationId?: string; files: TextAttachment[] }>({ files: [] });
+  const [attachmentDraft, setAttachmentDraft] = useState<{ conversationId?: string; files: ComposerAttachment[] }>({ files: [] });
   const attachments = attachmentDraft.conversationId === conversationId ? attachmentDraft.files : [];
-  const setAttachments = (update: TextAttachment[] | ((files: TextAttachment[]) => TextAttachment[])): void => {
+  const setAttachments = (update: ComposerAttachment[] | ((files: ComposerAttachment[]) => ComposerAttachment[])): void => {
     setAttachmentDraft((previous) => ({ conversationId, files: typeof update === "function" ? update(previous.conversationId === conversationId ? previous.files : []) : update }));
   };
   const [skillPopoverOpen, setSkillPopoverOpen] = useState(false);
@@ -400,9 +404,35 @@ export function DesktopChatArea({
           if (addedCharacters > COMPOSER_CHARACTER_LIMIT) { showToast(isJapanese ? "添付ファイルの合計が 20000 文字を超えています。分けて送信してください" : "附件合计超过 20000 字，请分批发送", "error"); break; }
           setAttachments((previous) => [...previous, attachment].slice(-8));
         }
-      } catch (error) { showToast(error instanceof Error ? error.message : copy.imageInvalid, "error"); }
+      } catch (error) { showToast(error instanceof ImageProcessingError ? imageErrorMessage(error.code, copy) : error instanceof Error ? error.message : copy.imageInvalid, "error"); }
     }
   };
+  // 桌面端拖入的是路径：视频只记路径，其余文件经 asset 协议读成 File 后走与选择文件相同的链路
+  const attachDroppedPaths = async (paths: string[]): Promise<void> => {
+    const files = await allowAssetFiles(paths.slice(0, 8));
+    if (activeConversationIdRef.current !== conversationId) return;
+    if (files.length === 0) { showToast(isJapanese ? "フォルダーは追加できません。ファイルをドラッグしてください" : "无法添加文件夹，请拖入文件", "error"); return; }
+    const videos = files.filter((file) => isVideoPath(file.name)).map((file): VideoAttachment => ({ kind: "video", name: file.name, path: file.path }));
+    if (videos.length > 0) setAttachments((previous) => [...previous, ...videos].slice(-8));
+    const others: File[] = [];
+    for (const file of files) {
+      if (isVideoPath(file.name)) continue;
+      // 图片的源文件上限也是所有附件里最大的，超过它的文件不必整个读进内存
+      if (file.size > maximumSourceBytes) { showToast(isJapanese ? `${file.name} は大きすぎます` : `${file.name} 过大，无法添加`, "error"); continue; }
+      try {
+        const response = await fetch(await assetUrl(file.path));
+        if (!response.ok) throw new Error(String(response.status));
+        const blob = await response.blob();
+        others.push(new File([blob], file.name, { type: blob.type }));
+      } catch { showToast(isJapanese ? `${file.name} を読み込めません` : `无法读取 ${file.name}`, "error"); }
+    }
+    if (activeConversationIdRef.current === conversationId) await attachFiles(others);
+  };
+  const fileDrop = useFileDrop({
+    enabled: !composerUnavailable,
+    onPaths: (paths) => void attachDroppedPaths(paths),
+    onFiles: (files) => void attachFiles(files),
+  });
   const handleFileInputChange = async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
@@ -464,14 +494,12 @@ export function DesktopChatArea({
 
       {activeSkills.length > 0 || attachments.length > 0 ? <div className="dsh-composer-chips" aria-label={isJapanese ? "読み込み済みの内容" : "已加载内容"}>
         {activeSkills.map((skill) => <button type="button" key={skill.id} onClick={() => void onSkillToggle?.(skill.id, false)} title={isJapanese ? `スキル ${skillLabel(skill, controller.locale).name} を外す` : `移除技能 ${skill.name}`}>{skillLabel(skill, controller.locale).name}<X size={12} /></button>)}
-        {attachments.map((file, index) => <button type="button" key={`${file.name}-${index}`} title={isJapanese ? `添付 ${file.name} を削除` : `移除附件 ${file.name}`} onClick={() => setAttachments((previous) => previous.filter((_, i) => i !== index))}>{file.name}<X size={12} /></button>)}
+        {attachments.map((file, index) => <button type="button" key={`${file.name}-${index}`} title={isJapanese ? `添付 ${file.name} を削除` : `移除附件 ${file.name}`} onClick={() => setAttachments((previous) => previous.filter((_, i) => i !== index))}>{"kind" in file ? <Film size={12} aria-hidden="true" /> : null}{file.name}<X size={12} /></button>)}
       </div> : null}
       {/* 空白对话时在输入框上方选择项目，新对话即绑定该工作区 */}
       {isBlank ? <ProjectSelector variant="composer" className="desktop-composer-project" onNewChat={onNewChat} /> : null}
       {/* 输入框主卡片 */}
-      <div className="dsh-composer-card"
-        onDragOver={(event) => { if (!composerUnavailable && event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
-        onDrop={(event) => { if (composerUnavailable) return; event.preventDefault(); void attachFiles(Array.from(event.dataTransfer.files)); }}>
+      <div className="dsh-composer-card">
         {/* @ 引用文件模糊搜索浮层 */}
         {filePickerOpen ? (
           <FileReferencePicker
@@ -758,7 +786,15 @@ export function DesktopChatArea({
   );
 
   return (
-    <main className="desktop-main-chat" aria-label={isJapanese ? "会話ワークベンチ" : "核心对话工作台"}>
+    <main className="desktop-main-chat" aria-label={isJapanese ? "会話ワークベンチ" : "核心对话工作台"} {...fileDrop.handlers}>
+      {fileDrop.active ? (
+        <div className="desktop-drop-zone" aria-hidden="true">
+          <div className="desktop-drop-zone__panel">
+            <Paperclip size={20} />
+            <span>{isJapanese ? "ここにドロップして添付（画像・ファイル・動画）" : "松开以添加附件（图片、文件或视频）"}</span>
+          </div>
+        </div>
+      ) : null}
       {/* 消息流与 Hero 区域 */}
       <div className={`desktop-chat-body ${isBlank ? "desktop-chat-body--welcome" : ""}`}>
         {isBlank ? (

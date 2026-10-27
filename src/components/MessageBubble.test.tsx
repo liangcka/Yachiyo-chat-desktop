@@ -15,6 +15,36 @@ const imageMessage: ChatMessage = {
 };
 
 describe("MessageBubble", () => {
+  it("随发的文件与视频像图片一样独立成卡片，文字气泡只留正文", async () => {
+    const user = userEvent.setup();
+    const message: ChatMessage = {
+      ...imageMessage,
+      imageId: undefined,
+      text: "看看这些\n\n【附件 说明.md】\n```\n第一行\n第二行\n```\n\n【视频 片段.mp4】\nhttps://cdn.test/v.mp4",
+    };
+    const { container } = render(<MessageBubble locale="zh-CN" message={message} />);
+
+    const bubble = container.querySelector(".message-bubble__user-bubble");
+    expect(bubble?.textContent).toBe("看看这些");
+    const card = screen.getByText("说明.md").closest("details");
+    expect(card).not.toBeNull();
+    expect(bubble?.contains(card ?? null)).toBe(false);
+    expect(screen.getByText("2 行")).toBeInTheDocument();
+    await user.click(screen.getByText("说明.md"));
+    expect(card).toHaveAttribute("open");
+
+    const video = screen.getByLabelText("视频");
+    expect(video).toHaveAttribute("src", "https://cdn.test/v.mp4");
+    expect(bubble?.contains(video)).toBe(false);
+  });
+
+  it("只有附件没有正文时不渲染空的文字气泡", () => {
+    const message: ChatMessage = { ...imageMessage, imageId: undefined, text: "【视频 片段.mp4】\nhttps://cdn.test/v.mp4" };
+    const { container } = render(<MessageBubble locale="zh-CN" message={message} />);
+    expect(container.querySelector(".message-bubble__user-bubble")).toBeNull();
+    expect(screen.getByLabelText("视频")).toBeInTheDocument();
+  });
+
   it("opens the sent image in a full-screen preview and closes it with Esc", async () => {
     const user = userEvent.setup();
     render(<MessageBubble locale="zh-CN" message={imageMessage} imageUrl="blob:image-1" />);

@@ -1,9 +1,11 @@
 import { ChevronLeft, ChevronRight, Copy, Pencil, RotateCcw, RotateCw } from "lucide-react";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, Locale } from "../domain/chat";
+import { splitMessageAttachments } from "../features/file-reference/attachments";
 import { copyFor } from "../i18n/messages";
 import { ImageLightbox } from "./chat/ImageLightbox";
 import { MarkdownContent } from "./chat/MarkdownContent";
+import { MessageAttachments } from "./chat/MessageAttachments";
 import { MessageContent } from "./chat/MessageContent";
 
 export interface MessageBubbleProps {
@@ -78,10 +80,16 @@ export const MessageBubble = memo(function MessageBubble({
   const hideCitations = showSources === false && message.sources !== undefined && message.sources.length > 0;
   const strippedText = hideCitations ? stripCitationMarkers(message.text) : message.text;
   const displayText = strippedText.trim().length > 0 ? strippedText : message.text;
+  // 用户随发的文件与视频拼在消息末尾，展示时拆出来与图片一样独立成卡片
+  const userParts = useMemo(
+    () => (message.role === "user" ? splitMessageAttachments(displayText) : undefined),
+    [displayText, message.role],
+  );
+  const userText = userParts?.text ?? displayText;
 
   const [userExpanded, setUserExpanded] = useState(false);
   const [isLongUserMessage, setIsLongUserMessage] = useState(
-    () => message.role === "user" && displayText.split("\n").length > 12,
+    () => message.role === "user" && userText.split("\n").length > 12,
   );
   const userContentRef = useRef<HTMLDivElement>(null);
 
@@ -92,12 +100,12 @@ export const MessageBubble = memo(function MessageBubble({
     const style = window.getComputedStyle(el);
     const lh = parseFloat(style.lineHeight) || 24;
     const maxHeight = lh * 12;
-    if (el.scrollHeight > maxHeight + 4 || displayText.split("\n").length > 12) {
+    if (el.scrollHeight > maxHeight + 4 || userText.split("\n").length > 12) {
       setIsLongUserMessage(true);
     } else {
       setIsLongUserMessage(false);
     }
-  }, [displayText, message.role]);
+  }, [userText, message.role]);
 
   // 进入编辑即聚焦并把光标放到末尾
   useEffect(() => {
@@ -338,6 +346,9 @@ export const MessageBubble = memo(function MessageBubble({
           <div aria-hidden="true" className="message-bubble__image message-bubble__image--loading" />
         )
       ) : null}
+      {!editing && userParts !== undefined && userParts.attachments.length > 0 ? (
+        <MessageAttachments attachments={userParts.attachments} />
+      ) : null}
       {editing ? (
         <form className={`message-bubble__edit${editClosing ? " message-bubble__edit--closing" : ""}`} onSubmit={(event) => { event.preventDefault(); submitEdit(); }}>
           <textarea
@@ -366,7 +377,7 @@ export const MessageBubble = memo(function MessageBubble({
         <p>{locale === "ja-JP" ? "返信を生成できませんでした。" : "本次回复未生成。"}</p>
       ) : message.role === "assistant" ? (
         <MessageContent message={message} locale={locale} hideCitations={hideCitations} pendingPermission={pendingPermission} pendingToolName={pendingToolName} />
-      ) : hasText ? (
+      ) : userText.trim().length > 0 ? (
         <div
           className={`message-bubble__user-bubble${bubbleReturning ? " message-bubble__user-bubble--returning" : ""}`}
           onAnimationEnd={() => setBubbleReturning(false)}
@@ -377,7 +388,7 @@ export const MessageBubble = memo(function MessageBubble({
             isLongUserMessage && !userExpanded ? " message-bubble__user-content--collapsed" : ""
           }`}
         >
-          <MarkdownContent text={displayText} />
+          <MarkdownContent text={userText} />
           {isLongUserMessage && !userExpanded ? (
             <div className="message-bubble__expand-wrapper">
               <button
