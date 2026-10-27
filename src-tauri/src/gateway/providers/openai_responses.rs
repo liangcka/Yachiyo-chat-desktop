@@ -163,6 +163,8 @@ pub fn extract_openai_responses_delta(data: &str) -> Option<ExtractedDelta> {
                 prompt_tokens: field("input_tokens"),
                 completion_tokens: field("output_tokens"),
                 total_tokens: field("total_tokens"),
+                cache_read_tokens: usage.pointer("/input_tokens_details/cached_tokens").and_then(|v| v.as_u64()).map(|v| v as u32),
+                cache_write_tokens: None,
             });
         }
         _ => return None,

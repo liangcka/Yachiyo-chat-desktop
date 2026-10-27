@@ -271,6 +271,8 @@ pub fn extract_gemini_delta(data: &str) -> Option<ExtractedDelta> {
                 prompt_tokens: p,
                 completion_tokens: c,
                 total_tokens: t,
+                cache_read_tokens: usage_meta.get("cachedContentTokenCount").and_then(|v| v.as_u64()).map(|v| v as u32),
+                cache_write_tokens: None,
             });
         }
     }

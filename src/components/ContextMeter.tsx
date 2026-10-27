@@ -49,6 +49,13 @@ export function ContextMeter({
     };
   }, [messages, contextLimit, compressedUpTo, summary]);
 
+  // 厂商上报的最近一次请求缓存命中；没有上报缓存字段的厂商不显示，避免把“未知”当成 0%
+  const cacheHit = useMemo(() => {
+    const usage = messages.filter((message) => message.role === "assistant" && message.usage !== undefined).at(-1)?.usage;
+    if (!usage?.promptTokens || usage.cacheReadTokens === undefined) return undefined;
+    return { readTokens: usage.cacheReadTokens, percent: Math.round((usage.cacheReadTokens / usage.promptTokens) * 100) };
+  }, [messages]);
+
   // 点击外部或按 Esc 关闭弹出层
   useEffect(() => {
     if (!open) return;
@@ -147,6 +154,12 @@ export function ContextMeter({
               </span>
               <span className="context-meter-panel__val">~{formatTokens(breakdown.messageTokens)}</span>
             </div>
+            {cacheHit !== undefined && (
+              <div className="context-meter-panel__row">
+                <span className="context-meter-panel__label">{isJapanese ? "直近のキャッシュヒット" : "上次请求缓存命中"}</span>
+                <span className="context-meter-panel__val">{`${cacheHit.percent}% · ${formatTokens(cacheHit.readTokens)}`}</span>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -9,7 +9,7 @@ use crate::gateway::agent::messages::{history_to_agent_messages, AgentMessage};
 use crate::gateway::agent::permission::{approval_key, ApprovalRegistry};
 use crate::gateway::agent::subagent::{run_subagent, SUBAGENT_TOOL};
 use crate::gateway::agent::pruner::{
-    prune_agent_messages, DEFAULT_PRUNE_HEAD_CHARS, DEFAULT_PRUNE_TAIL_CHARS,
+    compact_agent_messages, DEFAULT_PRUNE_HEAD_CHARS, DEFAULT_PRUNE_TAIL_CHARS,
     DEFAULT_PRUNE_THRESHOLD_CHARS,
 };
 use crate::gateway::prompt::{build_agent_system_prompt, build_time_note};
@@ -86,7 +86,12 @@ pub enum LoopOutcome {
 
 fn accumulate_usage(acc: &mut TokenUsage, inc: &Option<TokenUsage>) {
     if let Some(u) = inc {
-        acc.prompt_tokens = u.prompt_tokens.or(acc.prompt_tokens);
+        // 提示词与缓存都反映最近一轮请求的上下文，三者一起取自同一轮，命中率才可比
+        if u.prompt_tokens.is_some() {
+            acc.prompt_tokens = u.prompt_tokens;
+            acc.cache_read_tokens = u.cache_read_tokens;
+            acc.cache_write_tokens = u.cache_write_tokens;
+        }
         if let Some(c) = u.completion_tokens {
             acc.completion_tokens = Some(acc.completion_tokens.unwrap_or(0) + c);
         }
@@ -176,16 +181,19 @@ pub async fn run_agent_loop_ext(
         }
         sink(LoopEmit::Event(ClientStreamEvent::Turn { index: turn, usage: None }));
 
-        let pruned_messages = prune_agent_messages(
-            &messages,
+        let folded = compact_agent_messages(
+            &mut messages,
             DEFAULT_PRUNE_THRESHOLD_CHARS,
             DEFAULT_PRUNE_HEAD_CHARS,
             DEFAULT_PRUNE_TAIL_CHARS,
         );
+        if folded > 0 {
+            tracing::info!(turn, folded, "上下文越过高水位，已折叠早期只读工具结果");
+        }
         // 用户停止时丢弃进行中的上游请求 Future 即断开 HTTP 连接，厂商随之停止生成与计费，
         // 而不是等这一轮（可能是长时间思考或数万 token 的输出）完整跑完
         let outcome = tokio::select! {
-            outcome = executor.execute(&pruned_messages, sink) => outcome,
+            outcome = executor.execute(&messages, sink) => outcome,
             _ = wait_cancelled(cancelled) => return Ok(LoopOutcome::Cancelled),
         };
         let outcome = match outcome {
@@ -194,6 +202,15 @@ pub async fn run_agent_loop_ext(
             other => other?,
         };
         accumulate_usage(&mut usage, &outcome.usage);
+        if let Some(turn_usage) = &outcome.usage {
+            tracing::info!(
+                turn,
+                prompt_tokens = ?turn_usage.prompt_tokens,
+                cache_read_tokens = ?turn_usage.cache_read_tokens,
+                cache_write_tokens = ?turn_usage.cache_write_tokens,
+                "Agent 轮次用量"
+            );
+        }
 
         if outcome.tool_calls.is_empty() {
             return Ok(LoopOutcome::Completed { usage });
@@ -705,7 +722,7 @@ impl TurnExecutor for HttpTurnExecutor {
                             }
                         }
                         if let Some(u) = delta.usage {
-                            usage = Some(u);
+                            usage.get_or_insert_with(TokenUsage::default).merge_from(&u);
                         }
                         if let Some(thought) = delta.thought {
                             if !thought.is_empty() {

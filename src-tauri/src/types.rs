@@ -205,6 +205,24 @@ pub struct TokenUsage {
     pub completion_tokens: Option<u32>,
     #[serde(rename = "totalTokens", skip_serializing_if = "Option::is_none")]
     pub total_tokens: Option<u32>,
+    /// 提示词中命中前缀缓存的部分，已计入 prompt_tokens
+    #[serde(rename = "cacheReadTokens", skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<u32>,
+    /// 提示词中本次写入缓存的部分，已计入 prompt_tokens；只有 Anthropic 单独上报
+    #[serde(rename = "cacheWriteTokens", skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<u32>,
+}
+
+impl TokenUsage {
+    /// 同一请求的多个流事件各自只带部分字段（如 Anthropic 的 message_start 带输入、message_delta 带输出），
+    /// 按字段覆盖合并，后到的值优先
+    pub fn merge_from(&mut self, other: &TokenUsage) {
+        self.prompt_tokens = other.prompt_tokens.or(self.prompt_tokens);
+        self.completion_tokens = other.completion_tokens.or(self.completion_tokens);
+        self.total_tokens = other.total_tokens.or(self.total_tokens);
+        self.cache_read_tokens = other.cache_read_tokens.or(self.cache_read_tokens);
+        self.cache_write_tokens = other.cache_write_tokens.or(self.cache_write_tokens);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

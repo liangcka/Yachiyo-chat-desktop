@@ -420,19 +420,17 @@ pub fn extract_anthropic_delta(data: &str) -> Option<ExtractedDelta> {
             if let Some(msg) = parsed.get("message") {
                 if let Some(usage) = msg.get("usage") {
                     // input_tokens 只含未命中缓存的部分，提示词总量需加上缓存写入与读取
-                    let cached = ["cache_creation_input_tokens", "cache_read_input_tokens"]
-                        .iter()
-                        .filter_map(|field| usage.get(*field).and_then(|v| v.as_u64()))
-                        .sum::<u64>();
-                    let input_tokens = usage
-                        .get("input_tokens")
-                        .and_then(|v| v.as_u64())
-                        .map(|v| (v + cached) as u32);
+                    let field = |name: &str| usage.get(name).and_then(|v| v.as_u64()).map(|v| v as u32);
+                    let cache_write = field("cache_creation_input_tokens");
+                    let cache_read = field("cache_read_input_tokens");
+                    let input_tokens = field("input_tokens")
+                        .map(|v| v + cache_write.unwrap_or(0) + cache_read.unwrap_or(0));
                     if input_tokens.is_some() {
                         delta.usage = Some(TokenUsage {
                             prompt_tokens: input_tokens,
-                            completion_tokens: None,
-                            total_tokens: None,
+                            cache_read_tokens: cache_read,
+                            cache_write_tokens: cache_write,
+                            ..Default::default()
                         });
                         return Some(delta);
                     }
@@ -444,11 +442,7 @@ pub fn extract_anthropic_delta(data: &str) -> Option<ExtractedDelta> {
             if let Some(usage) = parsed.get("usage") {
                 let output_tokens = usage.get("output_tokens").and_then(|v| v.as_u64()).map(|v| v as u32);
                 if output_tokens.is_some() {
-                    delta.usage = Some(TokenUsage {
-                        prompt_tokens: None,
-                        completion_tokens: output_tokens,
-                        total_tokens: None,
-                    });
+                    delta.usage = Some(TokenUsage { completion_tokens: output_tokens, ..Default::default() });
                     return Some(delta);
                 }
             }
