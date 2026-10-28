@@ -28,11 +28,11 @@ pub struct DesktopState {
 }
 
 /// 桌面端 IPC 工具白名单：与前端 `executeDesktopAgentTool` 的实际调用点对齐
-/// （编辑器读写与 diff 审阅、终端面板手敲命令、Git 状态）。
+/// （@ 引用读取、终端面板手敲命令、Git 状态）。界面写入走带版本核对与备份的
+/// `write_workspace_file`，不再经由 write_file。
 /// webview 一旦被注入脚本劫持，也无法凭 IPC 触发未在白名单内的工具。
-const IPC_TOOL_WHITELIST: [&str; 5] = [
+const IPC_TOOL_WHITELIST: [&str; 4] = [
     "read_file",
-    "write_file",
     "git_status",
     "git_diff",
     "run_command",
@@ -69,17 +69,24 @@ fn get_workspace_root(state: State<DesktopState>) -> Option<String> {
     state
         .workspace_manager
         .get_workspace_root()
-        .map(|p| p.to_string_lossy().to_string())
+        .map(|p| tools::display_path(&p))
 }
 
+/// 原生切换项目：校验目录并返回规范路径，界面以返回值作为项目身份；空路径表示关闭项目
 #[tauri::command]
-fn set_workspace_root(state: State<DesktopState>, path: String) -> Result<(), String> {
+fn set_workspace_root(state: State<DesktopState>, path: String) -> Result<Option<String>, String> {
     if path.trim().is_empty() {
         state.workspace_manager.clear_workspace_root();
-        Ok(())
+        Ok(None)
     } else {
-        state.workspace_manager.set_workspace_root(PathBuf::from(path))
+        let canonical = state.workspace_manager.set_workspace_root(PathBuf::from(path))?;
+        Ok(Some(tools::display_path(&canonical)))
     }
+}
+
+/// 界面操作显式携带工作区：编辑器标签、审阅与终端各自属于某个项目，不随界面当前项目漂移
+fn ipc_workspace(workspace: Option<&str>) -> Result<Option<PathBuf>, String> {
+    workspace.filter(|path| !path.trim().is_empty()).map(tools::resolve_workspace_dir).transpose()
 }
 
 #[tauri::command]
@@ -87,6 +94,7 @@ async fn execute_agent_tool(
     state: State<'_, DesktopState>,
     name: String,
     arguments: serde_json::Value,
+    workspace: Option<String>,
 ) -> Result<String, String> {
     if !IPC_TOOL_WHITELIST.contains(&name.as_str()) {
         return Err(format!(
@@ -94,19 +102,213 @@ async fn execute_agent_tool(
             name
         ));
     }
-    let root = state.workspace_manager.get_workspace_root();
+    let root = ipc_workspace(workspace.as_deref())?;
     let _lease = if tools::tool_risk(&name) == Some(tools::ToolRisk::Write) {
         root.as_deref().map(|root| state.workspace_manager.acquire_workspace(root)).transpose()?
     } else { None };
     tools::execute_tool_with_context(
         &name,
-        &arguments,
+        &tools::ui_tool_arguments(&name, arguments),
         root.as_deref(),
         &state.http_client,
         None,
         tools::ToolAuthorization::HumanInitiated,
     )
     .await
+}
+
+fn required_workspace(workspace: &str) -> Result<PathBuf, String> {
+    tools::resolve_workspace_dir(workspace)
+}
+
+/// 界面读取文件：返回完整原文、版本摘要与编码信息，编辑器与审阅以此为底稿
+#[tauri::command]
+async fn read_workspace_file(workspace: String, path: String) -> Result<tools::versioned::TextView, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = required_workspace(&workspace)?;
+        Ok(tools::versioned::text_view(&tools::versioned::read_snapshot(&root, &path)?))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 界面写入文件：当前版本必须与 expected_digest 一致，覆盖前备份原内容；运行进行中时拒绝
+#[tauri::command]
+async fn write_workspace_file(
+    state: State<'_, DesktopState>,
+    workspace: String,
+    path: String,
+    content: String,
+    expected_digest: Option<String>,
+    bom: Option<bool>,
+) -> Result<Option<String>, String> {
+    let root = required_workspace(&workspace)?;
+    let lease = state.workspace_manager.acquire_workspace(&root)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        let current = tools::versioned::text_view(&tools::versioned::read_snapshot(&root, &path)?);
+        if current.present && !current.lossless {
+            return Err("该文件不是 UTF-8 文本，保存会改变编码，已拒绝写入。".to_string());
+        }
+        let bytes = tools::versioned::encode_text(&content, bom.unwrap_or(current.bom));
+        tools::versioned::write_checked(
+            &root,
+            &gateway::agent::checkpoint::default_storage_base(),
+            &path,
+            Some(&bytes),
+            expected_digest.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 某次运行改动的文件及当前状态（本次改动 / 已处理 / 已撤销 / 冲突）
+#[tauri::command]
+async fn list_run_changes(workspace: String, run_id: String) -> Result<Vec<gateway::agent::changes::RunFileChange>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = required_workspace(&workspace)?;
+        gateway::agent::changes::run_changes(&root, &gateway::agent::checkpoint::default_storage_base(), &run_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn read_run_change(workspace: String, run_id: String, path: String) -> Result<gateway::agent::changes::RunChangeContent, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = required_workspace(&workspace)?;
+        gateway::agent::changes::run_change_content(&root, &gateway::agent::checkpoint::default_storage_base(), &run_id, &path)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 撤销运行对某个文件的改动（整体或按所选块合并后的内容）
+#[tauri::command]
+async fn revert_run_change(
+    state: State<'_, DesktopState>,
+    workspace: String,
+    run_id: String,
+    path: String,
+    content: Option<String>,
+    expected_digest: Option<String>,
+) -> Result<gateway::agent::changes::RunFileChange, String> {
+    let root = required_workspace(&workspace)?;
+    let lease = state.workspace_manager.acquire_workspace(&root)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        gateway::agent::changes::revert_run_change(
+            &root,
+            &gateway::agent::checkpoint::default_storage_base(),
+            &run_id,
+            &path,
+            content.as_deref(),
+            expected_digest.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RunChangeItem {
+    path: String,
+    expected_digest: Option<String>,
+}
+
+/// 整体撤销运行对多个文件的改动：先核对全部版本，再按“修改 → 删除 → 新增”的顺序恢复
+#[tauri::command]
+async fn revert_run_changes(
+    state: State<'_, DesktopState>,
+    workspace: String,
+    run_id: String,
+    items: Vec<RunChangeItem>,
+) -> Result<Vec<gateway::agent::changes::RunFileChange>, String> {
+    let root = required_workspace(&workspace)?;
+    let lease = state.workspace_manager.acquire_workspace(&root)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        let items: Vec<(String, Option<String>)> = items.into_iter().map(|item| (item.path, item.expected_digest)).collect();
+        gateway::agent::changes::revert_run_changes(&root, &gateway::agent::checkpoint::default_storage_base(), &run_id, &items)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn keep_run_change(
+    state: State<'_, DesktopState>,
+    workspace: String,
+    run_id: String,
+    path: String,
+    expected_digest: Option<String>,
+) -> Result<gateway::agent::changes::RunFileChange, String> {
+    let root = required_workspace(&workspace)?;
+    let lease = state.workspace_manager.acquire_workspace(&root)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        gateway::agent::changes::keep_run_change(&root, &gateway::agent::checkpoint::default_storage_base(), &run_id, &path, expected_digest.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 撤销之后反悔：恢复为运行写入的版本
+#[tauri::command]
+async fn restore_run_change(
+    state: State<'_, DesktopState>,
+    workspace: String,
+    run_id: String,
+    path: String,
+    expected_digest: Option<String>,
+) -> Result<gateway::agent::changes::RunFileChange, String> {
+    let root = required_workspace(&workspace)?;
+    let lease = state.workspace_manager.acquire_workspace(&root)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        gateway::agent::changes::restore_agent_version(&root, &gateway::agent::checkpoint::default_storage_base(), &run_id, &path, expected_digest.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 界面覆盖写入前保存的备份（按时间倒序）
+#[tauri::command]
+async fn list_file_backups(workspace: String, path: String) -> Result<Vec<tools::versioned::BackupEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = required_workspace(&workspace)?;
+        let path = tools::versioned::normalize_relative(&root, &path)?;
+        Ok(tools::versioned::BackupStore::open(&root, &gateway::agent::checkpoint::default_storage_base())?.list(&path))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 用备份恢复文件；同样核对当前版本，恢复前的内容也会再备份一次
+#[tauri::command]
+async fn restore_file_backup(
+    state: State<'_, DesktopState>,
+    workspace: String,
+    path: String,
+    backup_id: String,
+    expected_digest: Option<String>,
+) -> Result<Option<String>, String> {
+    let root = required_workspace(&workspace)?;
+    let lease = state.workspace_manager.acquire_workspace(&root)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        let storage = gateway::agent::checkpoint::default_storage_base();
+        let path = tools::versioned::normalize_relative(&root, &path)?;
+        let (entry, bytes) = tools::versioned::BackupStore::open(&root, &storage)?.read(&backup_id)?;
+        if entry.path != path {
+            return Err("备份不属于该文件".to_string());
+        }
+        tools::versioned::write_checked(&root, &storage, &path, Some(&bytes), expected_digest.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -128,10 +330,10 @@ async fn restore_checkpoint(state: State<'_, DesktopState>, workspace: String, i
 /// UI 文件树懒加载：结构化目录条目（仅前端调用，不进 agent 工具 schema）
 #[tauri::command]
 fn list_workspace_entries(
-    state: State<DesktopState>,
+    workspace: Option<String>,
     path: Option<String>,
 ) -> Result<Vec<tools::fs::WorkspaceEntry>, String> {
-    let Some(root) = state.workspace_manager.get_workspace_root() else {
+    let Some(root) = ipc_workspace(workspace.as_deref())? else {
         return Ok(Vec::new());
     };
     tools::fs::list_workspace_entries(path.as_deref().unwrap_or("."), &root)
@@ -140,11 +342,11 @@ fn list_workspace_entries(
 /// 快速模糊检索工作区文件（用于 @ 引用智能补全浮层）
 #[tauri::command]
 fn search_workspace_files(
-    state: State<DesktopState>,
+    workspace: Option<String>,
     query: Option<String>,
     limit: Option<usize>,
 ) -> Result<Vec<String>, String> {
-    let Some(root) = state.workspace_manager.get_workspace_root() else {
+    let Some(root) = ipc_workspace(workspace.as_deref())? else {
         return Ok(Vec::new());
     };
     tools::fs::search_workspace_files(query.as_deref(), limit, &root)
@@ -154,10 +356,10 @@ fn search_workspace_files(
 /// diff 审阅基线：读取文件在 HEAD 的内容
 #[tauri::command]
 async fn read_head_file(
-    state: State<'_, DesktopState>,
+    workspace: Option<String>,
     path: String,
 ) -> Result<tools::git::HeadFile, String> {
-    let Some(root) = state.workspace_manager.get_workspace_root() else {
+    let Some(root) = ipc_workspace(workspace.as_deref())? else {
         return Ok(tools::git::HeadFile {
             present: false,
             content: String::new(),
@@ -490,6 +692,16 @@ pub fn run() {
             get_workspace_root,
             set_workspace_root,
             execute_agent_tool,
+            read_workspace_file,
+            write_workspace_file,
+            list_run_changes,
+            read_run_change,
+            revert_run_change,
+            revert_run_changes,
+            keep_run_change,
+            restore_run_change,
+            list_file_backups,
+            restore_file_backup,
             list_checkpoints,
             restore_checkpoint,
             list_workspace_entries,

@@ -71,3 +71,29 @@ export function useConversationGroups(conversations: Conversation[]) {
 
   return { orderedConversations, pinnedIds, togglePinConversation };
 }
+
+export interface ConversationGroup {
+  /** 项目路径；null 为未绑定项目的对话 */
+  workspace: string | null;
+  conversations: Conversation[];
+}
+
+/**
+ * 按任务所属项目分组：组的顺序取组内最靠前的会话（置顶与最近更新在前），未绑定项目的对话放在最后。
+ * 没有任何会话绑定项目时返回 undefined，侧栏保持平铺。
+ */
+export function groupConversationsByProject(conversations: Conversation[]): ConversationGroup[] | undefined {
+  if (!conversations.some((conversation) => typeof conversation.workspace === "string")) return undefined;
+  const groups = new Map<string, ConversationGroup>();
+  const unbound: Conversation[] = [];
+  for (const conversation of conversations) {
+    if (typeof conversation.workspace !== "string") {
+      unbound.push(conversation);
+      continue;
+    }
+    const group = groups.get(conversation.workspace) ?? { workspace: conversation.workspace, conversations: [] };
+    group.conversations.push(conversation);
+    groups.set(conversation.workspace, group);
+  }
+  return [...groups.values(), ...(unbound.length > 0 ? [{ workspace: null, conversations: unbound }] : [])];
+}

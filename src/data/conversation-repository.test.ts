@@ -30,6 +30,41 @@ describe("ConversationRepository", () => {
     expect(await reopened.listMessages(conversation.id)).toEqual([edited]);
   });
 
+  it("会话只能从未绑定状态绑定项目，不能改绑到另一个项目", async () => {
+    const conversation = await repository.createConversation("zh-CN", 10);
+    expect((await repository.getConversation(conversation.id))?.workspace).toBeUndefined();
+
+    await repository.setConversationWorkspace(conversation.id, null);
+    expect((await repository.getConversation(conversation.id))?.workspace).toBeNull();
+    // 明确不绑定项目的任务之后仍可在需要项目操作时绑定
+    await repository.setConversationWorkspace(conversation.id, "D:\\work\\alpha");
+    await repository.setConversationWorkspace(conversation.id, "D:\\work\\alpha");
+    await expect(repository.setConversationWorkspace(conversation.id, "D:\\work\\beta")).rejects.toThrow("会话已绑定其他项目");
+    await expect(repository.setConversationWorkspace(conversation.id, null)).rejects.toThrow();
+    expect((await new ConversationRepository(db).getConversation(conversation.id))?.workspace).toBe("D:\\work\\alpha");
+  });
+
+  it("随 assistant 消息记录最近一次运行的状态，撤回后回落到保留部分中最近的运行", async () => {
+    const conversation = await repository.createConversation("zh-CN", 10);
+    const run = (id: string) => ({ id, workspace: "D:/alpha", executionMode: "confirm" as const, startedAt: 1 });
+    const first: ChatMessage = { id: "a1", conversationId: conversation.id, role: "assistant", text: "", status: "streaming", createdAt: 11, run: run("run-1") };
+    await repository.putMessage(first);
+    expect((await repository.getConversation(conversation.id))?.lastRun).toEqual({ runId: "run-1", messageId: "a1", messageCreatedAt: 11, status: "streaming" });
+    await repository.putMessage({ ...first, status: "failed" });
+    expect((await repository.getConversation(conversation.id))?.lastRun?.status).toBe("failed");
+
+    const second: ChatMessage = { ...first, id: "a2", createdAt: 13, status: "complete", run: run("run-2") };
+    await repository.putMessage(second);
+    // 较早消息的迟到写入不覆盖更新的运行状态
+    await repository.putMessage({ ...first, status: "stopped" });
+    expect((await repository.getConversation(conversation.id))?.lastRun).toMatchObject({ runId: "run-2", status: "complete" });
+
+    await repository.deleteMessagesFrom(conversation.id, 13);
+    expect((await repository.getConversation(conversation.id))?.lastRun).toMatchObject({ runId: "run-1", status: "stopped" });
+    await repository.replaceMessages(conversation.id, []);
+    expect((await repository.getConversation(conversation.id))?.lastRun).toBeUndefined();
+  });
+
   it("persists and orders conversations by latest activity", async () => {
     const older = await repository.createConversation("zh-CN", 10);
     const newer = await repository.createConversation("ja-JP", 20);

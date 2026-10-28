@@ -143,10 +143,32 @@ export function SidebarConversationItem({
     setDraftTitle(conversation.title);
   };
 
+  // 实时状态优先；没有活跃运行时显示最近一次运行的结局（仍记为运行中的即为被中断）
+  const lastRun = conversation.lastRun;
+  const settledState =
+    activity !== undefined || lastRun === undefined
+      ? undefined
+      : lastRun.status === "streaming"
+        ? "interrupted"
+        : lastRun.status === "failed"
+          ? "failed"
+          : lastRun.status === "stopped"
+            ? "stopped"
+            : undefined;
   const activityLabel =
     activity === "approval"
       ? ja ? "承認待ち" : "等待确认"
-      : ja ? "実行中" : "运行中";
+      : activity === "cancelling"
+        ? ja ? "キャンセル中" : "正在取消"
+        : activity === "waiting"
+          ? ja ? "書き込み待ち" : "等待写入"
+          : ja ? "実行中" : "运行中";
+  const settledLabel =
+    settledState === "interrupted"
+      ? ja ? "中断" : "已中断"
+      : settledState === "failed"
+        ? ja ? "失敗" : "失败"
+        : ja ? "停止" : "已停止";
 
   return (
     <div
@@ -201,6 +223,10 @@ export function SidebarConversationItem({
                 aria-label={activityLabel}
                 title={activityLabel}
               />
+            ) : settledState !== undefined ? (
+              <span className={`desktop-sidebar__history-state desktop-sidebar__history-state--${settledState}`} role="status">
+                {settledLabel}
+              </span>
             ) : null}
             <span className="desktop-sidebar__history-time">
               {formatRelativeTime(conversation.updatedAt || conversation.createdAt, locale)}

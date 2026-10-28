@@ -54,13 +54,8 @@ function parsePermissionArguments(
     };
   }
 
-  if ((toolName === "write_file" || toolName === "edit_file" || toolName === "replace_file_content") && parsed) {
-    const filePath =
-      typeof parsed.path === "string"
-        ? parsed.path
-        : typeof parsed.TargetFile === "string"
-        ? parsed.TargetFile
-        : undefined;
+  if ((toolName === "write_file" || toolName === "edit_file") && parsed) {
+    const filePath = typeof parsed.path === "string" ? parsed.path : undefined;
     const desc =
       typeof parsed.Description === "string" && parsed.Description.trim()
         ? parsed.Description.trim()

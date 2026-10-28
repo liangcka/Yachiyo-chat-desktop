@@ -1,6 +1,21 @@
 import { shouldCompressContext } from "../domain/context-budget";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import type { ChatMessage, ChatSource, Conversation, Locale, MessageContentSegment, StoredImage, TokenUsage, ToolStep } from "../domain/chat";
+import {
+  runWorkspaceFor,
+  workspaceBinding,
+  type AgentExecutionMode,
+  type CancellationRecord,
+  type ChatMessage,
+  type ChatSource,
+  type Conversation,
+  type Locale,
+  type MessageContentSegment,
+  type RunRecoveryRecord,
+  type StoredImage,
+  type SupplementRecord,
+  type TokenUsage,
+  type ToolStep,
+} from "../domain/chat";
 import { archiveBranch, restoreBranch } from "../domain/message-branches";
 import { appendContentSegment, finishThoughtSegment } from "../domain/message-content";
 import {
@@ -10,16 +25,26 @@ import {
   type ActiveLlmConfig,
 } from "../domain/llm";
 import type { SkillDefinition } from "../skills";
-import { desktopFileReader, expandFileReferences, hasFileReferences } from "../features/file-reference/expand-file-references";
+import { createDesktopFileReader, expandFileReferences, hasFileReferences } from "../features/file-reference/expand-file-references";
 
 import { isDesktopApp } from "../services/app-platform";
-import { projectManager } from "../services/project-manager";
+import { projectManager, sameWorkspace } from "../services/project-manager";
 import { readReasoningEffort } from "../services/reasoning-effort";
 import {
+  cancelAgentRun,
   ChatClientError,
+  getAgentRunState,
   isRetryableChatErrorCode,
+  listActiveAgentRuns,
+  isStreamDisconnect,
+  resumeAgentRun,
+  stopAgentToolCall,
   streamChat as streamChatRequest,
   submitAgentApproval,
+  submitAgentSupplement,
+  type ActiveRunSummary,
+  type AgentRunState,
+  type ResumeRunResult,
   type StreamChatMessage,
   type StreamChatOptions,
   type StreamChatRequest,
@@ -60,6 +85,8 @@ export interface ChatRepository {
   getConversation(id: string): Promise<Conversation | undefined>;
   renameConversation?(id: string, title: string): Promise<void>;
   setConversationArchived?(id: string, archived: boolean): Promise<void>;
+  /** 记录任务归属的项目；已绑定其他项目时拒绝 */
+  setConversationWorkspace(id: string, workspace: string | null): Promise<void>;
   listMessages(
     conversationId: string,
     options?: { beforeCreatedAt?: number; limit?: number },
@@ -111,10 +138,20 @@ export interface ChatControllerOptions {
   onNotice?: (code: string) => void;
   now?: () => number;
   id?: () => string;
+  /** 运行编号生成器（与消息 id 分开，避免影响消息 id 序列） */
+  runId?: () => string;
+  /** 重新连接运行的事件流（默认走本地网关） */
+  resumeRun?: (runId: string, afterSeq: number, options: StreamChatOptions) => Promise<ResumeRunResult>;
+  /** 查询运行在网关中的状态（默认走本地网关） */
+  getRunState?: (runId: string) => Promise<AgentRunState>;
+  /** 断线后重新连接的等待间隔；测试可缩短 */
+  reconnectDelaysMs?: readonly number[];
+  /** 网关中仍在执行的运行（默认走本地网关） */
+  listActiveRuns?: () => Promise<ActiveRunSummary[]>;
 }
 
-/** 运行中会话的状态：流式生成中，或在等待用户审批工具权限 */
-export type RunActivity = "streaming" | "approval";
+/** 侧栏显示的实时运行状态：运行中、等待确认、正在取消、等待同一项目中的其他任务完成写入 */
+export type RunActivity = "streaming" | "approval" | "cancelling" | "waiting";
 
 export interface RecalledMessageData {
   text: string;
@@ -153,13 +190,38 @@ export interface ChatController extends ChatState {
   runningConversations: ReadonlyMap<string, RunActivity>;
   /** 停止指定会话的运行（不要求是当前会话） */
   stopConversation(id: string): Promise<void>;
+  /** 把当前未绑定项目的会话绑定到指定项目；已绑定其他项目或正在运行时返回 false */
+  bindConversationWorkspace(workspace: string): Promise<boolean>;
+  /** 只停止某条运行中的命令（按工具调用），运行继续 */
+  stopToolCall(callId: string): Promise<boolean>;
+  /** 当前会话的 Agent 运行中追加补充要求（不中断任务） */
+  supplement(text: string): Promise<SupplementResult>;
 }
 
 interface ControllerServices {
   repository: ChatRepository;
   streamChat: StreamChatFunction;
+  resumeRun: (runId: string, afterSeq: number, options: StreamChatOptions) => Promise<ResumeRunResult>;
+  getRunState: (runId: string) => Promise<AgentRunState>;
+  listActiveRuns: () => Promise<ActiveRunSummary[]>;
+  reconnectDelaysMs: readonly number[];
   now: () => number;
   id: () => string;
+  runId: () => string;
+}
+
+/** 运行没有正常接收到终止事件：依据网关的运行状态收尾 */
+interface RecoveredRun {
+  readonly recovered: true;
+  readonly state: AgentRunState;
+}
+
+/** 断线后重新连接的等待间隔（合计约 15 秒） */
+const defaultReconnectDelaysMs: readonly number[] = [300, 1000, 2000, 4000, 8000];
+
+function recoveryFor(state: AgentRunState, gap: boolean): RunRecoveryRecord {
+  const status = state.kind === "finished" ? state.status : state.kind === "active" ? "unknown" : "unknown";
+  return { status, ...(gap ? { gap: true } : {}) };
 }
 
 interface InitialData {
@@ -168,6 +230,13 @@ interface InitialData {
   messages: ChatMessage[];
   userMemory?: string;
   hasMoreHistory?: boolean;
+  /** 存储中仍为“运行中”的 Agent 消息：加载后向网关确认，能接回则接回，否则标记结局 */
+  staleRuns?: ChatMessage[];
+}
+
+/** 残留的 Agent 运行消息：界面先按已停止显示，存储保持原状，等向网关确认后再决定 */
+function isStaleAgentRun(message: ChatMessage): boolean {
+  return message.status === "streaming" && message.run !== undefined;
 }
 
 /** ActiveRun 内的工具步骤可变缓冲（domain ToolStep 为 readonly 快照形态） */
@@ -194,9 +263,62 @@ interface ActiveRun {
   token: number;
   /** 本次运行等待中的权限审批；会话在后台时暂存于此，切回前台再交给界面 */
   pendingPermission?: NonNullable<ChatState["pendingPermission"]>;
+  /** 网关已确认运行身份（收到 run_started），之后取消走显式取消接口而不是断开连接 */
+  runConfirmed?: boolean;
+  /** 已请求取消，正在等待网关收尾 */
+  cancelling?: boolean;
+  /** 运行进入终态（finishRun 完成）时兑现 */
+  ended: Promise<void>;
+  resolveEnded: () => void;
+  /** 待推送到界面的命令增量输出 */
+  liveOutputDirty: Set<string>;
+  liveOutputTimer?: ReturnType<typeof setTimeout>;
+  /** 正在等待同一项目中的其他任务完成写入 */
+  waitingForWorkspace?: boolean;
+  /** 已处理的最后一个事件序号 */
+  lastSeq?: number;
+  /** 重新连接时网关已丢弃了部分事件 */
+  eventGap?: boolean;
+  /** 安排一次部分持久化（由 startAssistant 注入，供运行外部的回调使用） */
+  schedulePersistence?: () => void;
 }
 
+/** 追加补充要求的结果：unavailable 表示当前没有可接受补充的运行（未开始、正在取消或不是 Agent 运行） */
+export type SupplementResult = "queued" | "undelivered" | "unavailable";
+
 const partialPersistenceInterval = 250;
+/** 运行中命令输出在界面保留的末尾长度 */
+const liveOutputLimit = 8 * 1024;
+const liveOutputFlushInterval = 120;
+/** 请求取消后等待网关收尾的上限：命令终止宽限与 MCP 收尾时间之和再留余量 */
+const cancelSettleTimeoutMs = 20_000;
+
+function keepTail(text: string, limit: number): string {
+  return text.length <= limit ? text : text.slice(text.length - limit);
+}
+
+async function settlesWithin(promise: Promise<void>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), ms); });
+  try {
+    return await Promise.race([promise.then(() => true), timeout]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
+ * 断开连接结束运行时的收尾结论：网关会随连接断开取消运行，但界面无法确认收尾；
+ * 若已有工具在执行，如实标记结果未知
+ */
+function cancellationForAbort(run: ActiveRun): CancellationRecord | undefined {
+  const unfinished = run.toolSteps.filter((step) => step.result === undefined);
+  if (unfinished.length === 0 && run.cancelling !== true) return undefined;
+  return {
+    confirmed: false,
+    unknown: unfinished.map((step) => ({ callId: step.id, name: step.name, detail: "未收到执行结果" })),
+  };
+}
 /** UI 窗口化：初始只加载最近 windowSize 条历史，向上滚动时按 historyLoadStep 条上翻 */
 const historyWindowSize = 50;
 const historyLoadStep = 30;
@@ -226,11 +348,19 @@ function overlayStreamedText(state: ChatState): ChatMessage[] {
 }
 
 export function useChatController(options: ChatControllerOptions): ChatController {
+  /** 加载与选择会话时确认残留运行；回调定义在后面，经 ref 调用 */
+  const recoverStaleRunRef = useRef<((message: ChatMessage) => Promise<void>) | undefined>(undefined);
+  const reattachBackgroundRunsRef = useRef<(() => Promise<void>) | undefined>(undefined);
   const servicesRef = useRef<ControllerServices>({
     id: options.id ?? (() => crypto.randomUUID()),
+    runId: options.runId ?? (() => crypto.randomUUID()),
     now: options.now ?? (() => Date.now()),
     repository: options.repository,
     streamChat: options.streamChat ?? streamChatRequest,
+    resumeRun: options.resumeRun ?? resumeAgentRun,
+    getRunState: options.getRunState ?? getAgentRunState,
+    listActiveRuns: options.listActiveRuns ?? listActiveAgentRuns,
+    reconnectDelaysMs: options.reconnectDelaysMs ?? defaultReconnectDelaysMs,
   });
   const activeLlmConfigRef = useRef<ActiveLlmConfig | undefined>(options.activeLlmConfig);
   useEffect(() => {
@@ -252,7 +382,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   useEffect(() => {
     autoAiTitleRef.current = options.autoAiTitle ?? true;
   }, [options.autoAiTitle]);
-  const [agentMode, setAgentMode] = useState<"readonly" | "confirm" | "full_auto">(() => {
+  const [agentMode, setAgentMode] = useState<AgentExecutionMode>(() => {
     try {
       const stored = localStorage.getItem("yachiyo_execution_mode");
       if (stored === "readonly" || stored === "confirm" || stored === "full_auto") return stored;
@@ -330,7 +460,13 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       new Map(
         [...runsRef.current].map(([id, run]): [string, RunActivity] => [
           id,
-          run.pendingPermission !== undefined ? "approval" : "streaming",
+          run.cancelling === true
+            ? "cancelling"
+            : run.pendingPermission !== undefined
+              ? "approval"
+              : run.waitingForWorkspace === true
+                ? "waiting"
+                : "streaming",
         ]),
       ),
     );
@@ -388,12 +524,15 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         limit: historyWindowSize + 1,
       });
       const hasMoreHistory = storedMessages.length > historyWindowSize;
-      const messages = storedMessages.slice(hasMoreHistory ? 1 : 0).map((message) =>
+      const windowed = storedMessages.slice(hasMoreHistory ? 1 : 0);
+      const messages = windowed.map((message) =>
         message.status === "streaming" ? { ...message, status: "stopped" as const } : message,
       );
+      // 普通对话的残留消息直接落盘为已停止；Agent 运行的残留消息先保持原状，等向网关确认
       for (let index = 0; index < messages.length; index += 1) {
-        if (messages[index] !== storedMessages[index]) await queueMessage(messages[index]!);
+        if (messages[index] !== windowed[index] && !isStaleAgentRun(windowed[index]!)) await queueMessage(messages[index]!);
       }
+      const staleRuns = windowed.filter(isStaleAgentRun);
       if (locale !== latest.locale) await servicesRef.current.repository.setLocale(latest.locale);
       if (isDefaultTitle(latest.title)) {
         const autoTitle = generateConversationTitle(messages, latest.locale);
@@ -439,12 +578,14 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         messages,
         userMemory,
         hasMoreHistory,
+        staleRuns,
       };
     })();
 
     void initializationRef.current
       .then((loaded) => {
         if (!ignored && mountedRef.current) {
+          focusConversationProject(loaded.conversation);
           emit({
             conversation: loaded.conversation,
             locale: loaded.locale,
@@ -453,6 +594,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             ...(loaded.userMemory !== "" ? { userMemory: loaded.userMemory } : {}),
             ...(loaded.hasMoreHistory ? { hasMoreHistory: true } : {}),
           });
+          for (const message of loaded.staleRuns ?? []) void recoverStaleRunRef.current?.(message);
+          void reattachBackgroundRunsRef.current?.();
         }
       })
       .catch(() => {
@@ -571,6 +714,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       });
 
       // 每条历史消息可能展开为多条请求消息（agent 工具步骤序列），故 map 后 flat 展平
+      // @ 引用按运行所属的工作区展开，不跟随界面当前选中的项目
+      const readReferencedFile = createDesktopFileReader(conversation?.workspace ?? null);
       const chatMessages = (
         await Promise.all(
           history.map(async ({ message, text }, index): Promise<StreamChatMessage[]> => {
@@ -609,7 +754,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             const expandedText =
               // desktop 端 user 消息中的 @文件引用 在请求侧展开为文件内容块（存储与 UI 保留原文）
               message.role === "user" && isDesktopApp() && hasFileReferences(text)
-                ? await expandFileReferences(text, desktopFileReader)
+                ? await expandFileReferences(text, readReferencedFile)
                 : text;
             const imageDataUrl = images.get(index);
             const requestMessage: StreamChatMessage = {
@@ -735,18 +880,29 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       usage?: TokenUsage,
       loopStopped?: boolean,
       errorDetail?: string,
+      cancellation?: CancellationRecord,
     ): Promise<void> => {
       if (run.finishing !== undefined) return run.finishing;
       run.finishing = (async () => {
-        if (!isRunAlive(run)) return;
+        if (!isRunAlive(run)) {
+          run.resolveEnded();
+          return;
+        }
         const conversationId = run.assistant.conversationId;
         runsRef.current.delete(conversationId);
         syncRunActivity();
         if (run.timer !== undefined) clearTimeout(run.timer);
+        if (run.liveOutputTimer !== undefined) clearTimeout(run.liveOutputTimer);
         // 终态（completed/stopped/failed）必须晚于所有已缓冲的流式增量落地
         streamBatcherRef.current?.flush();
         const latencyMs = Math.max(0, servicesRef.current.now() - run.startTime);
         run.contentSegments = finishThoughtSegment(run.contentSegments, latencyMs);
+        // 运行结束时仍在排队的补充没有送达模型，如实标记，由用户决定是否作为新消息发送
+        if (run.assistant.supplements?.some((item) => item.state === "queued")) {
+          const settled = run.assistant.supplements.map((item) => (item.state === "queued" ? { ...item, state: "undelivered" as const } : item));
+          run.assistant = { ...run.assistant, supplements: settled };
+          if (isForeground(conversationId)) emit({ type: "supplements-changed", messageId: run.assistant.id, supplements: settled });
+        }
         const finalUsage = usage ?? run.usage;
         const message: ChatMessage = {
           ...run.assistant,
@@ -760,9 +916,11 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           contentSegments: run.contentSegments,
           contentStartedAtMs: run.contentStartedAtMs,
           ...(status === "stopped" ? { interrupted: true } : {}),
+          ...(cancellation !== undefined ? { cancellation } : {}),
           ...(truncated === true ? { truncated: true } : {}),
           ...(loopStopped === true ? { loopStopped: true } : {}),
           ...(run.sources !== undefined ? { sources: run.sources } : {}),
+          ...(run.lastSeq !== undefined ? { runEventSeq: run.lastSeq } : {}),
           ...(run.toolSteps.length > 0
             ? { toolSteps: run.toolSteps.map((step) => ({ ...step })) }
             : {}),
@@ -780,7 +938,13 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
               ...(loopStopped === true ? { loopStopped: true } : {}),
             });
           } else if (status === "stopped") {
-            emit({ messageId: run.assistant.id, type: "stopped", latencyMs, contentSegments: run.contentSegments });
+            emit({
+              messageId: run.assistant.id,
+              type: "stopped",
+              latencyMs,
+              contentSegments: run.contentSegments,
+              ...(cancellation !== undefined ? { cancellation } : {}),
+            });
           } else {
             emit({
               errorCode: errorCode ?? "SERVICE_UNAVAILABLE",
@@ -792,6 +956,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             });
           }
         }
+        run.resolveEnded();
         await queueMessage(message).catch(() => {
           if (isForeground(conversationId)) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
         });
@@ -863,6 +1028,443 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     [emit, generateAiTitle, isForeground, isRunAlive, queueMessage, syncRunActivity],
   );
 
+  const setReconnecting = useCallback(
+    (run: ActiveRun, reconnecting: boolean) => {
+      if (reconnecting) run.assistant = { ...run.assistant, reconnecting: true };
+      else {
+        const rest = { ...run.assistant };
+        delete rest.reconnecting;
+        run.assistant = rest;
+      }
+      if (isForeground(run.assistant.conversationId)) {
+        emit({ type: "run-reconnecting", messageId: run.assistant.id, reconnecting });
+      }
+    },
+    [emit, isForeground],
+  );
+
+  /**
+   * 连接中断而运行已在网关登记：按最后处理的事件序号重新连接，回填并继续接收。
+   * 不是连接中断（网关下发的错误、协议错误）或用户已停止时返回 undefined，由调用方按原错误处理
+   */
+  const reconnectRun = useCallback(
+    async (run: ActiveRun, options: StreamChatOptions, error: unknown): Promise<StreamChatResult | RecoveredRun | undefined> => {
+      const runId = run.assistant.run?.id;
+      if (!isStreamDisconnect(error) || runId === undefined || run.runConfirmed !== true || run.controller.signal.aborted || !isRunAlive(run)) {
+        return undefined;
+      }
+      setReconnecting(run, true);
+      try {
+        for (const delay of servicesRef.current.reconnectDelaysMs) {
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          if (!isRunAlive(run) || run.controller.signal.aborted) return undefined;
+          try {
+            const resumed = await servicesRef.current.resumeRun(runId, run.lastSeq ?? 0, options);
+            if (resumed.kind === "unavailable") return { recovered: true, state: resumed.state };
+            return resumed.result;
+          } catch (next) {
+            // 重连后再次断开：从新的序号继续重试；其他错误交给调用方
+            if (!isStreamDisconnect(next)) throw next;
+          }
+        }
+        return { recovered: true, state: { kind: "unreachable" } };
+      } finally {
+        if (isRunAlive(run)) setReconnecting(run, false);
+      }
+    },
+    [isRunAlive, setReconnecting],
+  );
+
+  /** 没能接收到终止事件的运行：以网关记录的结局收尾，最后的输出缺失与无法确认的结果如实标记 */
+  const finishRecoveredRun = useCallback(
+    async (run: ActiveRun, recovered: RecoveredRun): Promise<void> => {
+      if (!isRunAlive(run)) return;
+      const recovery = recoveryFor(recovered.state, run.eventGap === true);
+      run.assistant = { ...run.assistant, recovery };
+      if (isForeground(run.assistant.conversationId)) {
+        emit({ type: "recovery-changed", messageId: run.assistant.id, recovery });
+      }
+      if (recovery.status === "completed") await finishRun(run, "complete");
+      else if (recovery.status === "failed") await finishRun(run, "failed", "PROVIDER_STREAM_ERROR");
+      else if (recovery.status === "cancelled") await finishRun(run, "stopped", undefined, undefined, undefined, undefined, undefined, { confirmed: true });
+      else await finishRun(run, "stopped");
+    },
+    [emit, finishRun, isForeground, isRunAlive],
+  );
+
+  /**
+   * 驱动一次运行直到终态：事件回调写入运行缓冲并按需推送界面；连接中断而运行已在网关登记时，
+   * 按最后处理的事件序号重新连接回填，不重新发起运行、不重放任何操作。
+   * connect 发起首个连接：新运行是 /api/chat，接回已有运行是事件流重连。
+   */
+  const driveRun = useCallback(
+    async (run: ActiveRun, connect: (options: StreamChatOptions) => Promise<StreamChatResult | RecoveredRun>): Promise<void> => {
+      const conversationId = run.assistant.conversationId;
+      const schedulePartialPersistence = () => {
+        if (run.timer !== undefined || !isRunAlive(run)) return;
+        run.timer = setTimeout(() => {
+          run.timer = undefined;
+          if (!isRunAlive(run)) return;
+          void queueMessage({
+            ...run.assistant,
+            status: "streaming",
+            text: run.text,
+            contentSegments: run.contentSegments,
+            contentStartedAtMs: run.contentStartedAtMs,
+            ...(run.thought !== undefined ? { thought: run.thought } : {}),
+            ...(run.provider !== undefined ? { provider: run.provider } : {}),
+            ...(run.model !== undefined ? { model: run.model } : {}),
+            ...(run.sources !== undefined ? { sources: run.sources } : {}),
+            ...(run.lastSeq !== undefined ? { runEventSeq: run.lastSeq } : {}),
+            ...(run.toolSteps.length > 0
+              ? { toolSteps: run.toolSteps.map((step) => ({ ...step })) }
+              : {}),
+          }).catch(() => undefined);
+        }, partialPersistenceInterval);
+      };
+
+      run.schedulePersistence = schedulePartialPersistence;
+
+      // 命令增量输出按固定间隔合并推送到界面，避免高频输出逐条触发渲染
+      const scheduleLiveOutputFlush = () => {
+        if (run.liveOutputTimer !== undefined || !isRunAlive(run)) return;
+        run.liveOutputTimer = setTimeout(() => {
+          run.liveOutputTimer = undefined;
+          if (!isRunAlive(run)) return;
+          const dirty = [...run.liveOutputDirty];
+          run.liveOutputDirty.clear();
+          if (!isForeground(run.assistant.conversationId)) return;
+          for (const callId of dirty) {
+            const step = run.toolSteps.find((item) => item.id === callId);
+            if (step?.liveOutput !== undefined && step.result === undefined) {
+              emit({ type: "tool-output", messageId: run.assistant.id, callId, liveOutput: step.liveOutput });
+            }
+          }
+        }, liveOutputFlushInterval);
+      };
+
+      const streamOptions: StreamChatOptions = {
+        onDelta(text) {
+          if (!isRunAlive(run) || text.length === 0) return;
+          const start = run.text.length;
+          const atMs = servicesRef.current.now() - run.startTime;
+          run.contentStartedAtMs ??= atMs;
+          run.text += text;
+          run.contentSegments = appendContentSegment(run.contentSegments,
+            { type: "text", start, end: run.text.length }, atMs);
+          if (isForeground(conversationId)) {
+            streamBatcherRef.current?.push({ messageId: run.assistant.id, text, type: "delta", contentSegments: run.contentSegments });
+          }
+          schedulePartialPersistence();
+        },
+        onNotice(code) {
+          if (isRunAlive(run)) onNoticeRef.current?.(code);
+        },
+        onThought(text) {
+          if (!isRunAlive(run) || text.length === 0) return;
+          const start = run.thought?.length ?? 0;
+          const atMs = servicesRef.current.now() - run.startTime;
+          run.contentStartedAtMs ??= atMs;
+          run.thought = (run.thought ?? "") + text;
+          run.contentSegments = appendContentSegment(run.contentSegments,
+            { type: "thought", start, end: run.thought.length, startedAtMs: atMs }, atMs);
+          if (isForeground(conversationId)) {
+            streamBatcherRef.current?.push({
+              messageId: run.assistant.id,
+              text,
+              type: "thought-delta",
+              contentSegments: run.contentSegments,
+            });
+          }
+          schedulePartialPersistence();
+        },
+        onSources(sources) {
+          if (!isRunAlive(run) || sources.length === 0) return;
+          run.sources = sources;
+          if (isForeground(conversationId)) emit({ messageId: run.assistant.id, sources, type: "sources-received" });
+          schedulePartialPersistence();
+        },
+        onToolCall(call) {
+          if (!isRunAlive(run)) return;
+          const argumentsJson = JSON.stringify(call.arguments ?? {});
+          const atMs = servicesRef.current.now() - run.startTime;
+          run.contentStartedAtMs ??= atMs;
+          const step: ToolStep = { id: call.id, name: call.name, argumentsJson, startedAtMs: atMs };
+          run.toolSteps.push(step);
+          run.contentSegments = appendContentSegment(run.contentSegments,
+            { type: "tool", toolId: call.id }, atMs);
+          if (isForeground(conversationId)) {
+            // 工具边界前先提交 rAF 缓冲，避免稍后的增量覆盖工具位置。
+            streamBatcherRef.current?.flush();
+            emit({ messageId: run.assistant.id, call: step, type: "tool-call", contentSegments: run.contentSegments });
+          }
+          schedulePartialPersistence();
+        },
+        onToolOutput(output) {
+          if (!isRunAlive(run)) return;
+          const step = run.toolSteps.find((item) => item.id === output.id);
+          if (step === undefined || step.result !== undefined) return;
+          step.liveOutput = keepTail((step.liveOutput ?? "") + output.text, liveOutputLimit);
+          run.liveOutputDirty.add(step.id);
+          scheduleLiveOutputFlush();
+          schedulePartialPersistence();
+        },
+        onToolResult(result) {
+          if (!isRunAlive(run)) return;
+          const step = run.toolSteps.find((s) => s.id === result.id);
+          const timedResult = { output: result.output, isError: result.isError, durationMs: result.durationMs,
+            endedAtMs: servicesRef.current.now() - run.startTime,
+            ...(result.command !== undefined ? { command: result.command } : {}) };
+          if (step !== undefined) {
+            step.result = timedResult;
+            delete step.liveOutput;
+            run.liveOutputDirty.delete(step.id);
+          }
+          if (isForeground(conversationId)) {
+            emit({
+              messageId: run.assistant.id,
+              callId: result.id,
+              result: timedResult,
+              type: "tool-result",
+            });
+          }
+          schedulePartialPersistence();
+        },
+        onPermissionRequest(request) {
+          if (!isRunAlive(run)) return;
+          if (run.cancelling === true) return;
+          run.pendingPermission = {
+            messageId: run.assistant.id,
+            requestId: request.requestId,
+            toolName: request.toolName,
+            argumentsJson: JSON.stringify(request.arguments ?? {}),
+            ...(request.callId !== undefined ? { callId: request.callId } : {}),
+          };
+          syncRunActivity();
+          if (isForeground(conversationId)) emit({ ...run.pendingPermission, type: "permission-requested" });
+        },
+        onPermissionResolved(resolved) {
+          if (run.pendingPermission?.requestId === resolved.requestId) {
+            run.pendingPermission = undefined;
+            syncRunActivity();
+          }
+          if (isForeground(conversationId)) {
+            emit({ type: "permission-resolved", requestId: resolved.requestId, approved: resolved.approved });
+          }
+        },
+        onRunStatus(status) {
+          if (!isRunAlive(run) || status.runId !== run.assistant.run?.id) return;
+          if (status.status !== "cancelling") {
+            const waiting = status.status === "waiting_for_workspace";
+            if (run.waitingForWorkspace !== waiting) {
+              run.waitingForWorkspace = waiting;
+              syncRunActivity();
+            }
+          }
+          if (!isForeground(conversationId)) return;
+          if (status.status === "cancelling") {
+            emit({ type: "run-cancelling", messageId: run.assistant.id, pending: status.pending });
+          } else {
+            // 等待同一项目中其他任务写入时说明原因；拿到写入权后恢复为运行中
+            emit({ type: "run-waiting", messageId: run.assistant.id, pending: status.status === "waiting_for_workspace" ? status.pending : [] });
+          }
+        },
+        onSupplementDelivered(delivered) {
+          if (!isRunAlive(run) || delivered.runId !== run.assistant.run?.id) return;
+          const supplements = (run.assistant.supplements ?? []).map((item) =>
+            delivered.ids.includes(item.id) ? { ...item, state: "delivered" as const } : item,
+          );
+          run.assistant = { ...run.assistant, supplements };
+          if (isForeground(conversationId)) {
+            emit({ type: "supplements-changed", messageId: run.assistant.id, supplements });
+          }
+          schedulePartialPersistence();
+        },
+        onRunStarted(started) {
+          const record = run.assistant.run;
+          if (!isRunAlive(run) || record === undefined || started.runId !== record.id) return;
+          run.runConfirmed = true;
+          // 以网关解析后的规范路径为准记录运行归属
+          const confirmed = { ...record, workspace: started.workspace };
+          run.assistant = { ...run.assistant, run: confirmed };
+          if (isForeground(conversationId)) {
+            emit({ type: "run-started", messageId: run.assistant.id, run: confirmed });
+          }
+          schedulePartialPersistence();
+        },
+        onTurn(turn) {
+          // Agent 多轮各自上报 usage 时逐轮累加；done 事件的最终 usage 优先（finishRun 取 usage ?? run.usage）
+          if (!isRunAlive(run) || turn.usage === undefined) return;
+          const previous = run.usage;
+          run.usage = {
+            promptTokens: (previous?.promptTokens ?? 0) + (turn.usage.promptTokens ?? 0),
+            completionTokens: (previous?.completionTokens ?? 0) + (turn.usage.completionTokens ?? 0),
+            totalTokens: (previous?.totalTokens ?? 0) + (turn.usage.totalTokens ?? 0),
+          };
+        },
+        onEventSeq(seq) {
+          if (isRunAlive(run)) run.lastSeq = seq;
+        },
+        onRunNote(note) {
+          if (!isRunAlive(run)) return;
+          const runNotes = [...(run.assistant.runNotes ?? []), note];
+          run.assistant = { ...run.assistant, runNotes };
+          if (isForeground(conversationId)) emit({ type: "run-notes-changed", messageId: run.assistant.id, runNotes });
+          schedulePartialPersistence();
+        },
+        onEventGap() {
+          // 网关已丢弃的那段过程无法回填，结束时如实说明
+          if (isRunAlive(run)) run.eventGap = true;
+        },
+        signal: run.controller.signal,
+      };
+
+      try {
+        let connected: StreamChatResult | RecoveredRun;
+        try {
+          connected = await connect(streamOptions);
+        } catch (error) {
+          const recovered = await reconnectRun(run, streamOptions, error);
+          if (recovered === undefined) throw error;
+          connected = recovered;
+        }
+        if ("recovered" in connected) {
+          await finishRecoveredRun(run, connected);
+          return;
+        }
+        const result = connected;
+        if (result.stopReason === "cancelled") {
+          const unknown = result.unknownOperations ?? [];
+          await finishRun(run, "stopped", undefined, undefined, result.usage, undefined, undefined, {
+            confirmed: unknown.length === 0,
+            ...(unknown.length > 0 ? { unknown } : {}),
+          });
+          return;
+        }
+        if (run.controller.signal.aborted) {
+          await finishRun(run, "stopped", undefined, undefined, undefined, undefined, undefined, cancellationForAbort(run));
+          return;
+        }
+        if (run.eventGap === true) {
+          const recovery: RunRecoveryRecord = { status: "completed", gap: true };
+          run.assistant = { ...run.assistant, recovery };
+          if (isForeground(conversationId)) emit({ type: "recovery-changed", messageId: run.assistant.id, recovery });
+        }
+        const loopStopped = result.stopReason === "loop_detected";
+        // 上下文超限的说明已作为运行提示记录在消息上
+        const contextOverflow = result.stopReason === "context_overflow";
+        // 流正常结束但零输出（如推理模型思考耗尽 token 预算）视为可重试失败，避免空气泡被静默隐藏；
+        // 循环叫停或上下文超限时已执行的工具步骤仍有价值，即使没有正文也按完成落盘
+        const failed = run.text.length === 0 && !loopStopped && !contextOverflow;
+        await finishRun(
+          run,
+          failed ? "failed" : "complete",
+          failed ? "PROVIDER_ERROR" : undefined,
+          failed ? undefined : result.truncated,
+          result.usage,
+          loopStopped,
+        );
+      } catch (error) {
+        if (!isRunAlive(run)) return;
+        const code =
+          run.controller.signal.aborted
+            ? "ABORTED"
+            : error instanceof ChatClientError
+              ? error.code
+              : "SERVICE_UNAVAILABLE";
+        // 网关透传的上游错误原因只随 PROVIDER_ERROR 展示，其余错误码已有专门文案
+        const detail = error instanceof ChatClientError && error.code === "PROVIDER_ERROR" ? error.detail : undefined;
+        if (code === "ABORTED") await finishRun(run, "stopped", undefined, undefined, undefined, undefined, undefined, cancellationForAbort(run));
+        else await finishRun(run, "failed", code, undefined, undefined, undefined, detail);
+      }
+    },
+    [emit, finishRun, finishRecoveredRun, isForeground, isRunAlive, queueMessage, reconnectRun, syncRunActivity],
+  );
+
+  /**
+   * 残留为“运行中”的 Agent 消息（窗口刷新、应用重启）：向网关确认运行状态。
+   * 运行仍在执行或刚结束、事件仍保留时重新连接，从头回放事件重建这条消息（包括仍在等待的审批）；
+   * 否则依据运行记录标记结局（已完成但输出缺失、失败、已取消、被中断或未知），不重放任何操作。
+   */
+  const recoverStaleRun = useCallback(
+    async (message: ChatMessage): Promise<void> => {
+      const record = message.run;
+      if (record === undefined || message.status !== "streaming") return;
+      const conversationId = message.conversationId;
+      if (runsRef.current.has(conversationId)) return;
+      const state = await servicesRef.current.getRunState(record.id);
+      if (!mountedRef.current || runsRef.current.has(conversationId)) return;
+
+      if (state.kind === "active" || (state.kind === "finished" && state.retained)) {
+        const assistant: ChatMessage = {
+          id: message.id,
+          conversationId,
+          role: "assistant",
+          createdAt: message.createdAt,
+          status: "streaming",
+          text: "",
+          run: record,
+          ...(message.provider !== undefined ? { provider: message.provider } : {}),
+          ...(message.model !== undefined ? { model: message.model } : {}),
+          ...(message.skills !== undefined ? { skills: message.skills } : {}),
+          ...(message.supplements !== undefined ? { supplements: message.supplements } : {}),
+          ...(message.branchRootId !== undefined ? { branchRootId: message.branchRootId } : {}),
+          ...(message.branchVersion !== undefined ? { branchVersion: message.branchVersion } : {}),
+        };
+        const run: ActiveRun = {
+          assistant,
+          controller: new AbortController(),
+          preparation: Promise.resolve(),
+          text: "",
+          ...(message.provider !== undefined ? { provider: message.provider } : {}),
+          ...(message.model !== undefined ? { model: message.model } : {}),
+          startTime: record.startedAt,
+          toolSteps: [],
+          contentSegments: [],
+          token: ++runTokenRef.current,
+          ended: Promise.resolve(),
+          resolveEnded: () => undefined,
+          liveOutputDirty: new Set(),
+          runConfirmed: true,
+        };
+        run.ended = new Promise<void>((resolve) => { run.resolveEnded = resolve; });
+        runsRef.current.set(conversationId, run);
+        syncRunActivity();
+        if (isForeground(conversationId)) emit({ type: "run-reattached", message: assistant });
+        await driveRun(run, async (options) => {
+          const resumed = await servicesRef.current.resumeRun(record.id, 0, options);
+          return resumed.kind === "resumed" ? resumed.result : { recovered: true, state: resumed.state };
+        });
+        return;
+      }
+
+      const recovery = recoveryFor(state, false);
+      const status = recovery.status === "completed" ? "complete" : recovery.status === "failed" ? "failed" : "stopped";
+      const settled: ChatMessage = { ...message, status, recovery, ...(status === "stopped" ? { interrupted: true } : {}) };
+      await queueMessage(settled).catch(() => undefined);
+      if (isForeground(conversationId)) emit({ type: "run-recovered", message: settled });
+      onConversationUpdatedRef.current?.();
+    },
+    [driveRun, emit, isForeground, queueMessage, syncRunActivity],
+  );
+
+  /** 启动时网关里仍在执行的运行（窗口刷新后）：找到各自会话里的残留消息并在后台接回 */
+  const reattachBackgroundRuns = useCallback(async (): Promise<void> => {
+    if (!isDesktopApp()) return;
+    const active = await servicesRef.current.listActiveRuns();
+    for (const item of active) {
+      if (item.conversationId === undefined || runsRef.current.has(item.conversationId)) continue;
+      const recent = await servicesRef.current.repository.listMessages(item.conversationId, { limit: 5 }).catch(() => []);
+      const message = recent.find((candidate) => candidate.run?.id === item.runId && candidate.status === "streaming");
+      if (message !== undefined) void recoverStaleRun(message);
+    }
+  }, [recoverStaleRun]);
+
+  useEffect(() => {
+    recoverStaleRunRef.current = recoverStaleRun;
+    reattachBackgroundRunsRef.current = reattachBackgroundRuns;
+  }, [reattachBackgroundRuns, recoverStaleRun]);
+
   const startAssistant = useCallback(
     async (
       history: ChatMessage[],
@@ -871,6 +1473,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       branch?: { branchRootId: string; branchVersion: number },
       preparedAssistant?: ChatMessage,
       conversationSnapshot?: Conversation,
+      /** 用户触发发送那一刻的执行模式；缺省取当前模式 */
+      executionModeAtSubmit: AgentExecutionMode = agentModeRef.current,
     ): Promise<void> => {
       const conversation = conversationSnapshot ?? stateRef.current.activeConversation;
       const activeConfig = activeLlmConfigRef.current;
@@ -878,6 +1482,15 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       const currentModel = activeConfig?.model ?? "step-3.7-flash";
       const activeSkills = activeSkillsRef.current ?? [];
       const currentSkillNames = activeSkills.map((s) => s.name);
+      // 运行身份在提交的同步阶段固定：之后的落盘、引用展开与请求期间切换项目或执行模式都不影响本次运行
+      const runRecord = isDesktopApp()
+        ? {
+            id: servicesRef.current.runId(),
+            workspace: conversation?.workspace ?? null,
+            executionMode: executionModeAtSubmit,
+            startedAt: servicesRef.current.now(),
+          }
+        : undefined;
       const assistant: ChatMessage = {
         conversationId: history.at(-1)?.conversationId ?? "",
         createdAt: nextTimestamp(),
@@ -889,6 +1502,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         model: currentModel,
         ...(currentSkillNames.length > 0 ? { skills: currentSkillNames } : {}),
         ...preparedAssistant,
+        ...(runRecord !== undefined ? { run: runRecord } : {}),
         status: "streaming",
       };
 
@@ -903,7 +1517,11 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         toolSteps: [],
         contentSegments: [],
         token: ++runTokenRef.current,
+        ended: Promise.resolve(),
+        resolveEnded: () => undefined,
+        liveOutputDirty: new Set(),
       };
+      run.ended = new Promise<void>((resolve) => { run.resolveEnded = resolve; });
       runsRef.current.set(assistant.conversationId, run);
       syncRunActivity();
       if (isForeground(assistant.conversationId)) emit({ assistant, type: "send-started", user });
@@ -928,38 +1546,14 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         return;
       }
 
-      const schedulePartialPersistence = () => {
-        if (run.timer !== undefined || !isRunAlive(run)) return;
-        run.timer = setTimeout(() => {
-          run.timer = undefined;
-          if (!isRunAlive(run)) return;
-          void queueMessage({
-            ...run.assistant,
-            status: "streaming",
-            text: run.text,
-            contentSegments: run.contentSegments,
-            contentStartedAtMs: run.contentStartedAtMs,
-            ...(run.thought !== undefined ? { thought: run.thought } : {}),
-            ...(run.provider !== undefined ? { provider: run.provider } : {}),
-            ...(run.model !== undefined ? { model: run.model } : {}),
-            ...(run.sources !== undefined ? { sources: run.sources } : {}),
-            ...(run.toolSteps.length > 0
-              ? { toolSteps: run.toolSteps.map((step) => ({ ...step })) }
-              : {}),
-          }).catch(() => undefined);
-        }, partialPersistenceInterval);
-      };
-
-      try {
+      await driveRun(run, async (options) => {
         const requestMessages = await makeRequestMessages(history, pendingImage, 0, undefined, conversation);
         const locale = conversation?.locale ?? stateRef.current.locale;
-        // 流正常结束但零输出（如推理模型思考耗尽 token 预算）视为可重试失败，
-        // 避免空气泡被静默隐藏
         const currentTime = formatClientTimestamp(servicesRef.current.now(), locale);
-        const conversationId = run.assistant.conversationId;
         // 思考档位只由桌面网关映射到各厂商参数；Web 端 Functions 不识别该字段
         const reasoningEffort = isDesktopApp() && activeConfig !== undefined ? readReasoningEffort(activeConfig) : undefined;
-        const result = await servicesRef.current.streamChat(
+        const conversationId = run.assistant.conversationId;
+        return await servicesRef.current.streamChat(
           {
             locale,
             messages: requestMessages,
@@ -983,14 +1577,17 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
               ? { smartSearch: true }
               : {}),
             ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
-            ...(isDesktopApp()
+            ...(runRecord !== undefined
               ? {
                   agent: {
                     enabled: true,
-                    executionMode: agentModeRef.current,
-                    workspace: projectManager.getState().activeProject ?? undefined,
+                    executionMode: runRecord.executionMode,
+                    ...(runRecord.workspace !== null ? { workspace: runRecord.workspace } : {}),
+                    runId: runRecord.id,
+                    conversationId,
                     // 只有能收图的模型才会拿到 look 截图工具
                     vision: activeConfig !== undefined && supportsImageInput(activeConfig),
+                    ...(activeConfig?.custom?.contextWindow !== undefined ? { contextWindow: activeConfig.custom.contextWindow } : {}),
                     ...(activeConfig?.custom !== undefined
                       ? { maxTurns: activeConfig.custom.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS }
                       : {}),
@@ -998,144 +1595,11 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
                 }
               : {}),
           },
-          {
-            onDelta(text) {
-              if (!isRunAlive(run) || text.length === 0) return;
-              const start = run.text.length;
-              const atMs = servicesRef.current.now() - run.startTime;
-              run.contentStartedAtMs ??= atMs;
-              run.text += text;
-              run.contentSegments = appendContentSegment(run.contentSegments,
-                { type: "text", start, end: run.text.length }, atMs);
-              if (isForeground(conversationId)) {
-                streamBatcherRef.current?.push({ messageId: run.assistant.id, text, type: "delta", contentSegments: run.contentSegments });
-              }
-              schedulePartialPersistence();
-            },
-            onNotice(code) {
-              if (isRunAlive(run)) onNoticeRef.current?.(code);
-            },
-            onThought(text) {
-              if (!isRunAlive(run) || text.length === 0) return;
-              const start = run.thought?.length ?? 0;
-              const atMs = servicesRef.current.now() - run.startTime;
-              run.contentStartedAtMs ??= atMs;
-              run.thought = (run.thought ?? "") + text;
-              run.contentSegments = appendContentSegment(run.contentSegments,
-                { type: "thought", start, end: run.thought.length, startedAtMs: atMs }, atMs);
-              if (isForeground(conversationId)) {
-                streamBatcherRef.current?.push({
-                  messageId: run.assistant.id,
-                  text,
-                  type: "thought-delta",
-                  contentSegments: run.contentSegments,
-                });
-              }
-              schedulePartialPersistence();
-            },
-            onSources(sources) {
-              if (!isRunAlive(run) || sources.length === 0) return;
-              run.sources = sources;
-              if (isForeground(conversationId)) emit({ messageId: run.assistant.id, sources, type: "sources-received" });
-              schedulePartialPersistence();
-            },
-            onToolCall(call) {
-              if (!isRunAlive(run)) return;
-              const argumentsJson = JSON.stringify(call.arguments ?? {});
-              const atMs = servicesRef.current.now() - run.startTime;
-              run.contentStartedAtMs ??= atMs;
-              const step: ToolStep = { id: call.id, name: call.name, argumentsJson, startedAtMs: atMs };
-              run.toolSteps.push(step);
-              run.contentSegments = appendContentSegment(run.contentSegments,
-                { type: "tool", toolId: call.id }, atMs);
-              if (isForeground(conversationId)) {
-                // 工具边界前先提交 rAF 缓冲，避免稍后的增量覆盖工具位置。
-                streamBatcherRef.current?.flush();
-                emit({ messageId: run.assistant.id, call: step, type: "tool-call", contentSegments: run.contentSegments });
-              }
-              schedulePartialPersistence();
-            },
-            onToolResult(result) {
-              if (!isRunAlive(run)) return;
-              const step = run.toolSteps.find((s) => s.id === result.id);
-              const timedResult = { output: result.output, isError: result.isError, durationMs: result.durationMs,
-                endedAtMs: servicesRef.current.now() - run.startTime };
-              if (step !== undefined) {
-                step.result = timedResult;
-              }
-              if (isForeground(conversationId)) {
-                emit({
-                  messageId: run.assistant.id,
-                  callId: result.id,
-                  result: timedResult,
-                  type: "tool-result",
-                });
-              }
-              schedulePartialPersistence();
-            },
-            onPermissionRequest(request) {
-              if (!isRunAlive(run)) return;
-              run.pendingPermission = {
-                messageId: run.assistant.id,
-                requestId: request.requestId,
-                toolName: request.toolName,
-                argumentsJson: JSON.stringify(request.arguments ?? {}),
-              };
-              syncRunActivity();
-              if (isForeground(conversationId)) emit({ ...run.pendingPermission, type: "permission-requested" });
-            },
-            onPermissionResolved(resolved) {
-              if (run.pendingPermission?.requestId === resolved.requestId) {
-                run.pendingPermission = undefined;
-                syncRunActivity();
-              }
-              if (isForeground(conversationId)) {
-                emit({ type: "permission-resolved", requestId: resolved.requestId, approved: resolved.approved });
-              }
-            },
-            onTurn(turn) {
-              // Agent 多轮各自上报 usage 时逐轮累加；done 事件的最终 usage 优先（finishRun 取 usage ?? run.usage）
-              if (!isRunAlive(run) || turn.usage === undefined) return;
-              const previous = run.usage;
-              run.usage = {
-                promptTokens: (previous?.promptTokens ?? 0) + (turn.usage.promptTokens ?? 0),
-                completionTokens: (previous?.completionTokens ?? 0) + (turn.usage.completionTokens ?? 0),
-                totalTokens: (previous?.totalTokens ?? 0) + (turn.usage.totalTokens ?? 0),
-              };
-            },
-            signal: run.controller.signal,
-          },
+          options,
         );
-        if (run.controller.signal.aborted) {
-          await finishRun(run, "stopped");
-          return;
-        }
-        const loopStopped = result.stopReason === "loop_detected";
-        // 循环叫停时已执行的工具步骤仍有价值，即使没有正文也按完成落盘
-        const failed = run.text.length === 0 && !loopStopped;
-        await finishRun(
-          run,
-          failed ? "failed" : "complete",
-          failed ? "PROVIDER_ERROR" : undefined,
-          failed ? undefined : result.truncated,
-          result.usage,
-          loopStopped,
-        );
-      } catch (error) {
-        if (!isRunAlive(run)) return;
-        const code =
-          error instanceof ChatClientError
-            ? error.code
-            : run.controller.signal.aborted
-              ? "ABORTED"
-              : "SERVICE_UNAVAILABLE";
-        // 网关透传的上游错误原因只随 PROVIDER_ERROR 展示，其余错误码已有专门文案
-        const detail = error instanceof ChatClientError && error.code === "PROVIDER_ERROR" ? error.detail : undefined;
-        if (code === "ABORTED") await finishRun(run, "stopped");
-        else await finishRun(run, "failed", code, undefined, undefined, undefined, detail);
-      }
+      });
     },
-    [emit, finishRun, isForeground, isRunAlive, makeRequestMessages, nextTimestamp, queueMessage, syncRunActivity],
+    [driveRun, emit, finishRun, isForeground, isRunAlive, makeRequestMessages, nextTimestamp, queueMessage, syncRunActivity],
   );
 
   const compressConversation = useCallback(
@@ -1338,12 +1802,72 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       }
       const run = runsRef.current.get(conversationId);
       if (run === undefined) return;
+      const runId = run.assistant.run?.id;
+      // 网关已确认的运行走显式取消：连接保持，等命令终止并确认后以 cancelled 结束，
+      // 界面在此期间显示“正在取消”，而不是立即断言所有操作已停止
+      if (runId !== undefined && run.runConfirmed === true && !run.controller.signal.aborted) {
+        if (run.cancelling !== true) {
+          run.cancelling = true;
+          run.pendingPermission = undefined;
+          syncRunActivity();
+          if (isForeground(conversationId)) emit({ type: "run-cancelling", messageId: run.assistant.id });
+          const requested = await cancelAgentRun(runId);
+          if (requested !== "failed" && (await settlesWithin(run.ended, cancelSettleTimeoutMs))) return;
+        } else if (await settlesWithin(run.ended, cancelSettleTimeoutMs)) {
+          return;
+        }
+        if (!isRunAlive(run)) return;
+      }
       run.controller.abort();
       await run.preparation.catch(() => undefined);
-      await finishRun(run, "stopped");
+      await finishRun(run, "stopped", undefined, undefined, undefined, undefined, undefined, cancellationForAbort(run));
     },
-    [emit, finishRun, isForeground],
+    [emit, finishRun, isForeground, isRunAlive, syncRunActivity],
   );
+
+  /** 只停止某条运行中的命令，运行继续 */
+  const updateSupplements = useCallback(
+    (run: ActiveRun, update: (current: ReadonlyArray<SupplementRecord>) => ReadonlyArray<SupplementRecord>) => {
+      const next = update(run.assistant.supplements ?? []);
+      run.assistant = { ...run.assistant, supplements: next };
+      if (isForeground(run.assistant.conversationId)) {
+        emit({ type: "supplements-changed", messageId: run.assistant.id, supplements: next });
+      }
+      run.schedulePersistence?.();
+    },
+    [emit, isForeground],
+  );
+
+  /** 当前会话的 Agent 运行中追加补充要求：排队等待下一次调用模型前送达，不中断任务 */
+  const supplement = useCallback(
+    async (text: string): Promise<SupplementResult> => {
+      const normalized = text.trim();
+      const conversationId = stateRef.current.activeConversation?.id;
+      const run = conversationId === undefined ? undefined : runsRef.current.get(conversationId);
+      const runId = run?.assistant.run?.id;
+      if (normalized.length === 0 || run === undefined || runId === undefined || !isRunAlive(run) || run.runConfirmed !== true || run.cancelling === true) {
+        return "unavailable";
+      }
+      // 补充编号单独生成，不占用消息 id 序列
+      const record: SupplementRecord = { id: crypto.randomUUID(), text: normalized, createdAt: servicesRef.current.now(), state: "queued" };
+      updateSupplements(run, (current) => [...current, record]);
+      const result = await submitAgentSupplement(runId, record.id, record.text);
+      if (result.status === "queued") return "queued";
+      // 网关拒绝（运行正在收尾或已取消）：补充没有排上，运行若已结束则 finishRun 已标记
+      if (isRunAlive(run)) {
+        updateSupplements(run, (current) => current.map((item) => (item.id === record.id && item.state === "queued" ? { ...item, state: "undelivered" as const } : item)));
+      }
+      return "undelivered";
+    },
+    [isRunAlive, updateSupplements],
+  );
+
+  const stopToolCall = useCallback(async (callId: string): Promise<boolean> => {
+    const run = [...runsRef.current.values()].find((item) => item.toolSteps.some((step) => step.id === callId));
+    const runId = run?.assistant.run?.id;
+    if (run === undefined || runId === undefined || run.runConfirmed !== true) return false;
+    return await stopAgentToolCall(runId, callId);
+  }, []);
 
   /** 只停止当前显示的会话，后台会话继续运行 */
   const stop = useCallback(async (): Promise<void> => {
@@ -1365,6 +1889,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   const send = useCallback(
     async (text: string): Promise<void> => {
       if (!text.trim() && !stateRef.current.pendingImage) return;
+      // 空白会话绑定到用户按下发送时选中的项目，之后的异步准备期间切换项目不影响本次任务
+      const activeProjectAtSubmit = projectManager.getState().activeProject;
+      const executionModeAtSubmit = agentModeRef.current;
       if (stateRef.current.phase === "streaming") {
         const streamingId = stateRef.current.activeConversation?.id;
         await stop();
@@ -1387,8 +1914,21 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       if (normalized.length === 0 && pendingImage === undefined) return;
 
       const targetConversationId = snapshot.activeConversation.id;
+      const binding = workspaceBinding(
+        snapshot.activeConversation,
+        snapshot.messages.length > 0 || Boolean(snapshot.activeConversation.summary),
+      );
+      const bindWorkspace = isDesktopApp() && binding.kind === "pending";
+      const runWorkspace = runWorkspaceFor(binding, activeProjectAtSubmit);
       await withSendingLock(targetConversationId, async () => {
         try {
+          if (bindWorkspace) {
+            await servicesRef.current.repository.setConversationWorkspace(targetConversationId, runWorkspace);
+            if (isForeground(targetConversationId)) {
+              emit({ type: "conversation-workspace-bound", conversationId: targetConversationId, workspace: runWorkspace });
+            }
+            onConversationUpdatedRef.current?.();
+          }
           // 未压缩历史达到阈值时先增量压缩，再发送（为摘要/长期记忆前缀预留槽位）；
           // 压缩基于界面状态，用户切走后不再继续压缩
           while (
@@ -1406,10 +1946,11 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
           // 压缩期间用户切到了别的会话：消息照常发出，运行直接转入后台
           const foreground = isForeground(targetConversationId);
-          const conversation = foreground
+          const loadedConversation = foreground
             ? stateRef.current.activeConversation
             : await servicesRef.current.repository.getConversation(targetConversationId);
-          if (conversation === undefined) return;
+          if (loadedConversation === undefined) return;
+          const conversation = bindWorkspace ? { ...loadedConversation, workspace: runWorkspace } : loadedConversation;
           const history = foreground
             ? stateRef.current.messages
             : await servicesRef.current.repository.listMessages(targetConversationId, { limit: historyWindowSize });
@@ -1425,7 +1966,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             status: "complete",
             text: normalized,
           };
-          await startAssistant([...history, user], user, image, undefined, undefined, conversation);
+          await startAssistant([...history, user], user, image, undefined, undefined, conversation, executionModeAtSubmit);
         } catch {
           if (isForeground(targetConversationId)) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
         }
@@ -1447,7 +1988,10 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     ) {
       return;
     }
-    await withSendingLock(snapshot.activeConversation.id, () => startAssistant(snapshot.messages, undefined));
+    const executionModeAtSubmit = agentModeRef.current;
+    await withSendingLock(snapshot.activeConversation.id, () =>
+      startAssistant(snapshot.messages, undefined, undefined, undefined, undefined, undefined, executionModeAtSubmit),
+    );
   }, [isSending, startAssistant, withSendingLock]);
 
   const recall = useCallback(async (): Promise<RecalledMessageData | undefined> => {
@@ -1525,6 +2069,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     if (isSending(current.activeConversation?.id) || !current.activeConversation || ["loading", "streaming", "compressing", "offline"].includes(current.phase)) return;
     if (text !== undefined && !text.trim()) return;
     const conversationId = current.activeConversation.id;
+    const executionModeAtSubmit = agentModeRef.current;
     await withSendingLock(conversationId, async () => { try {
       if (!current.activeConversation) return;
       await persistQueueRef.current;
@@ -1552,7 +2097,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         if (!mountedRef.current || stateRef.current.activeConversation?.id !== current.activeConversation.id) return;
         if (!compressed) break;
       }
-      await startAssistant(user ? [...preceding, user] : preceding, user, undefined, user ? undefined : branch, preparedAssistant);
+      await startAssistant(user ? [...preceding, user] : preceding, user, undefined, user ? undefined : branch, preparedAssistant, undefined, executionModeAtSubmit);
       onConversationUpdatedRef.current?.();
     } catch {
       if (isForeground(conversationId)) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
@@ -1620,6 +2165,10 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           ...(run !== undefined ? { running: true } : {}),
           ...(run?.pendingPermission !== undefined ? { pendingPermission: run.pendingPermission } : {}),
         });
+        focusConversationProject(currentConv);
+        if (run === undefined) {
+          for (const message of messages.filter(isStaleAgentRun)) void recoverStaleRunRef.current?.(message);
+        }
       } catch {
         emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
       }
@@ -1774,9 +2323,38 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
   const clearError = useCallback(() => emit({ type: "clear-error" }), [emit]);
 
+  const bindConversationWorkspace = useCallback(
+    async (workspace: string): Promise<boolean> => {
+      const conversation = stateRef.current.activeConversation;
+      if (
+        conversation === undefined ||
+        typeof conversation.workspace === "string" ||
+        runsRef.current.has(conversation.id) ||
+        isSending(conversation.id)
+      ) {
+        return false;
+      }
+      try {
+        await servicesRef.current.repository.setConversationWorkspace(conversation.id, workspace);
+      } catch {
+        return false;
+      }
+      if (isForeground(conversation.id)) {
+        emit({ type: "conversation-workspace-bound", conversationId: conversation.id, workspace });
+      }
+      onConversationUpdatedRef.current?.();
+      return true;
+    },
+    [emit, isForeground, isSending],
+  );
+
   const approvePermission = useCallback(
     async (requestId: string, approved: boolean, sessionScope = false): Promise<boolean> => {
-      return await submitAgentApproval({ requestId, approved, ...(sessionScope ? { sessionScope: true } : {}) });
+      // 审批绑定所属运行：取消中或已结束的运行不再回填决定
+      const run = [...runsRef.current.values()].find((item) => item.pendingPermission?.requestId === requestId);
+      const runId = run?.assistant.run?.id;
+      if (run === undefined || runId === undefined || run.cancelling === true) return false;
+      return await submitAgentApproval({ runId, requestId, approved, ...(sessionScope ? { sessionScope: true } : {}) });
     },
     [],
   );
@@ -1810,7 +2388,20 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     stop,
     stopConversation,
     runningConversations,
+    bindConversationWorkspace,
+    stopToolCall,
+    supplement,
   };
+}
+
+/**
+ * 打开已绑定项目的会话时，把界面浏览的项目对齐到该会话的项目，
+ * 使文件树、编辑器与审阅显示的正是这个任务操作的项目；未绑定的会话不改变当前项目
+ */
+function focusConversationProject(conversation: Conversation): void {
+  if (!isDesktopApp() || typeof conversation.workspace !== "string") return;
+  if (sameWorkspace(conversation.workspace, projectManager.getState().activeProject)) return;
+  void projectManager.switchProject(conversation.workspace);
 }
 
 /**
@@ -1827,6 +2418,7 @@ function withLiveRun(messages: ChatMessage[], run: ActiveRun): ChatMessage[] {
     ...(run.thought !== undefined ? { thought: run.thought } : {}),
     ...(run.sources !== undefined ? { sources: run.sources } : {}),
     ...(run.toolSteps.length > 0 ? { toolSteps: run.toolSteps.map((step) => ({ ...step })) } : {}),
+    ...(run.cancelling === true ? { cancelRequested: true } : {}),
   };
   const index = messages.findIndex((message) => message.id === live.id);
   return index < 0 ? [...messages, live] : messages.map((message, i) => (i === index ? live : message));

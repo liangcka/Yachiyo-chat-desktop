@@ -53,11 +53,12 @@ describe("ArtifactsPaneView", () => {
             },
           },
           {
-            id: "step-replace",
-            name: "replace_file_content",
+            id: "step-edit",
+            name: "edit_file",
             argumentsJson: JSON.stringify({
-              TargetFile: "src/styles/app.css",
-              ReplacementContent: ".box { color: red; }",
+              path: "src/styles/app.css",
+              old_string: ".box { color: blue; }",
+              new_string: ".box { color: red; }",
             }),
             result: {
               output: "File updated",
@@ -102,7 +103,7 @@ describe("ArtifactsPaneView", () => {
     // 检查代码文件操作卡片
     expect(screen.getByText("新建/重写文件")).toBeInTheDocument();
     expect(screen.getByText("src/components/NewFeature.tsx")).toBeInTheDocument();
-    expect(screen.getByText("更新文件代码")).toBeInTheDocument();
+    expect(screen.getByText("编辑文件")).toBeInTheDocument();
     expect(screen.getByText("src/styles/app.css")).toBeInTheDocument();
 
     // 检查终端命令卡片
@@ -128,5 +129,46 @@ describe("ArtifactsPaneView", () => {
     const closeLightboxBtn = screen.getByTitle("关闭预览 (Esc)");
     await user.click(closeLightboxBtn);
     expect(screen.queryByRole("dialog", { name: "图像全屏预览" })).not.toBeInTheDocument();
+  });
+
+  it("命令结论以网关记录为准，文件改动带上所属运行打开审阅", async () => {
+    const user = userEvent.setup();
+    const onOpenReview = vi.fn();
+    const messages: ChatMessage[] = [{
+      id: "msg-run",
+      conversationId: "conv-1",
+      role: "assistant",
+      text: "",
+      createdAt: 1,
+      status: "complete",
+      run: { id: "run-1", workspace: "D:/alpha", executionMode: "confirm", startedAt: 1 },
+      toolSteps: [
+        { id: "e1", name: "edit_file", argumentsJson: JSON.stringify({ path: "./src\\a.ts" }), result: { output: "ok", isError: false, durationMs: 1 } },
+        {
+          id: "c1",
+          name: "run_command",
+          argumentsJson: JSON.stringify({ command: "npm test" }),
+          result: {
+            output: "[结果] 失败：退出码 1",
+            isError: true,
+            durationMs: 1200,
+            command: { executionId: "x", command: "npm test", cwd: "D:/alpha", exitCode: 1, durationMs: 1200, endReason: "exited", exitConfirmed: true, outputBytes: 10, truncated: false },
+          },
+        },
+        { id: "c2", name: "run_command", argumentsJson: JSON.stringify({ command: "npm run dev" }) },
+        { id: "r1", name: "replace_file_content", argumentsJson: JSON.stringify({ TargetFile: "x.css" }), result: { output: "ok", isError: false, durationMs: 1 } },
+      ],
+    }];
+    render(<ArtifactsPaneView messages={messages} imageUrls={new Map()} onOpenReview={onOpenReview} />);
+
+    expect(screen.getByText("（3）")).toBeInTheDocument();
+    expect(screen.queryByText("x.css")).toBeNull();
+    expect(screen.getByText("src/a.ts")).toBeInTheDocument();
+    expect(screen.getByText("退出码 1 · 1.2 秒")).toBeInTheDocument();
+    expect(screen.getByLabelText("失败")).toBeInTheDocument();
+    expect(screen.getByLabelText("结果未知")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /查看改动/ }));
+    expect(onOpenReview).toHaveBeenCalledWith({ runId: "run-1", workspace: "D:/alpha" });
   });
 });

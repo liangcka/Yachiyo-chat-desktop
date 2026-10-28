@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatMessage, ToolStep } from "./chat";
-import { collectModifiedFiles } from "./file-changes";
+import { collectModifiedFiles, reviewableRuns } from "./file-changes";
 
 function step(name: string, path: unknown, result: ToolStep["result"] = { output: "ok", isError: false, durationMs: 1 }): ToolStep {
   return { id: `${name}-${String(path)}`, name, argumentsJson: JSON.stringify({ path }), result };
@@ -36,5 +36,23 @@ describe("collectModifiedFiles", () => {
 
   it("用户消息不汇总", () => {
     expect(collectModifiedFiles({ ...message, role: "user", toolSteps: [step("edit_file", "a.ts")] })).toEqual([]);
+  });
+});
+
+describe("reviewableRuns", () => {
+  it("按时间倒序列出绑定了项目的运行，附带触发请求，跳过未绑定项目的运行与重复身份", () => {
+    const user = (id: string, text: string): ChatMessage => ({ id, conversationId: "chat", role: "user", status: "complete", text, createdAt: 1 });
+    const reply = (id: string, runId: string, workspace: string | null): ChatMessage => ({
+      ...message, id, run: { id: runId, workspace, executionMode: "confirm", startedAt: Number(id.slice(1)) },
+    });
+    expect(reviewableRuns([
+      user("u1", "修复\n  登录"), reply("a1", "run-1", "D:/alpha"),
+      user("u2", "闲聊"), reply("a2", "run-2", null),
+      user("u3", "重试"), reply("a3", "run-1", "D:/alpha"),
+      user("u4", "更新文档"), reply("a4", "run-4", "D:/beta"),
+    ])).toEqual([
+      { runId: "run-4", workspace: "D:/beta", startedAt: 4, request: "更新文档" },
+      { runId: "run-1", workspace: "D:/alpha", startedAt: 1, request: "修复 登录" },
+    ]);
   });
 });

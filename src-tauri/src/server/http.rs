@@ -43,6 +43,7 @@ pub struct AppState {
     pub token: String,
     pub approvals: Arc<crate::gateway::agent::permission::ApprovalRegistry>,
     pub mcp_manager: Arc<crate::mcp::McpManager>,
+    pub runs: Arc<crate::gateway::agent::run_registry::RunRegistry>,
 }
 
 /// 判断提供商是否属于国内大模型服务商（智谱 GLM、DeepSeek、阶跃星辰 Stepfun）
@@ -150,6 +151,7 @@ async fn handle_chat(
         state.workspace_manager,
         Arc::clone(&state.approvals),
         Arc::clone(&state.mcp_manager),
+        Arc::clone(&state.runs),
     );
     let body_stream = stream.map(|res| match res {
         Ok(s) => Ok::<_, axum::Error>(axum::body::Bytes::from(s)),
@@ -374,6 +376,9 @@ async fn handle_list_models(
 
 #[derive(Debug, Deserialize)]
 pub struct AgentApprovalRequest {
+    /// 审批所属运行：只有仍在执行且未取消的运行才接受审批
+    #[serde(rename = "runId")]
+    pub run_id: String,
     #[serde(rename = "requestId")]
     pub request_id: String,
     #[serde(default)]
@@ -388,6 +393,13 @@ async fn handle_agent_approval(
     Json(payload): Json<AgentApprovalRequest>,
 ) -> impl IntoResponse {
     use crate::gateway::agent::permission::{ApprovalChoice, ApprovalDecision};
+    // 取消之后迟到的批准、或编号与运行不符的批准一律拒绝，不能让旧审批重新触发执行
+    if !state.runs.accepts_approval(&payload.run_id, &payload.request_id) {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "error": "Run is not active or the request does not belong to it" })),
+        );
+    }
     let decision = match payload.decision {
         Some(ApprovalChoice::Once) => ApprovalDecision { approved: true, session_scope: false },
         Some(ApprovalChoice::Always) => ApprovalDecision { approved: true, session_scope: true },
@@ -401,6 +413,103 @@ async fn handle_agent_approval(
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "Unknown or expired requestId" })),
         )
+    }
+}
+
+/// 网关内仍在执行的运行（含 SSE 已断开、仍在收尾的运行）及其正在执行的命令
+async fn handle_list_agent_runs(State(state): State<AppState>) -> impl IntoResponse {
+    Json(serde_json::json!({ "runs": state.runs.list() }))
+}
+
+/// 请求取消运行：返回时运行进入“正在取消”，命令终止并确认后运行才以 cancelled 结束
+async fn handle_cancel_agent_run(State(state): State<AppState>, Path(run_id): Path<String>) -> Response {
+    match state.runs.cancel(&run_id) {
+        Some(snapshot) => (StatusCode::ACCEPTED, Json(serde_json::json!({ "run": snapshot }))).into_response(),
+        None => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "Run is not active" }))).into_response(),
+    }
+}
+
+/// 运行的状态：活跃、已结束（事件可能仍可回填）或从运行记录得知的结局（重启后仍为运行中的记录报告为被中断）
+async fn handle_agent_run_state(State(state): State<AppState>, Path(run_id): Path<String>) -> Response {
+    match state.runs.state(&run_id) {
+        Some(run) => (StatusCode::OK, Json(serde_json::json!({ "state": run }))).into_response(),
+        None => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "RUN_UNKNOWN" }))).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct RunEventsQuery {
+    #[serde(default)]
+    after: u64,
+}
+
+/// 重新连接运行的事件流：从 after 之后回填，再实时推送，直到运行结束。
+/// 事件日志已不在内存中时返回 404 与运行状态，客户端据此标记结局，不重放任何操作
+async fn handle_agent_run_events(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<RunEventsQuery>,
+) -> Response {
+    let Some(control) = state.runs.lookup(&run_id) else {
+        let body = match state.runs.state(&run_id) {
+            Some(run) => serde_json::json!({ "error": "RUN_EVENTS_UNAVAILABLE", "state": run }),
+            None => serde_json::json!({ "error": "RUN_UNKNOWN" }),
+        };
+        return (StatusCode::NOT_FOUND, Json(body)).into_response();
+    };
+    let body_stream = crate::gateway::agent::run_events::subscribe(Arc::clone(&control.events), query.after)
+        .map(|res| res.map(axum::body::Bytes::from));
+    Response::builder()
+        .header(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")
+        .header(header::CACHE_CONTROL, "no-store")
+        .header("x-accel-buffering", "no")
+        .body(Body::from_stream(body_stream))
+        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Stream initialization failed").into_response())
+}
+
+#[derive(Deserialize)]
+struct AgentSupplementRequest {
+    id: String,
+    text: String,
+}
+
+/// 运行中追加补充要求：排队等待下一次调用模型前送达；运行已结束、取消或正在收尾时返回 409
+async fn handle_supplement_agent_run(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+    Json(payload): Json<AgentSupplementRequest>,
+) -> Response {
+    use crate::gateway::agent::run_registry::{Supplement, SupplementRejected};
+    match state.runs.supplement(&run_id, Supplement { id: payload.id, text: payload.text }) {
+        Ok(()) => (StatusCode::ACCEPTED, Json(serde_json::json!({ "status": "queued" }))).into_response(),
+        Err(reason) => {
+            let status = if reason == SupplementRejected::Invalid { StatusCode::BAD_REQUEST } else { StatusCode::CONFLICT };
+            (status, Json(serde_json::json!({ "error": reason.code() }))).into_response()
+        }
+    }
+}
+
+/// 按工具调用停止命令（界面在命令产生输出前即可停止）
+async fn handle_stop_agent_call(
+    State(state): State<AppState>,
+    Path((run_id, call_id)): Path<(String, String)>,
+) -> Response {
+    if state.runs.stop_call(&run_id, &call_id) {
+        (StatusCode::ACCEPTED, Json(serde_json::json!({ "success": true }))).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "Command is not running" }))).into_response()
+    }
+}
+
+/// 只停止运行中的某条命令，运行继续，模型收到命令被停止的结果
+async fn handle_stop_agent_process(
+    State(state): State<AppState>,
+    Path((run_id, execution_id)): Path<(String, String)>,
+) -> Response {
+    if state.runs.stop_process(&run_id, &execution_id) {
+        (StatusCode::ACCEPTED, Json(serde_json::json!({ "success": true }))).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "Process is not running" }))).into_response()
     }
 }
 
@@ -561,6 +670,13 @@ pub fn create_router(state: AppState, dist_path: PathBuf) -> Router {
         )
         .route("/api/chat", post(handle_chat))
         .route("/api/agent/approval", post(handle_agent_approval))
+        .route("/api/agent/runs", get(handle_list_agent_runs))
+        .route("/api/agent/runs/{run_id}", get(handle_agent_run_state))
+        .route("/api/agent/runs/{run_id}/events", get(handle_agent_run_events))
+        .route("/api/agent/runs/{run_id}/cancel", post(handle_cancel_agent_run))
+        .route("/api/agent/runs/{run_id}/supplements", post(handle_supplement_agent_run))
+        .route("/api/agent/runs/{run_id}/processes/{execution_id}/stop", post(handle_stop_agent_process))
+        .route("/api/agent/runs/{run_id}/calls/{call_id}/stop", post(handle_stop_agent_call))
         .route("/api/keys", get(handle_list_keys).post(handle_save_key))
         .route("/api/keys/{provider}", delete(handle_delete_key))
         .route("/api/deepseek/balance", post(handle_deepseek_balance))
@@ -618,6 +734,7 @@ pub async fn start_local_server(
 
     let direct_client = gateway_client_builder().no_proxy().build().unwrap_or_default();
 
+    let run_records = key_store.storage_dir().join("run-records");
     let state = AppState {
         key_store,
         workspace_manager,
@@ -629,6 +746,7 @@ pub async fn start_local_server(
             crate::crypto::keys::dirs_storage_path().join("agent-approvals.json"),
         )),
         mcp_manager,
+        runs: Arc::new(crate::gateway::agent::run_registry::RunRegistry::with_records(run_records)),
     };
 
     let app = create_router(state, dist_path);

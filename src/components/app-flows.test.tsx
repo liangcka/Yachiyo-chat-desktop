@@ -45,6 +45,11 @@ class MemoryRepository implements AppRepository {
     if (conversation !== undefined) conversation.title = title.trim();
   }
 
+  async setConversationWorkspace(id: string, workspace: string | null): Promise<void> {
+    const conversation = await this.getConversation(id);
+    if (conversation !== undefined) conversation.workspace = workspace;
+  }
+
   async updateConversationSummary(
     id: string,
     summary: string,

@@ -59,6 +59,13 @@ export interface UiCopy {
   readonly runFailed: string;
   readonly runNoFinalAnswer: string;
   readonly continueRun: string;
+  readonly runCancelling: string;
+  readonly runWaitingForWorkspace: string;
+  readonly supplementHint: string;
+  readonly webCapabilityNote: string;
+  readonly supplementSend: string;
+  readonly runCancelled: string;
+  readonly runCancelUnknown: (operations: string) => string;
   readonly continuePrompt: string;
   readonly llmSettings: string;
   readonly llmSettingsEntry: string;
@@ -134,6 +141,7 @@ export interface UiCopy {
   readonly editorSaveHint: string;
   readonly editorCloseTab: string;
   readonly reviewTitle: string;
+  readonly reviewGitTitle: string;
   readonly reviewEmpty: string;
   readonly reviewEmptyTitle: string;
   readonly reviewEmptyDesc: string;
@@ -145,19 +153,16 @@ export interface UiCopy {
   readonly terminalTitle: string;
   readonly reviewCards: string;
   readonly reviewCompare: string;
-  readonly reviewAccept: string;
-  readonly reviewReject: string;
-  readonly reviewAccepted: string;
-  readonly reviewRejected: string;
-  readonly reviewPending: string;
-  readonly reviewApply: string;
-  readonly reviewResetAll: string;
   readonly reviewAddedNote: string;
   readonly reviewDeletedNote: string;
   readonly reviewNoSelection: string;
   readonly reviewDiffEmpty: string;
   readonly reviewFilesLabel: string;
   readonly reviewEntryButton: string;
+  readonly reviewTaskTab: string;
+  readonly reviewGitTab: string;
+  readonly reviewGitReadOnlyNote: string;
+  readonly reviewNoRun: string;
   readonly refreshFileTree: string;
   readonly treeLoading: string;
   readonly treeEmpty: string;
@@ -240,6 +245,13 @@ const chinese = Object.freeze({
   runFailed: "运行出错，回复没有完成。",
   runNoFinalAnswer: "执行完工具后没有给出最终答复。",
   continueRun: "继续",
+  runCancelling: "正在取消：等待运行中的操作结束…",
+  runWaitingForWorkspace: "等待同一项目中的其他任务完成写入后继续…",
+  supplementHint: "补充要求会在 Agent 下一步之前送达，不会中断当前任务",
+  webCapabilityNote: "网页版只提供对话、附件与联网搜索。读写项目文件、运行命令、审阅与撤销改动需要在桌面版中进行。",
+  supplementSend: "追加补充要求（不中断任务）",
+  runCancelled: "已取消，运行中的命令已确认结束。",
+  runCancelUnknown: (operations) => `已取消，但这些操作的结果无法确认：${operations}。继续前请先核对实际状态。`,
   continuePrompt: "继续",
   llmSettings: "LLM 设置",
   llmSettingsEntry: "LLM 设置",
@@ -312,12 +324,13 @@ const chinese = Object.freeze({
   editorModified: "● 已修改",
   editorSaved: "已保存",
   editorReadOnly: "只读（大文件）",
-  editorSaveHint: "Ctrl+S 保存（write_file + checkpoint）",
+  editorSaveHint: "Ctrl+S 保存（核对版本，覆盖前备份）",
   editorCloseTab: "关闭标签页",
   reviewTitle: "变更审阅",
+  reviewGitTitle: "工作区差异（相对 HEAD）",
   reviewEmpty: "没有未提交的改动",
   reviewEmptyTitle: "没有未提交的改动",
-  reviewEmptyDesc: "Agent 修改项目内的文件后，改动会显示在这里",
+  reviewEmptyDesc: "这里只读显示相对 Git HEAD 的全部未提交改动",
   selectProject: "选择项目",
   changeProject: "更换",
   noProjectSelected: "未选择项目",
@@ -326,19 +339,16 @@ const chinese = Object.freeze({
   terminalTitle: "终端",
   reviewCards: "卡片",
   reviewCompare: "对比",
-  reviewAccept: "采纳",
-  reviewReject: "拒绝",
-  reviewAccepted: "已采纳",
-  reviewRejected: "已拒绝",
-  reviewPending: "待处理",
-  reviewApply: "应用采纳",
-  reviewResetAll: "全部重置",
-  reviewAddedNote: "新文件 · 仅查看",
-  reviewDeletedNote: "删除 · 不支持恢复",
+  reviewAddedNote: "未跟踪的新文件",
+  reviewDeletedNote: "已删除",
   reviewNoSelection: "选择左侧变更文件查看差异",
   reviewDiffEmpty: "与 HEAD 无内容差异",
   reviewFilesLabel: "变更文件",
   reviewEntryButton: "审阅",
+  reviewTaskTab: "本次任务",
+  reviewGitTab: "工作区 Git",
+  reviewGitReadOnlyNote: "只读：包含任务开始前就有的改动。要撤销 Agent 的改动，请在“本次任务”中操作。",
+  reviewNoRun: "当前会话还没有改动过文件的任务",
   refreshFileTree: "刷新文件树",
   treeLoading: "加载工作区…",
   treeEmpty: "（空目录或未连接桌面运行时）",
@@ -421,6 +431,13 @@ const japanese = Object.freeze({
   runFailed: "エラーのため、返答を完了できませんでした。",
   runNoFinalAnswer: "ツール実行後、最終的な返答がありませんでした。",
   continueRun: "続ける",
+  runCancelling: "キャンセル中：実行中の操作の終了を待っています…",
+  runWaitingForWorkspace: "同じプロジェクトの別タスクの書き込みが終わるのを待っています…",
+  supplementHint: "追加の指示は Agent の次のステップの前に届きます。タスクは中断されません",
+  webCapabilityNote: "Web 版では会話・添付・ウェブ検索のみ利用できます。プロジェクトファイルの読み書き、コマンドの実行、変更のレビューと取り消しはデスクトップ版で行ってください。",
+  supplementSend: "追加の指示を送る（タスクは中断しません）",
+  runCancelled: "キャンセルしました。実行中のコマンドの終了を確認済みです。",
+  runCancelUnknown: (operations) => `キャンセルしましたが、次の操作の結果を確認できません：${operations}。続ける前に実際の状態を確認してください。`,
   continuePrompt: "続けて",
   llmSettings: "LLM 設定",
   llmSettingsEntry: "LLM 設定",
@@ -494,12 +511,13 @@ const japanese = Object.freeze({
   editorModified: "● 変更あり",
   editorSaved: "保存済み",
   editorReadOnly: "読み取り専用（大容量ファイル）",
-  editorSaveHint: "Ctrl+S 保存（write_file + checkpoint）",
+  editorSaveHint: "Ctrl+S で保存（バージョン確認・上書き前にバックアップ）",
   editorCloseTab: "タブを閉じる",
   reviewTitle: "変更レビュー",
+  reviewGitTitle: "ワークスペースの差分（HEAD 比較）",
   reviewEmpty: "未コミットの変更はありません",
   reviewEmptyTitle: "未コミットの変更はありません",
-  reviewEmptyDesc: "Agentがプロジェクト内のファイルを変更すると、変更内容がここに表示されます",
+  reviewEmptyDesc: "Git HEAD と比べた未コミットの変更をすべて閲覧専用で表示します",
   selectProject: "プロジェクトを選択",
   changeProject: "変更",
   noProjectSelected: "プロジェクト未選択",
@@ -508,19 +526,16 @@ const japanese = Object.freeze({
   terminalTitle: "ターミナル",
   reviewCards: "カード",
   reviewCompare: "比較",
-  reviewAccept: "採用",
-  reviewReject: "拒否",
-  reviewAccepted: "採用済み",
-  reviewRejected: "拒否済み",
-  reviewPending: "未処理",
-  reviewApply: "採用を適用",
-  reviewResetAll: "すべてリセット",
-  reviewAddedNote: "新規ファイル · 閲覧のみ",
-  reviewDeletedNote: "削除 · 復元非対応",
+  reviewAddedNote: "未追跡の新規ファイル",
+  reviewDeletedNote: "削除済み",
   reviewNoSelection: "左側の変更ファイルを選択して差分を確認",
   reviewDiffEmpty: "HEAD との差分はありません",
   reviewFilesLabel: "変更ファイル",
   reviewEntryButton: "レビュー",
+  reviewTaskTab: "今回のタスク",
+  reviewGitTab: "ワークスペース Git",
+  reviewGitReadOnlyNote: "閲覧専用：タスク開始前からある変更も含みます。Agent の変更を取り消すには「今回のタスク」で操作してください。",
+  reviewNoRun: "このチャットにはファイルを変更したタスクがまだありません",
   refreshFileTree: "ファイルツリーを更新",
   treeLoading: "ワークスペースを読み込み中…",
   treeEmpty: "（空のディレクトリまたはデスクトップランタイム未接続）",

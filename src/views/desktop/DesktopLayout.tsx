@@ -6,14 +6,16 @@ import { useTheme } from "../../app/use-theme";
 import { useEditorWorkspace } from "../../app/use-editor-workspace";
 import type { SharedViewProps } from "../layout-types";
 import { DesktopChatArea } from "./DesktopChatArea";
-import { OpenReviewContext } from "../../components/chat/review-context";
+import { OpenReviewContext, type ReviewTarget } from "../../components/chat/review-context";
 import { DesktopSidebar } from "./sidebar";
 import { DesktopTopBar } from "./DesktopTopBar";
-import { DesktopRightPane } from "./DesktopRightPane";
+import { DesktopRightPane, type ReviewRequest } from "./DesktopRightPane";
 import type { DesktopRightTab } from "./sidebar/types";
 import type { SettingsTabKey } from "../../components/settings/SettingsModal";
 import { WhaleWidget } from "../../features/whale-widget/WhaleWidget";
 import { usePluginSettings } from "../../services/plugin-settings";
+import { useProjectState } from "../../services/project-manager";
+import { emitWorkspaceFilesChanged } from "../../services/workspace-events";
 
 const EditorView = lazy(() =>
   import("../../components/editor/EditorView").then((m) => ({ default: m.EditorView })),
@@ -122,7 +124,19 @@ export function DesktopLayout(props: SharedViewProps) {
   // 中栏视图切换（对话 ↔ 编辑器）：editor 一旦挂载即常驻（隐藏不卸载），保留 Monaco 实例与 model
   const [centerView, setCenterView] = useState<CenterView>(readStoredCenterView);
   const [editorMounted, setEditorMounted] = useState(() => readStoredCenterView() === "editor");
-  const editorWorkspace = useEditorWorkspace();
+  const { activeProject, switchError } = useProjectState();
+  const editorWorkspace = useEditorWorkspace(activeProject);
+
+  // 原生切换失败时前端项目保持不变，提示原因而不是静默停留在旧项目
+  const { showToast, controller } = props;
+  const switchErrorSequence = switchError?.sequence;
+  useEffect(() => {
+    if (switchError === null) return;
+    const ja = controller.locale === "ja-JP";
+    showToast(ja ? `プロジェクトを開けませんでした：${switchError.message}` : `无法打开项目：${switchError.message}`, "error");
+    // 只在出现新的失败时提示一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [switchErrorSequence]);
 
   const switchCenterView = useCallback((view: CenterView) => {
     setCenterView(view);
@@ -163,9 +177,11 @@ export function DesktopLayout(props: SharedViewProps) {
     }
   }, []);
 
-  const handleOpenRightReview = useCallback(() => {
+  const [reviewRequest, setReviewRequest] = useState<ReviewRequest>();
+  const handleOpenRightReview = useCallback((target?: ReviewTarget) => {
     setRightPaneOpen(true);
     handleSelectRightTab("review");
+    setReviewRequest((current) => ({ nonce: (current?.nonce ?? 0) + 1, ...(target !== undefined ? { target } : {}) }));
   }, [handleSelectRightTab]);
 
   // 拖拽态标志：拖拽期间禁用 grid 过渡动画防止抖动
@@ -439,6 +455,7 @@ export function DesktopLayout(props: SharedViewProps) {
             />
             <DesktopRightPane
               activeTab={rightPaneTab}
+              {...(reviewRequest !== undefined ? { reviewRequest } : {})}
               editorWorkspace={editorWorkspace}
               onClose={() => {
                 setRightPaneOpen(false);
@@ -448,7 +465,10 @@ export function DesktopLayout(props: SharedViewProps) {
                   /* 隐私模式下 localStorage 不可用 */
                 }
               }}
-              onCheckpointRestored={() => { editorWorkspace.resetTabs(); }}
+              onCheckpointRestored={() => {
+                editorWorkspace.resetTabs();
+                if (activeProject !== null) emitWorkspaceFilesChanged({ workspace: activeProject });
+              }}
               onOpenFile={(path) => {
                 void editorWorkspace.openFile(path);
                 switchCenterView("editor");

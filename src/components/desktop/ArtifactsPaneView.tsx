@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLocale } from "../../i18n/locale-context";
 import {
+  AlertTriangle,
   CheckCircle2,
   Code2,
   Eye,
@@ -8,17 +9,42 @@ import {
   GitCompareArrows,
   Image as ImageIcon,
   Layers,
+  Loader2,
   Terminal,
   XCircle,
 } from "lucide-react";
 import type { ChatMessage, ToolStep } from "../../domain/chat";
+import { projectToolStep, type ToolProjection } from "../../domain/tool-projection";
 import { ImageLightbox } from "../chat/ImageLightbox";
+import type { ReviewTarget } from "../chat/review-context";
+import { commandStatusLabel } from "../tools/command-status";
 
 export interface ArtifactsPaneViewProps {
   messages: ReadonlyArray<ChatMessage>;
   imageUrls: ReadonlyMap<string, string>;
-  onOpenReview?: () => void;
+  /** 打开审阅；文件改动来自绑定项目的运行时带上该运行，直接审阅它的改动 */
+  onOpenReview?: (target?: ReviewTarget) => void;
   onOpenFile?: (path: string) => void;
+}
+
+function StatusIcon({ projection, ja }: { projection: ToolProjection; ja: boolean }) {
+  switch (projection.status) {
+    case "succeeded":
+      return <CheckCircle2 size={12} className="artifact-card__status-icon artifact-card__status-icon--success" aria-label={ja ? "成功" : "成功"} />;
+    case "failed":
+      return <XCircle size={12} className="artifact-card__status-icon artifact-card__status-icon--error" aria-label={ja ? "失敗" : "失败"} />;
+    case "running":
+      return <Loader2 size={12} className="artifact-card__status-icon artifact-card__status-icon--running" aria-label={ja ? "実行中" : "运行中"} />;
+    case "cancelled":
+    case "unknown":
+      return (
+        <AlertTriangle
+          size={12}
+          className="artifact-card__status-icon artifact-card__status-icon--warning"
+          aria-label={projection.status === "cancelled" ? (ja ? "停止済み" : "已停止") : ja ? "結果不明" : "结果未知"}
+        />
+      );
+  }
 }
 
 interface ExtractedArtifact {
@@ -31,6 +57,8 @@ interface ExtractedArtifact {
   codeSnippet?: string;
   filePath?: string;
   step?: ToolStep;
+  projection?: ToolProjection;
+  reviewTarget?: ReviewTarget;
 }
 
 export function ArtifactsPaneView({
@@ -61,40 +89,31 @@ export function ArtifactsPaneView({
       });
     }
 
-    // 2. 工具调用工件（写代码、跑命令、文件操作）
-    if (msg.toolSteps && msg.toolSteps.length > 0) {
-      msg.toolSteps.forEach((step) => {
-        let parsedArgs: Record<string, unknown> = {};
-        try {
-          parsedArgs = JSON.parse(step.argumentsJson) as Record<string, unknown>;
-        } catch {
-          // 容错
-        }
-
-        if (step.name === "write_file" || step.name === "replace_file_content") {
-          const filePath = String(parsedArgs.path || parsedArgs.TargetFile || parsedArgs.file || "workspace-file");
-          artifacts.push({
-            id: `step-${step.id}`,
-            type: "code_step",
-            title:
-              step.name === "write_file"
-                ? ja ? "ファイルの作成／書き換え" : "新建/重写文件"
-                : ja ? "ファイルのコード更新" : "更新文件代码",
-            subtitle: filePath,
-            filePath,
-            step,
-          });
-        } else if (step.name === "run_command" || step.name === "terminal") {
-          const command = String(parsedArgs.command || parsedArgs.cmd || "");
-          artifacts.push({
-            id: `step-${step.id}`,
-            type: "command_step",
-            title: ja ? "ターミナルコマンドの実行" : "终端指令执行",
-            subtitle: `$ ${command}`,
-            step,
-          });
-        }
-      });
+    // 2. 工具调用工件：统一投影只认网关实际提供的工具（write_file / edit_file / run_command）
+    const settled = msg.status !== "streaming";
+    const reviewTarget = msg.run !== undefined && msg.run.workspace !== null ? { runId: msg.run.id, workspace: msg.run.workspace } : undefined;
+    for (const step of msg.toolSteps ?? []) {
+      const projection = projectToolStep(step, settled);
+      if (projection.kind === "file_write") {
+        artifacts.push({
+          id: `step-${step.id}`,
+          type: "code_step",
+          title: step.name === "write_file" ? (ja ? "ファイルの作成／書き換え" : "新建/重写文件") : ja ? "ファイルを編集" : "编辑文件",
+          ...(projection.path !== undefined ? { subtitle: projection.path, filePath: projection.path } : {}),
+          step,
+          projection,
+          ...(reviewTarget !== undefined ? { reviewTarget } : {}),
+        });
+      } else if (projection.kind === "command") {
+        artifacts.push({
+          id: `step-${step.id}`,
+          type: "command_step",
+          title: ja ? "ターミナルコマンドの実行" : "终端指令执行",
+          subtitle: `$ ${projection.command ?? ""}`,
+          step,
+          projection,
+        });
+      }
     }
   });
 
@@ -111,7 +130,7 @@ export function ArtifactsPaneView({
           <button
             type="button"
             className="artifacts-pane__quick-diff-btn"
-            onClick={onOpenReview}
+            onClick={() => onOpenReview()}
             title={ja ? "現在のワークスペースのコード差分をレビュー" : "查看当前工作区代码差异审阅"}
           >
             <GitCompareArrows size={13} />
@@ -164,20 +183,13 @@ export function ArtifactsPaneView({
             }
 
             if (art.type === "code_step") {
-              const isError = art.step?.result?.isError;
               return (
                 <div key={art.id} className="artifact-card artifact-card--code">
                   <div className="artifact-card__body">
                     <div className="artifact-card__header">
                       <FileCode size={13} className="artifact-card__type-icon artifact-card__type-icon--code" />
                       <span className="artifact-card__title">{art.title}</span>
-                      {art.step?.result ? (
-                        isError ? (
-                          <XCircle size={12} className="artifact-card__status-icon artifact-card__status-icon--error" />
-                        ) : (
-                          <CheckCircle2 size={12} className="artifact-card__status-icon artifact-card__status-icon--success" />
-                        )
-                      ) : null}
+                      {art.projection !== undefined ? <StatusIcon projection={art.projection} ja={ja} /> : null}
                     </div>
                     <code className="artifact-card__filepath" title={art.filePath}>
                       {art.subtitle}
@@ -201,7 +213,7 @@ export function ArtifactsPaneView({
                       <button
                         type="button"
                         className="artifact-card__action-btn"
-                        onClick={onOpenReview}
+                        onClick={() => onOpenReview(art.reviewTarget)}
                       >
                         <GitCompareArrows size={12} />
                         <span>{ja ? "変更を見る" : "查看改动"}</span>
@@ -213,22 +225,17 @@ export function ArtifactsPaneView({
             }
 
             if (art.type === "command_step") {
-              const isError = art.step?.result?.isError;
+              const status = art.projection?.record !== undefined ? commandStatusLabel(art.projection.record, ja ? "ja-JP" : "zh-CN") : undefined;
               return (
                 <div key={art.id} className="artifact-card artifact-card--command">
                   <div className="artifact-card__body">
                     <div className="artifact-card__header">
                       <Terminal size={13} className="artifact-card__type-icon artifact-card__type-icon--terminal" />
                       <span className="artifact-card__title">{art.title}</span>
-                      {art.step?.result ? (
-                        isError ? (
-                          <XCircle size={12} className="artifact-card__status-icon artifact-card__status-icon--error" />
-                        ) : (
-                          <CheckCircle2 size={12} className="artifact-card__status-icon artifact-card__status-icon--success" />
-                        )
-                      ) : null}
+                      {art.projection !== undefined ? <StatusIcon projection={art.projection} ja={ja} /> : null}
                     </div>
                     <code className="artifact-card__cmd-line">{art.subtitle}</code>
+                    {status !== undefined ? <span className={`artifact-card__status-text artifact-card__status-text--${status.tone}`}>{status.text}</span> : null}
                     {art.step?.result?.output ? (
                       <pre className="artifact-card__log">{art.step.result.output.slice(0, 300)}</pre>
                     ) : null}

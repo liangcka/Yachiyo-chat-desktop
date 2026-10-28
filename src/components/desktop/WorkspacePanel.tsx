@@ -56,7 +56,7 @@ export function WorkspacePanel({
     setIsLoading(true);
     setTerminalOutput((prev) => `${prev}\n$ ${cmd}\n`);
 
-    const res = await executeDesktopAgentTool("run_command", { command: cmd });
+    const res = await executeDesktopAgentTool("run_command", { command: cmd }, activeProject);
     setTerminalOutput((prev) => `${prev}${res.output}\n`);
     setIsLoading(false);
     refreshWorkspace();
@@ -65,7 +65,7 @@ export function WorkspacePanel({
   const handleGitStatus = async () => {
     setIsLoading(true);
     setTerminalOutput((prev) => `${prev}\n$ git status --short\n`);
-    const res = await executeDesktopAgentTool("git_status", {});
+    const res = await executeDesktopAgentTool("git_status", {}, activeProject);
     setTerminalOutput((prev) => `${prev}${res.output}\n`);
     setIsLoading(false);
   };
@@ -136,12 +136,17 @@ export function WorkspacePanel({
         {isTreeOpen ? (
           <div className="workspace-panel__section workspace-panel__section--tree">
             {/* key 递增 = 全树重挂载：缓存、展开态与加载进度一并重置 */}
-            <FileTree
-              key={`${activeProject ?? ""}:${treeRefreshKey}`}
-              copy={copy}
-              onOpenFile={handleOpenFile}
-              onReferenceFile={onReferenceFile ? handleReferenceFile : undefined}
-            />
+            {activeProject !== null ? (
+              <FileTree
+                key={`${activeProject}:${treeRefreshKey}`}
+                workspace={activeProject}
+                copy={copy}
+                onOpenFile={handleOpenFile}
+                onReferenceFile={onReferenceFile ? handleReferenceFile : undefined}
+              />
+            ) : (
+              <p className="file-tree__empty">{copy?.noProjectSelected ?? (ja ? "プロジェクト未選択" : "未选择项目")}</p>
+            )}
           </div>
         ) : null}
       </div>

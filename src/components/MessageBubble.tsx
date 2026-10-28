@@ -5,6 +5,7 @@ import { copyFor } from "../i18n/messages";
 import { ImageLightbox } from "./chat/ImageLightbox";
 import { MarkdownContent } from "./chat/MarkdownContent";
 import { MessageContent } from "./chat/MessageContent";
+import { RunRecoveryNotice } from "./chat/RunRecoveryNotice";
 
 export interface MessageBubbleProps {
   locale: Locale;
@@ -24,7 +25,7 @@ export interface MessageBubbleProps {
   onContinue?: () => void;
   isLastAssistant?: boolean;
   isGenerating?: boolean;
-  pendingPermission?: { toolName: string; argumentsJson: string };
+  pendingPermission?: { toolName: string; argumentsJson: string; callId?: string };
   pendingToolName?: string;
 }
 
@@ -288,7 +289,7 @@ export const MessageBubble = memo(function MessageBubble({
   // Agent 未正常收尾时说明原因：中断/出错，或最后一步是工具调用、之后没有正文
   const endedOnTool = message.contentSegments?.at(-1)?.type === "tool";
   const runEndNote =
-    message.role !== "assistant" || isEmpty || message.loopStopped === true || message.truncated === true
+    message.role !== "assistant" || isEmpty || message.loopStopped === true || message.truncated === true || message.recovery !== undefined
       ? undefined
       : message.status === "stopped"
         ? copyFor(locale).runStopped
@@ -297,6 +298,23 @@ export const MessageBubble = memo(function MessageBubble({
           : message.status === "complete" && hasToolSteps && endedOnTool
             ? copyFor(locale).runNoFinalAnswer
             : undefined;
+  // 取消要等网关确认命令等操作收尾：收尾期间与无法确认的结果都如实说明，不伪装成已停止
+  const copy = copyFor(locale);
+  const cancelNote =
+    message.role !== "assistant" || message.recovery !== undefined
+      ? undefined
+      : isStreamingMessage && message.cancelRequested === true
+        ? [copy.runCancelling, ...(message.cancelPending ?? []).map((operation) => `${operation.name}：${operation.detail}`)].join(" ")
+        : isStreamingMessage && (message.waitingFor?.length ?? 0) > 0
+          ? [copy.runWaitingForWorkspace, ...(message.waitingFor ?? []).map((operation) => operation.name)].join(" ")
+        : message.status === "stopped" && message.cancellation !== undefined
+          ? message.cancellation.confirmed
+            ? copy.runCancelled
+            : copy.runCancelUnknown(
+                (message.cancellation.unknown ?? []).map((operation) => operation.name).join("、") ||
+                  (locale === "ja-JP" ? "実行中だった操作" : "运行中的操作"),
+              )
+          : undefined;
   const hasMenuOptions = onRecall !== undefined;
   const showVersions = Boolean(hasVersions && !isGenerating && !isStreamingMessage);
   const showCopy = Boolean(hasText && !isStreamingMessage);
@@ -365,7 +383,7 @@ export const MessageBubble = memo(function MessageBubble({
       ) : isEmpty && message.status === "failed" && message.role === "assistant" ? (
         <p>{locale === "ja-JP" ? "返信を生成できませんでした。" : "本次回复未生成。"}</p>
       ) : message.role === "assistant" ? (
-        <MessageContent message={message} locale={locale} hideCitations={hideCitations} pendingPermission={pendingPermission} pendingToolName={pendingToolName} />
+        <MessageContent message={message} locale={locale} hideCitations={hideCitations} pendingPermission={pendingPermission} pendingToolName={pendingToolName} latest={onContinue !== undefined} />
       ) : hasText ? (
         <div
           className={`message-bubble__user-bubble${bubbleReturning ? " message-bubble__user-bubble--returning" : ""}`}
@@ -400,6 +418,22 @@ export const MessageBubble = memo(function MessageBubble({
       ) : null}
       {message.loopStopped === true ? (
         <span className="message-bubble__truncated">{copyFor(locale).loopStopped}</span>
+      ) : null}
+      {cancelNote !== undefined ? (
+        <div
+          className={`message-bubble__run-note${message.cancellation?.confirmed === false ? " message-bubble__run-note--warning" : ""}`}
+          role="status"
+        >
+          <span>{cancelNote}</span>
+        </div>
+      ) : null}
+      {message.role === "assistant" ? (
+        <RunRecoveryNotice
+          message={message}
+          locale={locale}
+          latest={onContinue !== undefined}
+          {...(onRegenerate !== undefined ? { onRegenerate: () => onRegenerate(message.id) } : {})}
+        />
       ) : null}
       {runEndNote !== undefined ? (
         <div className="message-bubble__run-note" role="status">

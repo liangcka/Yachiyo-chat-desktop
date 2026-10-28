@@ -3,6 +3,7 @@ import {
   Check,
   ChevronRight,
   Globe,
+  Loader2,
   Paperclip,
   Plus,
   Sparkles,
@@ -18,9 +19,11 @@ import { ModeSelect } from "../../components/desktop/ModeSelect";
 import { PlanStrip } from "../../components/desktop/PlanStrip";
 import { ReasoningEffortSelect } from "../../components/desktop/ReasoningEffortSelect";
 import { ProjectSelector } from "../../components/desktop/ProjectSelector";
+import { ConversationProjectBar } from "../../components/desktop/ConversationProjectBar";
+import { BindProjectContext, FollowUpContext, StopCommandContext } from "../../components/chat/review-context";
 import { PermissionCard } from "../../components/tools/PermissionCard";
 import { appendAttachments, COMPOSER_CHARACTER_LIMIT, readTextAttachment, type TextAttachment } from "../../features/file-reference/attachments";
-import { extractLatestTodos } from "../../domain/chat";
+import { extractLatestTodos, runWorkspaceFor, workspaceBinding } from "../../domain/chat";
 import { copyFor } from "../../i18n/messages";
 import { isRetryableChatErrorCode } from "../../services/chat-client";
 import { SKILLS, skillLabel } from "../../skills";
@@ -36,7 +39,7 @@ import {
 } from "../../components/chat/SlashCommandPicker";
 import { isDesktopApp } from "../../services/app-platform";
 import { searchWorkspaceFiles } from "../../services/desktop-bridge";
-import { useProjectState } from "../../services/project-manager";
+import { getProjectDisplayName, projectManager, useProjectState } from "../../services/project-manager";
 import "../../styles/desktop-chat-area.css";
 import { DesktopWelcome } from "./DesktopWelcome";
 import { useComposerDockTransition } from "./use-composer-dock-transition";
@@ -80,8 +83,14 @@ export function DesktopChatArea({
   const pendingPermission = controller.pendingPermission;
   const isLoading = controller.phase === "loading";
   const isStreaming = controller.phase === "streaming";
+  // 已请求取消、等待网关确认收尾：停止按钮不再可点，避免误以为已经停止
+  const isCancelling = controller.activeConversation !== undefined
+    && controller.runningConversations.get(controller.activeConversation.id) === "cancelling";
   const isCompressing = controller.phase === "compressing";
   const isOffline = !isOnline || controller.phase === "offline";
+  // Agent 运行中输入的内容作为补充要求排队送达，不中断任务；普通对话仍是停止后发送
+  const streamingMessage = isStreaming ? [...controller.messages].reverse().find((message) => message.role === "assistant" && message.status === "streaming") : undefined;
+  const canSupplement = streamingMessage?.run !== undefined && streamingMessage.cancelRequested !== true;
   const composerUnavailable = isLoading || isOffline || isCompressing;
   const isJapanese = controller.locale === "ja-JP";
   const loadingLabel = isJapanese ? "会話を読み込み中…" : "正在加载对话…";
@@ -95,6 +104,10 @@ export function DesktopChatArea({
   const handleContinue = useCallback(() => {
     onSend(copyFor(controllerLocale).continuePrompt);
   }, [controllerLocale, onSend]);
+  // 结果区的“继续处理”与重发未送达的补充：直接发给当前会话，不动输入框里正在写的内容
+  const sendFollowUp = useCallback((text: string) => {
+    void controller.send(text);
+  }, [controller]);
 
   const latestTodos = useMemo(
     () => extractLatestTodos(controller.messages),
@@ -155,7 +168,25 @@ export function DesktopChatArea({
     controller.activeConversation?.id,
   );
 
+  const submitSupplement = (text: string): void => {
+    const content = appendAttachments(text, attachments);
+    setComposerValue("");
+    setAttachments([]);
+    void controller.supplement(content).then((result) => {
+      if (result === "unavailable") {
+        setComposerValue(text);
+        showToast(isJapanese ? "タスクの準備中のため追加できません。少し待つか、停止してから送信してください" : "任务尚未就绪，暂时不能追加补充；稍后再试，或停止后发送", "error");
+      } else if (result === "undelivered") {
+        showToast(isJapanese ? "タスクが終了処理中のため届きませんでした。メッセージの下から新しいメッセージとして送信できます" : "任务正在收尾，补充未送达；可在消息下方作为新消息发送", "error");
+      }
+    });
+  };
+
   const sendMessage = (text: string): void => {
+    if (canSupplement && !pendingImageDataUrl) {
+      submitSupplement(text);
+      return;
+    }
     if (needsModelSetup) {
       showToast(copy.desktopKeyRequired, "error");
       onOpenSettings?.("models");
@@ -188,12 +219,38 @@ export function DesktopChatArea({
   const [slashPickerQuery, setSlashPickerQuery] = useState("");
   const slashPickerRef = useRef<SlashCommandPickerHandle>(null);
 
-  // 检索工作区文件列表；在 @ 浮层里选好项目后随之重新检索
+  // 任务的项目归属：已有任务以记录为准，空白任务在提交时绑定当前选中的项目
   const { activeProject } = useProjectState();
+  const binding = workspaceBinding(controller.activeConversation, !isBlank);
+  const composerWorkspace = runWorkspaceFor(binding, activeProject);
+  const bindingLocked = isStreaming || isCompressing || isLoading;
+  const bindProject = useCallback(
+    async (workspace: string) => {
+      const bound = await controller.bindConversationWorkspace(workspace);
+      const name = getProjectDisplayName(workspace, controller.locale);
+      showToast(
+        bound
+          ? isJapanese ? `このタスクを ${name} に紐付けました` : `已将本任务绑定到 ${name}`
+          : isJapanese ? "紐付けできませんでした。実行中のタスクや紐付け済みのタスクは変更できません" : "绑定失败：运行中或已绑定其他项目的任务不能更改项目",
+        bound ? "info" : "error",
+      );
+    },
+    [controller, isJapanese, showToast],
+  );
+  const pickAndBindProject = useCallback(async () => {
+    const picked = await projectManager.pickAndOpenProject(isJapanese ? "プロジェクトを選択" : "选择项目");
+    if (picked !== undefined) await bindProject(picked);
+  }, [bindProject, isJapanese]);
+  const requestProjectBinding = useCallback(() => {
+    if (binding.kind === "legacy" || binding.kind === "none") void pickAndBindProject();
+    else void projectManager.pickAndOpenProject(isJapanese ? "プロジェクトを選択" : "选择项目");
+  }, [binding.kind, isJapanese, pickAndBindProject]);
+
+  // 检索任务所属项目的文件列表；在 @ 浮层里选好项目后随之重新检索
   useEffect(() => {
     if (!filePickerOpen) return;
     let cancelled = false;
-    void searchWorkspaceFiles(filePickerQuery, 25).then((results) => {
+    void searchWorkspaceFiles(composerWorkspace, filePickerQuery, 25).then((results) => {
       if (cancelled) return;
       setFilePickerItems(results ?? []);
       setFilePickerIndex(0);
@@ -201,7 +258,7 @@ export function DesktopChatArea({
     return () => {
       cancelled = true;
     };
-  }, [activeProject, filePickerOpen, filePickerQuery]);
+  }, [composerWorkspace, filePickerOpen, filePickerQuery]);
 
   const updatePickersTrigger = (text: string, cursorPos: number) => {
     const beforeCursor = text.slice(0, cursorPos);
@@ -466,8 +523,22 @@ export function DesktopChatArea({
         {activeSkills.map((skill) => <button type="button" key={skill.id} onClick={() => void onSkillToggle?.(skill.id, false)} title={isJapanese ? `スキル ${skillLabel(skill, controller.locale).name} を外す` : `移除技能 ${skill.name}`}>{skillLabel(skill, controller.locale).name}<X size={12} /></button>)}
         {attachments.map((file, index) => <button type="button" key={`${file.name}-${index}`} title={isJapanese ? `添付 ${file.name} を削除` : `移除附件 ${file.name}`} onClick={() => setAttachments((previous) => previous.filter((_, i) => i !== index))}>{file.name}<X size={12} /></button>)}
       </div> : null}
-      {/* 空白对话时在输入框上方选择项目，新对话即绑定该工作区 */}
-      {isBlank ? <ProjectSelector variant="composer" className="desktop-composer-project" onNewChat={onNewChat} /> : null}
+      {/* 空白对话时在输入框上方选择项目，首次提交即绑定该项目；已有任务展示其归属 */}
+      {isBlank
+        ? isDesktopApp()
+          ? <ProjectSelector variant="composer" className="desktop-composer-project" onNewChat={onNewChat} />
+          : <p className="desktop-composer-capability" role="note">{copy.webCapabilityNote}</p>
+        : null}
+      {!isBlank && isDesktopApp() ? (
+        <ConversationProjectBar
+          locale={controller.locale}
+          binding={binding}
+          activeProject={activeProject}
+          disabled={bindingLocked}
+          onBind={(workspace) => void bindProject(workspace)}
+          onPickAndBind={() => void pickAndBindProject()}
+        />
+      ) : null}
       {/* 输入框主卡片 */}
       <div className="dsh-composer-card"
         onDragOver={(event) => { if (!composerUnavailable && event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
@@ -475,6 +546,8 @@ export function DesktopChatArea({
         {/* @ 引用文件模糊搜索浮层 */}
         {filePickerOpen ? (
           <FileReferencePicker
+            workspace={composerWorkspace}
+            onSelectProject={requestProjectBinding}
             query={filePickerQuery}
             items={filePickerItems}
             selectedIndex={filePickerIndex}
@@ -556,7 +629,7 @@ export function DesktopChatArea({
             }}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={isLoading ? loadingLabel : isOffline ? copy.offline : isCompressing ? copy.compressingContext : copy.inputHint}
+            placeholder={isLoading ? loadingLabel : isOffline ? copy.offline : isCompressing ? copy.compressingContext : canSupplement ? copy.supplementHint : copy.inputHint}
             disabled={composerUnavailable}
             rows={1}
           />
@@ -691,12 +764,14 @@ export function DesktopChatArea({
               disabled={composerUnavailable || isStreaming}
             />
 
-            {/* 执行模式 */}
-            <ModeSelect
-              mode={controller.agentMode}
-              onSelect={controller.setExecutionMode}
-              disabled={isStreaming}
-            />
+            {/* 执行模式：只有桌面版能执行本地操作 */}
+            {isDesktopApp() ? (
+              <ModeSelect
+                mode={controller.agentMode}
+                onSelect={controller.setExecutionMode}
+                disabled={isStreaming}
+              />
+            ) : null}
           </div>
 
           <div className="dsh-composer-card__tools-right">
@@ -725,15 +800,28 @@ export function DesktopChatArea({
             />
 
             {/* 生成期间保留停止入口。 */}
+            {isStreaming && canSupplement && (composerValue.trim() || attachments.length > 0) && !pendingImageDataUrl ? (
+              <button
+                type="button"
+                className="dsh-composer-card__send-btn dsh-composer-card__send-btn--stop"
+                onClick={controller.stop}
+                disabled={isCancelling}
+                title={isCancelling ? copy.runCancelling : copy.stop}
+                aria-label={isCancelling ? copy.runCancelling : copy.stop}
+              >
+                {isCancelling ? <Loader2 size={14} className="dsh-composer-card__spin" /> : <Square size={14} fill="currentColor" />}
+              </button>
+            ) : null}
             {isStreaming && !composerValue.trim() && attachments.length === 0 && !pendingImageDataUrl ? (
               <button
                 type="button"
                 className="dsh-composer-card__send-btn dsh-composer-card__send-btn--stop"
                 onClick={controller.stop}
-                title={copy.stop}
-                aria-label={copy.stop}
+                disabled={isCancelling}
+                title={isCancelling ? copy.runCancelling : copy.stop}
+                aria-label={isCancelling ? copy.runCancelling : copy.stop}
               >
-                <Square size={14} fill="currentColor" />
+                {isCancelling ? <Loader2 size={14} className="dsh-composer-card__spin" /> : <Square size={14} fill="currentColor" />}
               </button>
             ) : (
               <button
@@ -745,8 +833,8 @@ export function DesktopChatArea({
                   }
                 }}
                 disabled={composerUnavailable || (!composerValue.trim() && !pendingImageDataUrl && attachments.length === 0)}
-                title={`${isStreaming ? (isJapanese ? "現在の返信を止めて追加の指示を送信" : "停止当前回复并发送补充要求") : copy.send} (Enter)`}
-                aria-label={copy.send}
+                title={`${isStreaming ? (canSupplement && !pendingImageDataUrl ? copy.supplementSend : isJapanese ? "現在の返信を止めて追加の指示を送信" : "停止当前回复并发送补充要求") : copy.send} (Enter)`}
+                aria-label={isStreaming && canSupplement && !pendingImageDataUrl ? copy.supplementSend : copy.send}
               >
                 <ArrowUp size={16} strokeWidth={2.5} />
               </button>
@@ -769,31 +857,37 @@ export function DesktopChatArea({
           />
         ) : (
           <div className="desktop-conversation-region">
-            <ConversationView
-              activeSkills={activeSkills}
-              hasMoreHistory={controller.hasMoreHistory}
-              imageUrls={imageUrls}
-              key={controller.activeConversation?.id}
-              locale={controller.locale}
-              messages={controller.messages}
-              pendingPermission={pendingPermission ? { toolName: pendingPermission.toolName, argumentsJson: pendingPermission.argumentsJson } : undefined}
-              pendingToolName={pendingPermission?.toolName}
-              conversation={controller.activeConversation}
-              onEdit={isOffline || isStreaming || isCompressing ? undefined : controller.editMessage}
-              onVersionChange={isStreaming || isCompressing ? undefined : controller.switchBranch}
-              onLoadEarlier={() => void controller.loadEarlier()}
-              onRecall={onRecall}
-              onRegenerate={isOffline || isStreaming || isCompressing ? undefined : onRegenerate}
-              onContinue={isOffline || isStreaming || isCompressing ? undefined : handleContinue}
-              onToast={showToast}
-              showSources={webSearchSettings.showSources}
-              summary={controller.activeConversation?.summary}
-            />
+            <BindProjectContext.Provider value={requestProjectBinding}>
+            <StopCommandContext.Provider value={controller.stopToolCall}>
+            <FollowUpContext.Provider value={isOffline || isCompressing || isStreaming ? undefined : sendFollowUp}>
+              <ConversationView
+                activeSkills={activeSkills}
+                hasMoreHistory={controller.hasMoreHistory}
+                imageUrls={imageUrls}
+                key={controller.activeConversation?.id}
+                locale={controller.locale}
+                messages={controller.messages}
+                pendingPermission={pendingPermission ? { toolName: pendingPermission.toolName, argumentsJson: pendingPermission.argumentsJson, ...(pendingPermission.callId !== undefined ? { callId: pendingPermission.callId } : {}) } : undefined}
+                pendingToolName={pendingPermission?.toolName}
+                conversation={controller.activeConversation}
+                onEdit={isOffline || isStreaming || isCompressing ? undefined : controller.editMessage}
+                onVersionChange={isStreaming || isCompressing ? undefined : controller.switchBranch}
+                onLoadEarlier={() => void controller.loadEarlier()}
+                onRecall={onRecall}
+                onRegenerate={isOffline || isStreaming || isCompressing ? undefined : onRegenerate}
+                onContinue={isOffline || isStreaming || isCompressing ? undefined : handleContinue}
+                onToast={showToast}
+                showSources={webSearchSettings.showSources}
+                summary={controller.activeConversation?.summary}
+              />
+            </FollowUpContext.Provider>
+            </StopCommandContext.Provider>
+            </BindProjectContext.Provider>
           </div>
         )}
 
         {latestTodos && latestTodos.length > 0 ? (
-          <PlanStrip todos={latestTodos} />
+          <PlanStrip todos={latestTodos} running={isStreaming} />
         ) : null}
 
         {/* 输入节点持续挂载，首次发送只改变布局位置，保留焦点与输入法状态。 */}

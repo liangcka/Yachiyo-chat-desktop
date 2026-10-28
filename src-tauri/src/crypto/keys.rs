@@ -60,6 +60,11 @@ impl KeyStore {
         Self::at_path(storage_path)
     }
 
+    /// 密钥文件所在目录：同一应用数据目录下的其他状态（运行记录等）与之放在一起
+    pub fn storage_dir(&self) -> PathBuf {
+        self.storage_path.parent().map(std::path::Path::to_path_buf).unwrap_or_else(dirs_storage_path)
+    }
+
     /// 指定加密文件路径，供隔离的测试使用
     pub fn at_path(storage_path: PathBuf) -> Self {
         Self {

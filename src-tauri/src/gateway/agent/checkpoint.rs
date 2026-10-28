@@ -5,7 +5,11 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-const MAX_FILES: usize = 20_000;
+/// 运行改动账本在检查点存储中的子目录
+pub(crate) const RUN_LEDGER_DIR: &str = "runs";
+/// 界面覆盖写入前的备份目录
+pub(crate) const UI_BACKUP_DIR: &str = "ui-backups";
+pub(crate) const MAX_FILES: usize = 20_000;
 const MAX_BYTES: u64 = 256 * 1024 * 1024;
 const EXCLUDED_DIRS: &[&str] = &[
     ".git",
@@ -49,7 +53,7 @@ pub struct CheckpointStore {
     entries: Vec<Checkpoint>,
 }
 
-fn is_link(metadata: &fs::Metadata) -> bool {
+pub(crate) fn is_link(metadata: &fs::Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -61,7 +65,7 @@ fn is_link(metadata: &fs::Metadata) -> bool {
     }
 }
 
-fn canonical_workspace(root: &Path) -> Result<PathBuf, String> {
+pub(crate) fn canonical_workspace(root: &Path) -> Result<PathBuf, String> {
     let canonical = root
         .canonicalize()
         .map_err(|e| format!("工作区不可用: {e}"))?;
@@ -118,7 +122,7 @@ pub(crate) fn is_private_storage_path(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn storage_root(root: &Path, base: &Path, create: bool) -> Result<PathBuf, String> {
+pub(crate) fn storage_root(root: &Path, base: &Path, create: bool) -> Result<PathBuf, String> {
     let base = canonical_storage_base(base)?;
     if base.starts_with(root) || root.starts_with(&base) {
         return Err("工作区与检查点存储范围重叠，请选择更具体的项目目录。".to_string());
@@ -142,13 +146,13 @@ fn storage_root(root: &Path, base: &Path, create: bool) -> Result<PathBuf, Strin
     Ok(path)
 }
 
-fn relative_string(path: &Path, root: &Path) -> Result<String, String> {
+pub(crate) fn relative_string(path: &Path, root: &Path) -> Result<String, String> {
     path.strip_prefix(root)
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .map_err(|_| "检查点文件越出工作区".to_string())
 }
 
-fn excluded(name: &std::ffi::OsStr) -> bool {
+pub(crate) fn excluded(name: &std::ffi::OsStr) -> bool {
     EXCLUDED_DIRS
         .iter()
         .any(|excluded| name.to_string_lossy().eq_ignore_ascii_case(excluded))
@@ -224,7 +228,7 @@ fn inventory(root: &Path) -> Result<(Vec<PathBuf>, Vec<String>), String> {
     Ok((files, directories))
 }
 
-fn digest(bytes: &[u8]) -> String {
+pub(crate) fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
@@ -434,6 +438,34 @@ impl CheckpointStore {
         Ok(self.entries.len())
     }
 
+    /// 读取检查点中某个文件的原始字节（校验摘要）；该文件不在快照中时返回 None
+    pub fn read_file(&self, checkpoint_id: &str, relative: &str) -> Result<Option<Vec<u8>>, String> {
+        let root = canonical_workspace(&self.workspace_root)?;
+        let (directory, manifest) = load_manifest(&root, &self.storage_base, checkpoint_id)?;
+        let Some((index, file)) = manifest
+            .files
+            .iter()
+            .enumerate()
+            .find(|(_, file)| path_key(&file.path) == path_key(relative))
+        else {
+            return Ok(None);
+        };
+        let backup = directory.join(index.to_string());
+        let metadata = fs::symlink_metadata(&backup).map_err(|e| e.to_string())?;
+        if is_link(&metadata) || !metadata.is_file() || metadata.len() != file.bytes {
+            return Err("检查点备份文件无效".to_string());
+        }
+        let bytes = read_limited(&backup, file.bytes)?;
+        if digest(&bytes) != file.digest {
+            return Err("检查点备份校验失败".to_string());
+        }
+        Ok(Some(bytes))
+    }
+
+    pub fn storage_base(&self) -> &Path {
+        &self.storage_base
+    }
+
     pub fn list(workspace_root: &Path) -> Result<Vec<Checkpoint>, String> {
         Self::list_with_storage(workspace_root, &default_storage_base())
     }
@@ -450,7 +482,8 @@ impl CheckpointStore {
         for entry in fs::read_dir(storage).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
             let id = entry.file_name().to_string_lossy().to_string();
-            if id.starts_with("pending-") {
+            // 运行改动账本与检查点共用存储目录，不属于可恢复的检查点
+            if id.starts_with("pending-") || id == RUN_LEDGER_DIR || id == UI_BACKUP_DIR {
                 continue;
             }
             let (_, manifest) = load_manifest(&root, storage_base, &id)?;

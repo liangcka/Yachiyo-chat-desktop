@@ -3,8 +3,11 @@ import { useLocale } from "../../i18n/locale-context";
 import { ChevronRight, File as FileIcon, Folder, FolderOpen, Loader2 } from "lucide-react";
 import type { UiCopy } from "../../i18n/messages";
 import { listWorkspaceEntries, type WorkspaceEntry } from "../../services/desktop-bridge";
+import { subscribeWorkspaceFilesChanged } from "../../services/workspace-events";
 
 export interface FileTreeProps {
+  /** 文件树所属工作区；切换项目时由父组件以 key 重挂载 */
+  workspace: string;
   copy?: UiCopy;
   /** 当前激活打开的文件路径（用于在树中高亮显示） */
   activePath?: string | null;
@@ -138,7 +141,13 @@ function filterIgnoredEntries(entries: WorkspaceEntry[]): WorkspaceEntry[] {
   return entries.filter((e) => !IGNORED_DIR_NAMES.has(e.name));
 }
 
-export function FileTree({ copy, activePath, onOpenFile, onReferenceFile }: FileTreeProps) {
+function parentDirectory(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  const index = normalized.lastIndexOf("/");
+  return index < 0 ? "" : normalized.slice(0, index);
+}
+
+export function FileTree({ workspace, copy, activePath, onOpenFile, onReferenceFile }: FileTreeProps) {
   const ja = useLocale() === "ja-JP";
   const [rootEntries, setRootEntries] = useState<WorkspaceEntry[] | null>(null);
   const [entriesByDir, setEntriesByDir] = useState<ReadonlyMap<string, WorkspaceEntry[]>>(new Map());
@@ -146,11 +155,15 @@ export function FileTree({ copy, activePath, onOpenFile, onReferenceFile }: File
   const [loadingDirs, setLoadingDirs] = useState<ReadonlySet<string>>(new Set());
   /** 载入请求的序号守卫：卸载后丢弃旧响应，避免过期数据覆盖新树 */
   const loadEpochRef = useRef(0);
+  const entriesByDirRef = useRef(entriesByDir);
+  useEffect(() => {
+    entriesByDirRef.current = entriesByDir;
+  }, [entriesByDir]);
 
   const fetchDir = useCallback(async (dir: string) => {
     const epoch = loadEpochRef.current;
     setLoadingDirs((current) => new Set(current).add(dir));
-    const entries = await listWorkspaceEntries(dir);
+    const entries = await listWorkspaceEntries(workspace, dir);
     if (epoch !== loadEpochRef.current) return;
     setLoadingDirs((current) => {
       const next = new Set(current);
@@ -159,14 +172,29 @@ export function FileTree({ copy, activePath, onOpenFile, onReferenceFile }: File
     });
     if (entries === undefined) return;
     setEntriesByDir((current) => new Map(current).set(dir, filterIgnoredEntries(entries)));
-  }, []);
+  }, [workspace]);
 
-  // 全树刷新由父组件经 key 重挂载实现（缓存与展开态随组件销毁一并清空）
+  // 全树刷新由父组件经 key 重挂载实现（缓存与展开态随组件销毁一并清空）。
+  // 撤销任务改动、恢复检查点或保存后只重新列出受影响的已加载目录，保留展开状态
+  useEffect(() => subscribeWorkspaceFilesChanged((event) => {
+    if (event.workspace !== workspace) return;
+    const dirs = event.paths === undefined ? undefined : new Set(event.paths.map(parentDirectory));
+    if (dirs === undefined || dirs.has("")) {
+      const epoch = loadEpochRef.current;
+      void listWorkspaceEntries(workspace, "").then((entries) => {
+        if (epoch === loadEpochRef.current && entries !== undefined) setRootEntries(filterIgnoredEntries(entries));
+      });
+    }
+    for (const dir of entriesByDirRef.current.keys()) {
+      if (dirs === undefined || dirs.has(dir)) void fetchDir(dir);
+    }
+  }), [fetchDir, workspace]);
+
   useEffect(() => {
     loadEpochRef.current += 1;
     let cancelled = false;
     void (async () => {
-      const entries = await listWorkspaceEntries("");
+      const entries = await listWorkspaceEntries(workspace, "");
       if (cancelled) return;
       setRootEntries(entries ? filterIgnoredEntries(entries) : []);
     })();
@@ -174,7 +202,7 @@ export function FileTree({ copy, activePath, onOpenFile, onReferenceFile }: File
       cancelled = true;
       loadEpochRef.current += 1;
     };
-  }, []);
+  }, [workspace]);
 
   const handleToggleDir = useCallback(
     (path: string) => {

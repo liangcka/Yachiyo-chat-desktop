@@ -98,7 +98,7 @@ async fn invalid_unbound_paths_and_writes_return_errors_without_permission_wait(
         assert_eq!(results.len(), 3);
         assert!(results[0].contains("绝对路径"));
         assert!(results[1].contains("绝对路径"));
-        assert_eq!(results[2], "当前未选择项目，无法写入。请让用户在侧栏选择项目。");
+        assert_eq!(results[2], "当前任务未绑定项目，无法写入。请让用户在输入框上方为本任务绑定项目。");
     }
 }
 
@@ -120,7 +120,7 @@ async fn unbound_execution_boundary_requires_absolute_path_and_approval() {
     let error = execute_tool_with_context("write_file", &serde_json::json!({"path": file, "content": "覆盖"}),
         None, &client, None, ToolAuthorization::Agent { mode: AgentExecutionMode::FullAuto, approved: true })
         .await.unwrap_err();
-    assert_eq!(error, "当前未选择项目，无法写入。请让用户在侧栏选择项目。");
+    assert_eq!(error, "当前任务未绑定项目，无法写入。请让用户在输入框上方为本任务绑定项目。");
     assert_eq!(std::fs::read_to_string(file).unwrap(), "正文");
 }
 

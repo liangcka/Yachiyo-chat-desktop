@@ -4,7 +4,9 @@ import type { RunActivity } from "../../../app/use-chat-controller";
 import type { Conversation } from "../../../domain/chat";
 import { useLocale } from "../../../i18n/locale-context";
 import type { UiCopy } from "../../../i18n/messages";
+import { getProjectDisplayName } from "../../../services/project-manager";
 import { SidebarConversationItem } from "./SidebarConversationItem";
+import { groupConversationsByProject } from "./use-conversation-groups";
 
 interface SidebarHistoryListProps {
   activeConversationId?: string;
@@ -34,6 +36,7 @@ export function SidebarHistoryList({
   const ja = useLocale() === "ja-JP";
   const [archiveOpen, setArchiveOpen] = useState(false);
   const current = conversations.filter((conversation) => conversation.archivedAt === undefined);
+  const groups = groupConversationsByProject(current);
   const archived = conversations
     .filter((conversation) => conversation.archivedAt !== undefined)
     .sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0));
@@ -63,8 +66,24 @@ export function SidebarHistoryList({
         <div className="desktop-sidebar__history-list" role="list">
           {current.length === 0 ? (
             <p className="desktop-sidebar__empty-text">{copy.noHistory}</p>
-          ) : (
+          ) : groups === undefined ? (
             current.map(renderItem)
+          ) : (
+            groups.map((group) => {
+              const running = group.conversations.filter((conversation) => runningConversations?.has(conversation.id)).length;
+              const name = group.workspace === null ? (ja ? "プロジェクトなし" : "未绑定项目") : getProjectDisplayName(group.workspace, ja ? "ja-JP" : "zh-CN");
+              return (
+                <div key={group.workspace ?? "\u0000unbound"} className="desktop-sidebar__project-group" role="group" aria-label={name}>
+                  <div className="desktop-sidebar__project-group-header" title={group.workspace ?? undefined}>
+                    <span className="desktop-sidebar__project-group-name">{name}</span>
+                    {running > 0 ? (
+                      <span className="desktop-sidebar__project-group-running">{ja ? `${running} 件実行中` : `${running} 个运行中`}</span>
+                    ) : null}
+                  </div>
+                  {group.conversations.map(renderItem)}
+                </div>
+              );
+            })
           )}
         </div>
       </section>

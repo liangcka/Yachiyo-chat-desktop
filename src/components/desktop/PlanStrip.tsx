@@ -6,10 +6,16 @@ import "./PlanStrip.css";
 
 export interface PlanStripProps {
   todos: ReadonlyArray<TodoItem>;
+  /** 是否有运行在进行：运行结束后计划里的“进行中”只是停下的位置，不再显示为正在执行 */
+  running?: boolean;
   className?: string;
 }
 
-export function PlanStrip({ todos, className = "" }: PlanStripProps) {
+/**
+ * Agent 自己维护的计划进度。它只反映模型的自我报告，不是执行结果：
+ * 验证结论与未解决的问题以命令记录为准，见消息下方的结果区。
+ */
+export function PlanStrip({ todos, running = true, className = "" }: PlanStripProps) {
   const ja = useLocale() === "ja-JP";
   const [expanded, setExpanded] = useState(false);
 
@@ -18,14 +24,16 @@ export function PlanStrip({ todos, className = "" }: PlanStripProps) {
   }
 
   const completedCount = todos.filter((t) => t.status === "completed").length;
-  const inProgressItem = todos.find((t) => t.status === "in_progress");
+  const currentItem = todos.find((t) => t.status === "in_progress");
+  const inProgressItem = running ? currentItem : undefined;
+  const stoppedAt = running ? undefined : currentItem;
   const totalCount = todos.length;
 
   return (
     <div
       className={`plan-strip ${expanded ? "plan-strip--expanded" : ""} ${className}`.trim()}
       role="region"
-      aria-label={ja ? "Agent のタスクリスト" : "Agent 任务清单"}
+      aria-label={ja ? "Agent の計画" : "Agent 计划"}
     >
       <div
         className="plan-strip__header"
@@ -52,14 +60,18 @@ export function PlanStrip({ todos, className = "" }: PlanStripProps) {
 
         <div className="plan-strip__summary">
           <span className="plan-strip__counter">
-            {ja ? "進捗" : "任务进度"} {completedCount}/{totalCount}
+            {ja ? "計画の進捗" : "计划进度"} {completedCount}/{totalCount}
           </span>
           {inProgressItem ? (
             <span className="plan-strip__active-task" title={inProgressItem.content}>
               {inProgressItem.content}
             </span>
+          ) : stoppedAt !== undefined ? (
+            <span className="plan-strip__idle-label" title={stoppedAt.content}>
+              {ja ? `ここで停止：${stoppedAt.content}` : `停在：${stoppedAt.content}`}
+            </span>
           ) : completedCount === totalCount ? (
-            <span className="plan-strip__completed-label">{ja ? "すべてのステップが完了しました" : "所有计划步骤已完成"}</span>
+            <span className="plan-strip__completed-label">{ja ? "計画のステップはすべて完了と記録されています" : "计划步骤均已标记完成"}</span>
           ) : (
             <span className="plan-strip__idle-label">{ja ? "続きを待っています" : "待继续推进"}</span>
           )}
@@ -86,7 +98,8 @@ export function PlanStrip({ todos, className = "" }: PlanStripProps) {
         <ul className="plan-strip__list">
           {todos.map((item, index) => {
             const isDone = item.status === "completed";
-            const isActive = item.status === "in_progress";
+            const isActive = item.status === "in_progress" && running;
+            const isStopped = item.status === "in_progress" && !running;
 
             return (
               <li
@@ -105,10 +118,15 @@ export function PlanStrip({ todos, className = "" }: PlanStripProps) {
                 <span className="plan-strip__item-content">{item.content}</span>
                 {isActive ? (
                   <span className="plan-strip__item-badge">{ja ? "実行中" : "进行中"}</span>
+                ) : isStopped ? (
+                  <span className="plan-strip__item-badge">{ja ? "未完了" : "未完成"}</span>
                 ) : null}
               </li>
             );
           })}
+          <li className="plan-strip__note">
+            {ja ? "計画は Agent 自身が更新します。検証結果はコマンドの実行記録を基準にしてください。" : "计划由 Agent 自行更新；是否通过验证以命令执行记录为准。"}
+          </li>
         </ul>
       ) : null}
     </div>

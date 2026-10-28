@@ -57,8 +57,10 @@ export async function expandFileReferences(
   return `${text}\n\n${blocks.join("\n\n")}`;
 }
 
-/** 桌面端读取器：经 agent 工具沙箱 read_file（含工作区边界校验） */
-export const desktopFileReader: FileContentReader = async (path) => {
-  const res = await executeDesktopAgentTool("read_file", { path });
-  return res.isError ? undefined : res.output;
-};
+/** 桌面端读取器：经工具沙箱 read_file 读取运行所属工作区内的文件（含边界校验），不跟随界面当前项目 */
+export function createDesktopFileReader(workspace: string | null): FileContentReader {
+  return async (path) => {
+    const res = await executeDesktopAgentTool("read_file", { path }, workspace);
+    return res.isError ? undefined : res.output;
+  };
+}

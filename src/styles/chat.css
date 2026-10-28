@@ -1494,3 +1494,24 @@
 .message-bubble__run-note button:hover {
   color: var(--yx-alias-label-primary);
 }
+
+.message-bubble__run-note--warning {
+  color: var(--warning);
+}
+
+/* 运行没能正常结束时的恢复提示 */
+.run-recovery {
+  flex-wrap: wrap;
+}
+
+.run-recovery__operations {
+  flex-basis: 100%;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.run-recovery__actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}

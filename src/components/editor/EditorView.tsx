@@ -78,15 +78,15 @@ export function EditorView({
 
   // 保存/激活的最新引用：Monaco addCommand 闭包经 ref 取最新值，避免闭包过期（同步收敛在 effect，渲染期不触碰 ref）
   const workspaceRef = useRef(workspace);
-  const activePathRef = useRef(workspace.activePath);
+  const activeKeyRef = useRef(workspace.activeTab?.key ?? null);
 
   useEffect(() => {
     workspaceRef.current = workspace;
   }, [workspace]);
 
   useEffect(() => {
-    activePathRef.current = workspace.activePath;
-  }, [workspace.activePath]);
+    activeKeyRef.current = workspace.activeTab?.key ?? null;
+  }, [workspace.activeTab?.key]);
 
   const [ready, setReady] = useState(false);
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
@@ -135,8 +135,8 @@ export function EditorView({
       setReady(true);
 
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-        const path = activePathRef.current;
-        if (path !== null) void workspaceRef.current.saveTab(path);
+        const key = activeKeyRef.current;
+        if (key !== null) void workspaceRef.current.saveTab(key);
       });
 
       editor.onDidChangeCursorPosition((e) => {
@@ -169,21 +169,24 @@ export function EditorView({
     const monaco = monacoRef.current;
     if (!monaco || !ready) return;
 
+    // model 按标签键（工作区 + 路径）与重新加载次数缓存：不同项目的同名文件不能共用 model，
+    // 从磁盘重新加载后以新内容重建 model
     for (const tab of workspace.tabs) {
-      if (modelsRef.current.has(tab.path)) continue;
+      const modelKey = `${tab.key}#${tab.revision}`;
+      if (modelsRef.current.has(modelKey)) continue;
       const model = monaco.editor.createModel(tab.content, languageForPath(tab.path));
       // model → state 单向同步：仅用户编辑触发，state 侧不回写 model
       model.onDidChangeContent(() => {
-        workspaceRef.current.updateContent(tab.path, model.getValue());
+        workspaceRef.current.updateContent(tab.key, model.getValue());
       });
-      modelsRef.current.set(tab.path, model);
+      modelsRef.current.set(modelKey, model);
     }
 
-    const livePaths = new Set(workspace.tabs.map((t) => t.path));
-    for (const [path, model] of modelsRef.current) {
-      if (!livePaths.has(path)) {
+    const liveKeys = new Set(workspace.tabs.map((t) => `${t.key}#${t.revision}`));
+    for (const [key, model] of modelsRef.current) {
+      if (!liveKeys.has(key)) {
         model.dispose();
-        modelsRef.current.delete(path);
+        modelsRef.current.delete(key);
       }
     }
   }, [workspace.tabs, ready]);
@@ -192,12 +195,11 @@ export function EditorView({
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor || !ready) return;
-    const model = workspace.activePath !== null
-      ? modelsRef.current.get(workspace.activePath)
-      : undefined;
+    const active = workspace.activeTab;
+    const model = active !== null ? modelsRef.current.get(`${active.key}#${active.revision}`) : undefined;
     editor.setModel(model ?? null);
-    editor.updateOptions({ readOnly: workspace.activeTab?.readOnly ?? false });
-  }, [workspace.activePath, workspace.activeTab?.readOnly, ready]);
+    editor.updateOptions({ readOnly: active?.readOnly ?? false });
+  }, [workspace.activeTab, workspace.tabs, ready]);
 
   const activeTab = workspace.activeTab;
 
@@ -245,6 +247,7 @@ export function EditorView({
               {activeProject ? (
                 <FileTree
                   key={`${activeProject}-${treeRefreshKey}`}
+                  workspace={activeProject}
                   copy={copy}
                   activePath={workspace.activePath}
                   onOpenFile={(path) => {
@@ -287,13 +290,13 @@ export function EditorView({
               const dirty = tab.content !== tab.savedContent;
               return (
                 <button
-                  key={tab.path}
+                  key={tab.key}
                   type="button"
                   role="tab"
-                  aria-selected={tab.path === workspace.activePath}
-                  className={`editor-tab ${tab.path === workspace.activePath ? "editor-tab--active" : ""}`}
+                  aria-selected={tab.key === workspace.activeTab?.key}
+                  className={`editor-tab ${tab.key === workspace.activeTab?.key ? "editor-tab--active" : ""}`}
                   onClick={() => {
-                    workspace.setActive(tab.path);
+                    workspace.setActive(tab.key);
                   }}
                   title={tab.path}
                 >
@@ -307,13 +310,13 @@ export function EditorView({
                     aria-label={copy?.editorCloseTab ?? "关闭标签页"}
                     onClick={(e) => {
                       e.stopPropagation();
-                      workspace.closeTab(tab.path);
+                      workspace.closeTab(tab.key);
                     }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
                         e.stopPropagation();
-                        workspace.closeTab(tab.path);
+                        workspace.closeTab(tab.key);
                       }
                     }}
                   >
@@ -328,7 +331,7 @@ export function EditorView({
               role="tab"
               aria-selected={false}
               className="editor-tab editor-tab--review"
-              onClick={onOpenReview}
+              onClick={() => onOpenReview?.()}
               title={copy?.reviewTitle ?? "变更审阅"}
             >
               <GitCompareArrows size={13} className="editor-tab__icon" />
@@ -337,6 +340,14 @@ export function EditorView({
           </div>
 
           <div className="editor-view__body">
+            {activeTab?.conflict !== undefined ? (
+              <div className="editor-view__conflict" role="alert">
+                <span>{isJa ? "ディスク上のファイルが別の場所で変更されたため、上書きしていません。" : "磁盘上的文件已在别处被修改，未覆盖。"}{activeTab.conflict}</span>
+                <button type="button" onClick={() => void workspace.reloadTab(activeTab.key)}>
+                  {isJa ? "再読み込み（ローカルの変更を破棄）" : "重新加载（放弃本地修改）"}
+                </button>
+              </div>
+            ) : null}
             <div
               ref={containerRef}
               className="editor-view__monaco"
@@ -384,7 +395,9 @@ export function EditorView({
             </span>
             {activeTab?.readOnly ? (
               <span className="editor-status__item editor-status__item--warn">
-                {copy?.editorReadOnly ?? "只读（大文件）"}
+                {activeTab.readOnlyReason === "encoding"
+                  ? (isJa ? "読み取り専用（UTF-8 以外の文字コード）" : "只读（非 UTF-8 编码，保存会改变编码）")
+                  : copy?.editorReadOnly ?? "只读（大文件）"}
               </span>
             ) : (
               <span className={`editor-status__item ${activeTab && activeTab.content !== activeTab.savedContent ? "editor-status__item--warn" : ""}`}>
@@ -397,7 +410,7 @@ export function EditorView({
             )}
             <span className="editor-status__item editor-status__item--hint">
               <Save size={11} />
-              {copy?.editorSaveHint ?? "Ctrl+S 保存（write_file + checkpoint）"}
+              {copy?.editorSaveHint ?? "Ctrl+S 保存（核对版本，覆盖前备份）"}
             </span>
           </footer>
         </div>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  applySelectedHunks,
   parseGitStatusShort,
+  revertSelectedHunks,
   toReviewHunks,
 } from "./diff-merge";
 
@@ -47,7 +47,7 @@ describe("parseGitStatusShort", () => {
   });
 });
 
-describe("toReviewHunks + applySelectedHunks", () => {
+describe("toReviewHunks 与按块撤销的编号一致", () => {
   // 两处相距足够远（> 2*context+1）的修改，确保产出 2 个独立 hunk
   const original = [
     "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
@@ -68,44 +68,55 @@ describe("toReviewHunks + applySelectedHunks", () => {
     expect(allLines.some((l) => l.type === "add" && l.text === "X")).toBe(true);
   });
 
-  it("全采纳 = 工作区内容", () => {
+  it("不撤销 = 当前内容，全部撤销 = 基线", () => {
     const hunks = toReviewHunks(original, modified);
-    const result = applySelectedHunks(original, hunks, hunks.map(() => true));
-    expect(result).toBe(modified);
+    expect(revertSelectedHunks(original, modified, hunks.map(() => false))).toBe(modified);
+    expect(revertSelectedHunks(original, modified, hunks.map(() => true))).toBe(original);
   });
 
-  it("全拒绝 = 原文", () => {
-    const hunks = toReviewHunks(original, modified);
-    const result = applySelectedHunks(original, hunks, hunks.map(() => false));
-    expect(result).toBe(original);
-  });
-
-  it("部分采纳只应用所选 hunk", () => {
+  it("按 toReviewHunks 的编号只撤销所选块", () => {
     const hunks = toReviewHunks(original, modified);
     expect(hunks.length).toBe(2);
-
-    // 只采纳第一个 hunk（b→B），拒绝第二个（p→X）
-    const result = applySelectedHunks(original, hunks, [true, false]);
-    expect(result).toBe(modified.replace("X", "p"));
-
-    // 只采纳第二个 hunk（p→X），拒绝第一个（b 保持小写）
-    const result2 = applySelectedHunks(original, hunks, [false, true]);
-    expect(result2).toBe(original.replace("p", "X"));
+    // 撤销第一个块（B→b），第二个块（X）保持现状
+    expect(revertSelectedHunks(original, modified, [true, false])).toBe(modified.replace("B", "b"));
+    // 撤销第二个块（X→p），第一个块（B）保持现状
+    expect(revertSelectedHunks(original, modified, [false, true])).toBe(modified.replace("X", "p"));
   });
 
   it("相邻多行增删混合场景保持行号正确", () => {
     const o = ["1", "2", "3", "4", "5"].join("\n");
     const m = ["1", "2", "x", "y", "z", "4", "5"].join("\n");
     const hunks = toReviewHunks(o, m);
-    const all = applySelectedHunks(o, hunks, hunks.map(() => true));
-    expect(all).toBe(m);
-    const none = applySelectedHunks(o, hunks, hunks.map(() => false));
-    expect(none).toBe(o);
+    expect(revertSelectedHunks(o, m, hunks.map(() => true))).toBe(o);
+    expect(revertSelectedHunks(o, m, hunks.map(() => false))).toBe(m);
   });
 
-  it("空 diff 产生空 hunk 集合，apply 恒等", () => {
+  it("空 diff 产生空 hunk 集合，撤销恒等", () => {
     const hunks = toReviewHunks("same\ncontent\n", "same\ncontent\n");
     expect(hunks).toEqual([]);
-    expect(applySelectedHunks("same\ncontent\n", hunks, [])).toBe("same\ncontent\n");
+    expect(revertSelectedHunks("same\ncontent\n", "same\ncontent\n", [])).toBe("same\ncontent\n");
   });
 });
+
+describe("revertSelectedHunks", () => {
+  const baseline = Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join("\n").replace("line 20", "line 20 用户的修改") + "\n";
+  const current = baseline.replace("line 2\n", "line 2 Agent 一\n").replace("line 38\n", "line 38 Agent 二\n");
+
+  it("只撤销所选块，基线中的用户修改与未选块保持现状", () => {
+    const hunks = toReviewHunks(baseline, current);
+    expect(hunks).toHaveLength(2);
+    const result = revertSelectedHunks(baseline, current, [true, false]);
+    expect(result).toBe(baseline.replace("line 38\n", "line 38 Agent 二\n"));
+    expect(result).toContain("line 20 用户的修改");
+  });
+
+  it("不选择任何块时内容不变，全选则回到基线", () => {
+    expect(revertSelectedHunks(baseline, current, [false, false])).toBe(current);
+    expect(revertSelectedHunks(baseline, current, [true, true])).toBe(baseline);
+  });
+
+  it("保留文件末尾换行的差异与 CRLF", () => {
+    expect(revertSelectedHunks("a\r\nb", "a\r\nb\r\nc\r\n", [true])).toBe("a\r\nb");
+  });
+});
+

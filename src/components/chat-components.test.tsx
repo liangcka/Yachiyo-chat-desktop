@@ -181,7 +181,7 @@ describe("reference chat components", () => {
     const content = screen.getByRole("article", { name: "八千代的回复" });
     const children = [...content.children].filter((node) => !node.classList.contains("message-bubble__actions"));
     expect(children.map((node) => node.matches("details") ? node.querySelector("summary")!.textContent : node.textContent)).toEqual([
-      "运行 3 步· 1 步失败", "最终结果。",
+      "运行 3 步· 1 步失败", "最终结果。", "1 个未解决的问题命令 three：失败",
     ]);
     fireEvent.click(screen.getByText("运行 3 步"));
     expect([...container.querySelector(".message-process__content")!.children].map((node) => node.textContent)).toEqual([
@@ -709,6 +709,24 @@ describe("reference chat components", () => {
       render(<MessageBubble locale="zh-CN" message={message} />);
       expect(screen.getByText(note)).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: zh.continueRun })).not.toBeInTheDocument();
+    });
+
+    it("请求取消后显示正在取消与仍在等待的操作，收尾后区分已确认与结果未知", () => {
+      const cancelling = makeAssistantMessage({
+        status: "streaming", text: "", toolSteps: [toolStep], cancelRequested: true,
+        cancelPending: [{ callId: "m1", name: "mcp__fs__write", detail: "等待 MCP 工具返回" }],
+      });
+      const { rerender } = render(<MessageBubble locale="zh-CN" message={cancelling} />);
+      expect(screen.getByText(`${zh.runCancelling} mcp__fs__write：等待 MCP 工具返回`)).toBeInTheDocument();
+
+      rerender(<MessageBubble locale="zh-CN" message={makeAssistantMessage({ status: "stopped", text: "做了一半", toolSteps: [toolStep], cancellation: { confirmed: true } })} />);
+      expect(screen.getByText(zh.runCancelled)).toBeInTheDocument();
+
+      rerender(<MessageBubble locale="zh-CN" message={makeAssistantMessage({
+        status: "stopped", text: "做了一半", toolSteps: [toolStep],
+        cancellation: { confirmed: false, unknown: [{ callId: "m1", name: "mcp__fs__write", detail: "未返回" }] },
+      })} />);
+      expect(screen.getByText(zh.runCancelUnknown("mcp__fs__write"))).toBeInTheDocument();
     });
 
     it("正常以正文收尾时不显示说明", () => {
