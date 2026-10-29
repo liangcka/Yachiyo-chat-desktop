@@ -1,20 +1,38 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DiffReviewPanel } from "./DiffReviewPanel";
+import { executeDesktopAgentTool, readHeadFile, readWorkspaceFile } from "../../services/desktop-bridge";
 
 vi.mock("../../services/desktop-bridge", () => ({
-  executeDesktopAgentTool: vi.fn().mockResolvedValue({ output: "", isError: false }),
+  executeDesktopAgentTool: vi.fn(),
   readHeadFile: vi.fn(),
+  readWorkspaceFile: vi.fn(),
 }));
 
-describe("变更审阅空状态", () => {
-  it("没有变更时只显示说明和刷新入口", async () => {
-    const { container } = render(<DiffReviewPanel resolvedTheme="dark" />);
+describe("工作区差异（相对 HEAD）", () => {
+  beforeEach(() => {
+    vi.mocked(executeDesktopAgentTool).mockReset().mockResolvedValue({ output: "", isError: false });
+    vi.mocked(readHeadFile).mockReset();
+    vi.mocked(readWorkspaceFile).mockReset();
+  });
+
+  it("没有变更时只显示说明", async () => {
+    const { container } = render(<DiffReviewPanel workspace="D:/demo" resolvedTheme="dark" />);
     expect(await screen.findByText("没有未提交的改动")).toBeInTheDocument();
-    expect(screen.getByText("Agent 修改项目内的文件后，改动会显示在这里")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "全部重置" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "应用采纳" })).not.toBeInTheDocument();
     expect(container.querySelector(".review-files")).toBeNull();
     expect(container.querySelector(".review-content")).toBeNull();
+  });
+
+  it("只读显示差异，不提供任何写回入口；删除的文件也能查看", async () => {
+    vi.mocked(executeDesktopAgentTool).mockResolvedValue({ output: " M src/app.ts\n D old.ts\n", isError: false });
+    vi.mocked(readHeadFile).mockResolvedValue({ present: true, content: "a\nb\n" });
+    vi.mocked(readWorkspaceFile).mockResolvedValue({ present: true, content: "a\nB\n", digest: "d", lossless: true, bom: false });
+
+    render(<DiffReviewPanel workspace="D:/demo" resolvedTheme="dark" />);
+    expect(await screen.findByText("B")).toBeInTheDocument();
+    expect(screen.getByText(/只读：包含任务开始前就有的改动/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /old\.ts/ })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /采纳|拒绝|应用|撤销/ })).toBeNull();
+    expect(readWorkspaceFile).toHaveBeenCalledWith("D:/demo", "src/app.ts");
   });
 });

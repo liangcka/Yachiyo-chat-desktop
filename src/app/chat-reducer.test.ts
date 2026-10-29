@@ -519,4 +519,15 @@ describe("agent 工具事件动作", () => {
     });
     expect(ignored.activeConversation?.title).toBe("这是什么这个项目");
   });
+
+  it("等待同一项目写入时记录等待的操作，恢复运行或结束后清除", () => {
+    const streaming = chatReducer({ ...initialChatState, phase: "idle", activeConversation: conversation }, { type: "send-started", user, assistant });
+    const pending = [{ callId: "w1", name: "write_file", detail: "等待同一项目中的其他任务完成写入" }];
+    const waiting = chatReducer(streaming, { type: "run-waiting", messageId: assistant.id, pending });
+    expect(waiting.messages[1]?.waitingFor).toEqual(pending);
+    const resumed = chatReducer(waiting, { type: "run-waiting", messageId: assistant.id, pending: [] });
+    expect(resumed.messages[1]).not.toHaveProperty("waitingFor");
+    const completed = chatReducer(waiting, { type: "completed", messageId: assistant.id });
+    expect(completed.messages[1]).not.toHaveProperty("waitingFor");
+  });
 });

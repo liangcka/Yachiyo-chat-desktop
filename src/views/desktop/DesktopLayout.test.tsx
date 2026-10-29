@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { useChatController } from "../../app/use-chat-controller";
-import type { Conversation } from "../../domain/chat";
+import type { ChatMessage, Conversation } from "../../domain/chat";
 import { copyFor } from "../../i18n/messages";
 import { defaultWebSearchSettings } from "../../services/web-search-settings";
 import { projectManager } from "../../services/project-manager";
@@ -14,13 +14,49 @@ const overlayBridge = vi.hoisted(() => ({
   hide: vi.fn(async () => true),
 }));
 
+/** 是否按桌面版渲染：项目、执行模式与审阅只在桌面版提供 */
+const platform = vi.hoisted(() => ({ desktop: false }));
+
+vi.mock("../../services/app-platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../services/app-platform")>()),
+  isDesktopApp: () => platform.desktop,
+}));
+
+const runChangesBridge = vi.hoisted(() => ({
+  list: vi.fn(async (_workspace: string, runId: string) => [{
+    path: runId === "run-1" ? "src/login.ts" : "README.md",
+    kind: "modified" as const,
+    state: "agent" as const,
+    source: "file_tool" as const,
+    calls: ["call"],
+    baseline: { present: true, digest: "a" },
+    current: { present: true, digest: "b" },
+  }]),
+}));
+
 vi.mock("../../services/desktop-bridge", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../services/desktop-bridge")>();
-  return { ...actual, showControlOverlay: overlayBridge.show, hideControlOverlay: overlayBridge.hide };
+  return {
+    ...actual,
+    showControlOverlay: overlayBridge.show,
+    hideControlOverlay: overlayBridge.hide,
+    listRunChanges: runChangesBridge.list,
+    readRunChange: vi.fn(async (_workspace: string, runId: string, path: string) => ({
+      change: (await runChangesBridge.list("", runId))[0]!,
+      baseline: { present: true, content: `${path} 改动前\n`, digest: "a", lossless: true, bom: false },
+      current: { present: true, content: `${path} 改动后\n`, digest: "b", lossless: true, bom: false },
+    })),
+  };
 });
 
 describe("DesktopLayout", () => {
   const copy = copyFor("zh-CN");
+
+  beforeEach(() => {
+    platform.desktop = false;
+    // 右侧面板的展开状态与标签持久化在 localStorage，用例之间不得互相影响
+    localStorage.clear();
+  });
 
   const now = Date.now();
   const mockConversations: Conversation[] = [
@@ -64,6 +100,7 @@ describe("DesktopLayout", () => {
       stop: vi.fn(),
       updateUserMemory: vi.fn().mockResolvedValue(true),
       userMemory: "",
+      runningConversations: new Map(),
     } as unknown as ReturnType<typeof useChatController>,
     conversations: mockConversations,
     copy,
@@ -321,12 +358,34 @@ describe("DesktopLayout", () => {
   });
 
   it("空白对话只显示输入框与上方的项目选择", () => {
+    platform.desktop = true;
     const props = createMockProps();
+    props.llmEntries = [{ id: "e1", provider: "openai", apiKey: "k", model: "m" }];
+    props.llmActiveEntryId = "e1";
     render(<DesktopLayout {...props} />);
 
     expect(screen.queryByRole("region", { name: "欢迎体验" })).not.toBeInTheDocument();
     const main = screen.getByRole("main", { name: "核心对话工作台" });
     expect(within(main).getByTitle(/当前项目：无项目/)).toBeInTheDocument();
+    expect(within(main).getByRole("button", { name: "执行模式" })).toBeInTheDocument();
+  });
+
+  it("网页版说明本地执行能力边界，不提供无法生效的项目与执行模式入口", async () => {
+    const user = userEvent.setup();
+    const props = createMockProps();
+    render(<DesktopLayout {...props} />);
+
+    const main = screen.getByRole("main", { name: "核心对话工作台" });
+    expect(within(main).getByRole("note")).toHaveTextContent(copy.webCapabilityNote);
+    expect(within(main).queryByTitle(/当前项目/)).toBeNull();
+    expect(within(main).queryByRole("button", { name: "执行模式" })).toBeNull();
+    // 对话入口照常可用
+    expect(screen.getByRole("textbox", { name: copy.inputHint })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "展开成果面板" }));
+    await user.click(screen.getByRole("tab", { name: "代码审阅" }));
+    const pane = screen.getByRole("complementary", { name: "成果与多功能审阅面板" });
+    expect(within(pane).getByRole("note")).toHaveTextContent(copy.webCapabilityNote);
   });
 
   it("从侧栏项目菜单打开工作区，不进入设置", async () => {
@@ -407,6 +466,70 @@ describe("DesktopLayout", () => {
     expect(topbar).toBeInTheDocument();
     expect(within(topbar).queryByRole("button", { name: "设置与偏好" })).not.toBeInTheDocument();
     expect(within(topbar).queryByRole("button", { name: "拍摄" })).not.toBeInTheDocument();
+  });
+
+  it("从消息的改动汇总打开该任务的审阅，可切换任务或查看只读的工作区差异", async () => {
+    platform.desktop = true;
+    const user = userEvent.setup();
+    const props = createMockProps();
+    const edit = (id: string, path: string) => ({ id, name: "write_file", argumentsJson: JSON.stringify({ path }), result: { output: "ok", isError: false, durationMs: 1 } });
+    const messages: ChatMessage[] = [
+      { id: "u1", conversationId: "conv-1", role: "user", status: "complete", text: "修复登录", createdAt: 1 },
+      { id: "a1", conversationId: "conv-1", role: "assistant", status: "complete", text: "已修复。", createdAt: 2, toolSteps: [edit("c1", "src/login.ts")], run: { id: "run-1", workspace: "D:/alpha", executionMode: "confirm", startedAt: 2 } },
+      { id: "u2", conversationId: "conv-1", role: "user", status: "complete", text: "更新文档", createdAt: 3 },
+      { id: "a2", conversationId: "conv-1", role: "assistant", status: "complete", text: "已更新。", createdAt: 4, toolSteps: [edit("c2", "README.md")], run: { id: "run-2", workspace: "D:/beta", executionMode: "confirm", startedAt: 4 } },
+    ];
+    props.controller = { ...props.controller, messages } as typeof props.controller;
+    render(<DesktopLayout {...props} />);
+
+    const reviewButtons = await screen.findAllByRole("button", { name: "查看改动" });
+    await user.click(reviewButtons[0]!);
+
+    expect(await screen.findByText("该任务所属项目：D:/alpha")).toBeInTheDocument();
+    const pane = screen.getByRole("complementary", { name: "成果与多功能审阅面板" });
+    expect(await within(pane).findByRole("button", { name: /src\/login\.ts/ })).toBeInTheDocument();
+    expect(runChangesBridge.list).toHaveBeenCalledWith("D:/alpha", "run-1");
+    const runSelect = screen.getByRole("combobox", { name: "要审阅的任务" });
+    expect(within(runSelect).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      expect.stringContaining("更新文档"),
+      expect.stringContaining("修复登录"),
+    ]);
+
+    await user.selectOptions(runSelect, "run-2");
+    expect(await screen.findByText("该任务所属项目：D:/beta")).toBeInTheDocument();
+    expect(await within(pane).findByRole("button", { name: /README\.md/ })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "工作区 Git" }));
+    expect(screen.getByRole("tab", { name: "工作区 Git" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("combobox", { name: "要审阅的任务" })).toBeNull();
+  });
+
+  it("Agent 运行中按回车把输入作为补充要求排队，不中断任务，停止按钮仍可用", async () => {
+    const user = userEvent.setup();
+    const props = createMockProps();
+    const supplement = vi.fn(async () => "queued" as const);
+    const stop = vi.fn();
+    props.composerValue = "顺便把日志级别改成 debug";
+    props.controller = {
+      ...props.controller,
+      phase: "streaming",
+      stop,
+      supplement,
+      messages: [
+        { id: "u1", conversationId: "conv-1", role: "user", status: "complete", text: "修复测试", createdAt: 1 },
+        { id: "a1", conversationId: "conv-1", role: "assistant", status: "streaming", text: "", createdAt: 2, run: { id: "run-1", workspace: "D:/alpha", executionMode: "confirm", startedAt: 2 } },
+      ],
+    } as typeof props.controller;
+    render(<DesktopLayout {...props} />);
+
+    const input = screen.getByRole("textbox", { name: copy.inputHint });
+    expect(input).toHaveAttribute("placeholder", copy.supplementHint);
+    expect(screen.getByRole("button", { name: copy.stop })).toBeEnabled();
+    await user.type(input, "{Enter}");
+    expect(supplement).toHaveBeenCalledWith("顺便把日志级别改成 debug");
+    expect(stop).not.toHaveBeenCalled();
+    expect(props.onSend).not.toHaveBeenCalled();
+    expect(props.setComposerValue).toHaveBeenCalledWith("");
   });
 
   it("toggles right artifacts and review pane via Ctrl+B and header button", async () => {

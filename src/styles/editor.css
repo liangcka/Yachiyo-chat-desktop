@@ -418,7 +418,6 @@
   font-family: var(--ds-font-family-code, monospace);
 }
 
-
 /* 状态栏 */
 .editor-view__statusbar {
   display: flex;
@@ -580,13 +579,6 @@
   font-weight: 600;
 }
 
-.review-panel__actions {
-  margin-left: auto;
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
 .review-ghost-btn {
   display: inline-flex;
   align-items: center;
@@ -618,11 +610,6 @@
     background: var(--dsw-alias-interactive-bg-hover-solid);
   }
 
-  .review-ghost-btn--ok:not(:disabled):hover {
-    color: var(--dsw-alias-state-business-primary);
-    border-color: var(--dsw-alias-state-business-primary);
-  }
-
   .review-ghost-btn--danger:not(:disabled):hover {
     color: var(--dsw-alias-state-error-primary);
     border-color: var(--dsw-alias-state-error-primary);
@@ -635,18 +622,6 @@
 
 .review-ghost-btn--icon {
   padding: 4px;
-}
-
-.review-ghost-btn--on {
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-button-info-fill);
-  border-color: transparent;
-}
-
-.review-ghost-btn--danger-on {
-  color: var(--dsw-alias-state-error-primary);
-  background: var(--dsw-alias-interactive-bg-hover-danger);
-  border-color: transparent;
 }
 
 .review-primary-btn {
@@ -811,11 +786,6 @@
   color: var(--dsw-alias-label-primary);
 }
 
-.review-file--disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
 .review-file__badge {
   display: grid;
   place-items: center;
@@ -890,13 +860,9 @@
     border-color var(--ds-transition-duration-fast);
 }
 
-.review-hunk--accepted {
-  border-color: rgb(63 185 80 / 45%);
-}
-
-.review-hunk--rejected {
-  opacity: 0.55;
-  border-color: var(--dsw-alias-border-l1);
+/* 本次任务审阅：已勾选准备撤销的块 */
+.review-hunk--picked {
+  border-color: var(--dsw-alias-state-error-primary);
 }
 
 .review-hunk__head {
@@ -912,25 +878,6 @@
   font-family: var(--ds-font-family-code);
   font-size: 11px;
   color: var(--dsw-alias-state-business-primary);
-}
-
-.review-hunk__state {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 1px 9px;
-  border-radius: 999px;
-  color: var(--dsw-alias-label-tertiary);
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.review-hunk__state--accepted {
-  color: var(--dsw-alias-state-business-primary);
-  background: var(--yx-alias-interactive-bg-hover-accent);
-}
-
-.review-hunk__state--rejected {
-  color: var(--dsw-alias-state-error-primary);
-  background: var(--dsw-alias-interactive-bg-hover-danger);
 }
 
 .review-hunk__lines {
@@ -980,24 +927,162 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
-.review-hunk__ops {
-  display: flex;
-  gap: 6px;
-  padding: 7px 12px;
-  border-top: 1px solid var(--dsw-alias-border-l1);
-  background: var(--dsw-alias-bg-layer-1);
-}
-
-.review-hunk__ops--readonly {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11.5px;
-  color: var(--dsw-alias-label-dimmed);
-}
-
 /* 对比模式容器 */
 .review-compare {
   flex: 1;
   min-height: 0;
+}
+
+/* 保存时发现磁盘版本已变化：提示冲突并提供重新加载 */
+.editor-view__conflict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-l1);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.editor-view__conflict button {
+  padding: 2px 10px;
+  border: 1px solid var(--border-l2);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* ── 本次任务改动审阅 ───────────────────────────── */
+.review-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 0;
+}
+
+.review-switch__runs {
+  min-width: 0;
+  flex: 1;
+  max-width: 320px;
+  margin-left: auto;
+  padding: 3px 8px;
+  border-radius: var(--yx-radius-sm);
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.review-switch__workspace {
+  padding: 4px 12px 0;
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow-wrap: anywhere;
+}
+
+.task-review__notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 6px 10px;
+  border-radius: var(--yx-radius-sm);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-interactive-bg-hover);
+  border: 1px solid var(--dsw-alias-border-l1);
+}
+
+.task-review__notice > svg {
+  flex: none;
+}
+
+.task-review__notice--error {
+  color: var(--dsw-alias-state-error-primary);
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+  border-color: transparent;
+}
+
+.task-review__notice button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.task-review__notice button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.task-review__file-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+
+.task-review__actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.task-review__conflict {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 12px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.task-review__conflict > svg {
+  flex: none;
+  margin-top: 3px;
+}
+
+.task-review__preview {
+  flex: 1;
+  min-height: 0;
+  margin: 10px;
+  overflow: auto;
+}
+
+.task-review__pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.task-review__state--agent {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.task-review__state--conflict {
+  color: var(--dsw-alias-state-error-primary);
 }

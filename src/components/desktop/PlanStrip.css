@@ -149,3 +149,10 @@
   font-weight: 500;
   white-space: nowrap;
 }
+
+.plan-strip__note {
+  list-style: none;
+  padding: 6px 4px 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+}

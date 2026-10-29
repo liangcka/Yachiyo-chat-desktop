@@ -837,6 +837,55 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 22%, transparent);
 }
 
+.desktop-sidebar__history-activity--cancelling {
+  background: var(--dsw-alias-label-tertiary, #8a8f98);
+}
+
+.desktop-sidebar__history-activity--waiting {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--dsw-alias-state-business-primary, #4b8bf5);
+}
+
+/* 按项目分组的任务列表 */
+.desktop-sidebar__project-group + .desktop-sidebar__project-group {
+  margin-top: 6px;
+}
+
+.desktop-sidebar__project-group-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px 2px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary, #8a8f98);
+}
+
+.desktop-sidebar__project-group-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.desktop-sidebar__project-group-running {
+  flex-shrink: 0;
+  color: var(--dsw-alias-state-business-primary, #4b8bf5);
+}
+
+/* 没有活跃运行时最近一次运行的结局 */
+.desktop-sidebar__history-state {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  line-height: 1;
+  color: var(--dsw-alias-label-tertiary, #8a8f98);
+}
+
+.desktop-sidebar__history-state--failed,
+.desktop-sidebar__history-state--interrupted {
+  color: var(--warning);
+}
+
 @keyframes sidebar-activity-pulse {
   0%,
   100% {
@@ -2742,6 +2791,16 @@
   scrollbar-width: thin;
   scrollbar-color: var(--dsw-alias-scrollbar-bg-l2) transparent;
   position: relative;
+}
+
+.desktop-right-pane__review {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.desktop-right-pane__review > .review-panel {
+  min-height: 0;
 }
 
 .desktop-right-pane__body .skills-panel-content--embedded,
@@ -7285,6 +7344,30 @@
   margin-left: auto;
 }
 
+.artifact-card__status-icon--warning {
+  color: var(--warning);
+  margin-left: auto;
+}
+
+.artifact-card__status-icon--running {
+  color: var(--text-muted);
+  margin-left: auto;
+  animation: review-spin 0.75s linear infinite;
+}
+
+.artifact-card__status-text {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.artifact-card__status-text--error {
+  color: #ef4444;
+}
+
+.artifact-card__status-text--warning {
+  color: var(--warning);
+}
+
 .artifact-card__title {
   font-size: 12.5px;
   font-weight: 600;
@@ -7644,4 +7727,59 @@
 
 .file-ref-picker__pick-project:hover {
   background: var(--dsw-alias-interactive-bg-active);
+}
+
+/* 已有任务的项目归属：绑定后只读展示，未绑定时给出绑定入口 */
+.conversation-project-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  margin-bottom: -2px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.conversation-project-bar__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 240px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conversation-project-bar__chip--unbound {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
+.conversation-project-bar__hint {
+  min-width: 0;
+}
+
+.conversation-project-bar__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-l2);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.conversation-project-bar__action:hover:not(:disabled) {
+  background: var(--interactive-hover);
+}
+
+.conversation-project-bar__action:disabled {
+  opacity: 0.5;
+  cursor: default;
 }

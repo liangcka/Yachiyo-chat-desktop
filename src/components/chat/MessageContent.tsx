@@ -1,9 +1,15 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import type { ChatMessage, Locale, MessageContentSegment, ToolStep } from "../../domain/chat";
 import { collectModifiedFiles } from "../../domain/file-changes";
+import { summarizeMessageVerification } from "../../domain/verification";
 import { ToolCard } from "../tools/ToolCard";
 import { FileChangeSummary } from "./FileChangeSummary";
+import { RunNotes } from "./RunNotes";
+import { RunResultSummary } from "./RunResultSummary";
+import { SupplementList } from "./SupplementList";
+import { StopCommandContext } from "./review-context";
+import { VerificationSummary } from "./VerificationSummary";
 import { MarkdownContent } from "./MarkdownContent";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { processDurationMs, splitContentSegments } from "./content-segments";
@@ -36,10 +42,14 @@ function deepEqual(a: unknown, b: unknown): boolean {
 
 function resolvePendingStepId(
   toolSteps: ReadonlyArray<ToolStep> | undefined,
-  pendingPermission?: { toolName: string; argumentsJson?: string },
+  pendingPermission?: { toolName: string; argumentsJson?: string; callId?: string },
   pendingToolName?: string,
 ): string | undefined {
   if (!toolSteps || toolSteps.length === 0) return undefined;
+  // 网关给出调用编号时精确定位，不再按工具名与参数猜测
+  if (pendingPermission?.callId !== undefined) {
+    return toolSteps.some((step) => step.id === pendingPermission.callId) ? pendingPermission.callId : undefined;
+  }
   const toolName = pendingPermission?.toolName ?? pendingToolName;
   if (!toolName) return undefined;
 
@@ -67,6 +77,16 @@ function resolvePendingStepId(
  */
 function isCommandTool(name: string): boolean {
   return name === "run_command";
+}
+
+function StepCard({ step, live, locale, pendingStepId }: { step: ToolStep; live: boolean; locale: Locale; pendingStepId?: string }) {
+  const stopCommand = useContext(StopCommandContext);
+  const running = live && step.result === undefined;
+  return <ToolCard toolName={step.name} args={parseArguments(step.argumentsJson)} output={step.result?.output}
+    isError={step.result?.isError} isRunning={running}
+    isWaitingForApproval={step.id === pendingStepId} locale={locale}
+    command={step.result?.command} liveOutput={step.liveOutput}
+    onStop={running && step.name === "run_command" && stopCommand !== undefined ? () => stopCommand(step.id) : undefined} />;
 }
 
 function ToolGroup({ steps, streaming, locale, pendingStepId }: {
@@ -102,10 +122,7 @@ function ToolGroup({ steps, streaming, locale, pendingStepId }: {
         <ChevronRight size={13} aria-hidden="true" />
       </summary>
       <div className="message-tool-group__details">
-        {steps.map((step) => <ToolCard key={step.id} toolName={step.name}
-          args={parseArguments(step.argumentsJson)} output={step.result?.output}
-          isError={step.result?.isError} isRunning={streaming && step.result === undefined}
-          isWaitingForApproval={step.id === pendingStepId} locale={locale} />)}
+        {steps.map((step) => <StepCard key={step.id} step={step} live={streaming} locale={locale} pendingStepId={pendingStepId} />)}
       </div>
     </details>
   );
@@ -119,11 +136,13 @@ function legacySegments(message: ChatMessage): ReadonlyArray<MessageContentSegme
   ];
 }
 
-export function MessageContent({ message, locale, hideCitations, pendingPermission, pendingToolName }: {
+export function MessageContent({ message, locale, hideCitations, pendingPermission, pendingToolName, latest = false }: {
   message: ChatMessage;
   locale: Locale;
   hideCitations: boolean;
-  pendingPermission?: { toolName: string; argumentsJson?: string };
+  /** 会话中最新的一条回复：结果区提供继续处理的入口 */
+  latest?: boolean;
+  pendingPermission?: { toolName: string; argumentsJson?: string; callId?: string };
   pendingToolName?: string;
 }) {
   const segments = message.contentSegments?.length ? message.contentSegments : legacySegments(message);
@@ -134,7 +153,15 @@ export function MessageContent({ message, locale, hideCitations, pendingPermissi
     : undefined;
   const { processSegments, finalSegments } = splitContentSegments(segments);
   const collapseProcess = message.status === "complete" && processSegments.length > 0;
-  const changes = <FileChangeSummary paths={collectModifiedFiles(message)} locale={locale} />;
+  const modifiedFiles = collectModifiedFiles(message);
+  const settled = message.role === "assistant" && message.status !== "streaming" && (message.toolSteps?.length ?? 0) > 0;
+  const changes = <>
+    {message.runNotes !== undefined ? <RunNotes notes={message.runNotes} locale={locale} latest={latest} /> : null}
+    <FileChangeSummary paths={modifiedFiles} locale={locale} {...(message.run !== undefined ? { run: message.run } : {})} settled={settled} />
+    {settled ? <VerificationSummary summary={summarizeMessageVerification(message)} modifiedFiles={modifiedFiles.length} locale={locale} /> : null}
+    {message.supplements !== undefined ? <SupplementList supplements={message.supplements} locale={locale} /> : null}
+    {message.role === "assistant" && message.status !== "streaming" ? <RunResultSummary message={message} locale={locale} latest={latest} /> : null}
+  </>;
 
   function thoughtDurationMs(segment: MessageContentSegment): number | undefined {
     return segment.type === "thought" && segment.startedAtMs !== undefined && segment.endedAtMs !== undefined
@@ -178,9 +205,7 @@ export function MessageContent({ message, locale, hideCitations, pendingPermissi
       }
       flushCommands();
       nodes.push(<div key={step.id} className="message-tool-step">
-        <ToolCard toolName={step.name} args={parseArguments(step.argumentsJson)} output={step.result?.output}
-          isError={step.result?.isError} isRunning={live && step.result === undefined}
-          isWaitingForApproval={step.id === pendingStepId} locale={locale} />
+        <StepCard step={step} live={live} locale={locale} pendingStepId={pendingStepId} />
       </div>);
     }
     flushCommands();
@@ -220,7 +245,10 @@ export function MessageContent({ message, locale, hideCitations, pendingPermissi
     return content;
   }
   if (segments.length === 0 && message.status === "streaming") {
-    return <ThinkingBlock locale={locale} hasText={false} isStreaming />;
+    return <>
+      <ThinkingBlock locale={locale} hasText={false} isStreaming />
+      {message.supplements !== undefined ? <SupplementList supplements={message.supplements} locale={locale} /> : null}
+    </>;
   }
   if (!collapseProcess) return <>{renderSegments(segments)}{changes}</>;
 

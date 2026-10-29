@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ToolCard } from "./ToolCard";
 import { projectManager } from "../../services/project-manager";
+import { BindProjectContext } from "../chat/review-context";
 
 describe("ToolCard", () => {
   it("渲染动词化描述而非原始工具名和 JSON", () => {
@@ -124,10 +125,24 @@ describe("ToolCard", () => {
   it.each(["zh-CN", "ja-JP"] as const)("未选择项目的失败步骤提供项目选择入口（%s）", async (locale) => {
     const pick = vi.spyOn(projectManager, "pickAndOpenProject").mockResolvedValue(undefined);
     render(<ToolCard toolName="write_file" isError locale={locale}
-      output="当前未选择项目，无法写入。请让用户在侧栏选择项目。" />);
+      output="当前任务未绑定项目，无法写入。请让用户在输入框上方为本任务绑定项目。" />);
     const label = locale === "ja-JP" ? "プロジェクトを選択" : "选择项目";
     await fireEvent.click(screen.getByRole("button", { name: label }));
     expect(pick).toHaveBeenCalledWith(label);
+    pick.mockRestore();
+  });
+
+  it("对话提供绑定入口时，项目选择用于绑定当前任务而不是只切换界面项目", () => {
+    const pick = vi.spyOn(projectManager, "pickAndOpenProject").mockResolvedValue(undefined);
+    const bind = vi.fn();
+    render(
+      <BindProjectContext.Provider value={bind}>
+        <ToolCard toolName="write_file" isError output="当前任务未绑定项目，无法写入。请让用户在输入框上方为本任务绑定项目。" />
+      </BindProjectContext.Provider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "选择项目" }));
+    expect(bind).toHaveBeenCalledTimes(1);
+    expect(pick).not.toHaveBeenCalled();
     pick.mockRestore();
   });
 
@@ -139,5 +154,33 @@ describe("ToolCard", () => {
   it.each(["当前未打开项目工作区，请使用用户提供的绝对路径读取文件或目录。", "当前未选择工作区项目，无法写入文件。"])("历史记录和相对路径错误也提供项目入口：%s", (output) => {
     render(<ToolCard toolName="read_file" isError output={output} />);
     expect(screen.getByRole("button", { name: "选择项目" })).toBeVisible();
+  });
+
+  it("命令结束后以退出码显示结论，运行中显示输出末尾并可单独停止", async () => {
+    const record = {
+      executionId: "exec-1", command: "npm test", cwd: "D:/demo", exitCode: 1, durationMs: 3200,
+      endReason: "exited" as const, exitConfirmed: true, outputBytes: 10, truncated: false, logPath: ".yachiyo/spill/command-1.log",
+    };
+    const { rerender } = render(<ToolCard toolName="run_command" args={{ command: "npm test" }} isRunning
+      liveOutput={"line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\n"} onStop={vi.fn(async () => true)} />);
+    expect(screen.getByText(/line 7/)).toBeVisible();
+    expect(screen.queryByText(/line 1\b/)).not.toBeInTheDocument();
+    const stop = screen.getByRole("button", { name: /停止命令/ });
+    fireEvent.click(stop);
+    expect(await screen.findByRole("button", { name: /正在停止/ })).toBeDisabled();
+
+    rerender(<ToolCard toolName="run_command" args={{ command: "npm test" }} isError output="[结果] 失败：退出码 1" command={record} />);
+    expect(screen.getByText("退出码 1 · 3.2 秒")).toHaveClass("tool-card__status--error");
+    expect(screen.queryByRole("button", { name: /停止命令/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /运行 `npm test`/ }));
+    expect(screen.getByText("完整日志：.yachiyo/spill/command-1.log")).toBeVisible();
+  });
+
+  it("未能确认进程退出时标记结果未知", () => {
+    render(<ToolCard toolName="run_command" args={{ command: "make" }} isError command={{
+      executionId: "e", command: "make", cwd: "D:/demo", durationMs: 100, endReason: "cancelled",
+      exitConfirmed: false, outputBytes: 0, truncated: false,
+    }} />);
+    expect(screen.getByText("未能确认进程退出 · 结果未知")).toHaveClass("tool-card__status--warning");
   });
 });

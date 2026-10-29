@@ -5,7 +5,7 @@ import {
   RefreshCw,
   X,
 } from "lucide-react";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import type { EditorWorkspaceController } from "../../app/use-editor-workspace";
 import { ArtifactsPaneView } from "../../components/desktop/ArtifactsPaneView";
 import { LlmSettingsPanel } from "../../components/LlmSettingsPanel";
@@ -13,6 +13,11 @@ import { LlmSettingsPanel } from "../../components/LlmSettingsPanel";
 const DiffReviewPanel = lazy(() =>
   import("../../components/editor/DiffReviewPanel").then((m) => ({ default: m.DiffReviewPanel })),
 );
+const TaskReviewPanel = lazy(() =>
+  import("../../components/editor/TaskReviewPanel").then((m) => ({ default: m.TaskReviewPanel })),
+);
+import type { ReviewTarget } from "../../components/chat/review-context";
+import { reviewableRuns } from "../../domain/file-changes";
 import { SkillsPanel } from "../../components/SkillsPanel";
 import { UserMemoryPanel } from "../../components/UserMemoryPanel";
 import { WorkspacePanel } from "../../components/desktop/WorkspacePanel";
@@ -20,9 +25,18 @@ import type { SettingsTabKey } from "../../components/settings/SettingsModal";
 import { SKILLS } from "../../skills";
 import type { SharedViewProps } from "../layout-types";
 import type { DesktopRightTab } from "./sidebar/types";
+import { useProjectState } from "../../services/project-manager";
+import { isDesktopApp } from "../../services/app-platform";
+
+/** 一次打开审阅的请求；nonce 变化即视为新请求（重复点击同一任务也会切回“本次任务”） */
+export interface ReviewRequest {
+  readonly nonce: number;
+  readonly target?: ReviewTarget;
+}
 
 export interface DesktopRightPaneProps {
   activeTab: DesktopRightTab;
+  reviewRequest?: ReviewRequest;
   onClose: () => void;
   /** 文件树点击文件：在编辑器中打开 */
   onOpenFile?: (path: string) => void;
@@ -45,10 +59,31 @@ export function DesktopRightPane({
   onCheckpointRestored,
   onSelectTab,
   shared,
+  reviewRequest,
   resolvedTheme = "dark",
 }: DesktopRightPaneProps) {
   const [reviewRefreshKey, setReviewRefreshKey] = useState(0);
+  const { activeProject } = useProjectState();
   const ja = shared.controller.locale === "ja-JP";
+  const runs = useMemo(() => reviewableRuns(shared.controller.messages), [shared.controller.messages]);
+  const [reviewMode, setReviewMode] = useState<"task" | "git">("task");
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(reviewRequest?.target?.runId ?? null);
+  // 新的打开请求切回“本次任务”并选中请求的运行（渲染期调整，不经过 effect）
+  const [handledRequest, setHandledRequest] = useState(reviewRequest?.nonce);
+  if (reviewRequest !== undefined && reviewRequest.nonce !== handledRequest) {
+    setHandledRequest(reviewRequest.nonce);
+    setReviewMode("task");
+    if (reviewRequest.target !== undefined) setSelectedRunId(reviewRequest.target.runId);
+  }
+  /** 面板内（成果工件）打开审阅：带运行时直接选中该运行 */
+  const openReviewInPane = (target?: ReviewTarget) => {
+    if (target !== undefined) setSelectedRunId(target.runId);
+    setReviewMode("task");
+    onSelectTab("review");
+  };
+  // 选中的运行不在当前会话（例如切换了会话）时回到最近一次运行
+  const selectedRun = runs.find((run) => run.runId === selectedRunId) ?? runs[0];
+  const showTask = reviewMode === "task" && selectedRun !== undefined;
 
   if (activeTab === "none") return null;
   const visibleTab = activeTab === "editor" ? "workspace" : activeTab;
@@ -124,11 +159,75 @@ export function DesktopRightPane({
 
       {/* 面板内容容器 */}
       <div className="desktop-right-pane__body">
-        {/* 1. 代码差异审阅 Tab */}
-        {activeTab === "review" ? (
-          <Suspense fallback={<div className="desktop-right-pane__loading" />}>
-            <DiffReviewPanel copy={shared.copy} resolvedTheme={resolvedTheme} refreshKey={reviewRefreshKey} />
-          </Suspense>
+        {/* 1. 代码审阅 Tab：本次任务改动（可保留/撤销） / 工作区相对 HEAD 的差异（只读） */}
+        {(activeTab === "review" || visibleTab === "workspace") && !isDesktopApp() ? (
+          <p className="desktop-composer-capability desktop-right-pane__capability" role="note">{shared.copy.webCapabilityNote}</p>
+        ) : activeTab === "review" ? (
+          <div className="desktop-right-pane__review">
+            <div className="review-switch">
+              <div className="review-panel__modes" role="tablist" aria-label={shared.copy.reviewTitle}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={showTask}
+                  disabled={selectedRun === undefined}
+                  title={selectedRun === undefined ? shared.copy.reviewNoRun : undefined}
+                  className={`review-mode-btn ${showTask ? "review-mode-btn--active" : ""}`}
+                  onClick={() => setReviewMode("task")}
+                >
+                  {shared.copy.reviewTaskTab}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={!showTask}
+                  className={`review-mode-btn ${!showTask ? "review-mode-btn--active" : ""}`}
+                  onClick={() => setReviewMode("git")}
+                >
+                  {shared.copy.reviewGitTab}
+                </button>
+              </div>
+              {showTask && runs.length > 1 ? (
+                <select
+                  className="review-switch__runs"
+                  aria-label={ja ? "レビューするタスク" : "要审阅的任务"}
+                  value={selectedRun.runId}
+                  onChange={(event) => setSelectedRunId(event.target.value)}
+                >
+                  {runs.map((run) => (
+                    <option key={run.runId} value={run.runId}>
+                      {new Date(run.startedAt).toLocaleTimeString(ja ? "ja-JP" : "zh-CN", { hour: "2-digit", minute: "2-digit" })} · {run.request || run.runId.slice(0, 8)}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+            </div>
+            {showTask && selectedRun.workspace !== activeProject ? (
+              <p className="review-switch__workspace">
+                {ja ? `このタスクのプロジェクト：${selectedRun.workspace}` : `该任务所属项目：${selectedRun.workspace}`}
+              </p>
+            ) : null}
+            <Suspense fallback={<div className="desktop-right-pane__loading" />}>
+              {showTask ? (
+                <TaskReviewPanel
+                  key={`${selectedRun.workspace}\u0000${selectedRun.runId}`}
+                  workspace={selectedRun.workspace}
+                  runId={selectedRun.runId}
+                  refreshKey={reviewRefreshKey}
+                />
+              ) : activeProject !== null ? (
+                <DiffReviewPanel
+                  key={activeProject}
+                  workspace={activeProject}
+                  copy={shared.copy}
+                  resolvedTheme={resolvedTheme}
+                  refreshKey={reviewRefreshKey}
+                />
+              ) : (
+                <p className="review-files__hint">{shared.copy.noProjectSelected}</p>
+              )}
+            </Suspense>
+          </div>
         ) : null}
 
         {/* 3. 成果工件 Tab */}
@@ -136,13 +235,13 @@ export function DesktopRightPane({
           <ArtifactsPaneView
             messages={shared.controller.messages}
             imageUrls={shared.imageUrls}
-            onOpenReview={onOpenReview ?? (() => onSelectTab("review"))}
+            onOpenReview={openReviewInPane}
             onOpenFile={onOpenFile}
           />
         ) : null}
 
         {/* 4. 工作区与终端 Tab */}
-        {visibleTab === "workspace" ? (
+        {visibleTab === "workspace" && isDesktopApp() ? (
           <WorkspacePanel
             copy={shared.copy}
             open={true}

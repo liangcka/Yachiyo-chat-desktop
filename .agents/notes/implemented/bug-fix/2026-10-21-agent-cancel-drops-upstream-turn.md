@@ -17,8 +17,8 @@ Status: implemented
 
 ## Consequences
 
-- 网关感知到 SSE 断开（连接关闭或 5 秒心跳写入失败）后，上游连接在 200ms 内断开。
-- 工具执行（命令、MCP）不受影响：中途丢弃有副作用的工具可能留下半完成状态，且不产生 API 费用。
+- 取消标志置位后（显式取消接口；2026-10-28 起 SSE 断开不再取消运行），上游连接在 200ms 内断开。
+- 有副作用的工具不靠丢弃 Future 停止：命令在执行器内部终止整棵进程树并确认退出，MCP 调用给予收尾时间后才标记结果未知，见 [命令执行与可信取消](../architecture/2026-10-28-agent-command-execution-and-cancellation.md)。
 
 ## Verification
 

@@ -3,18 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FileReferencePicker } from "./FileReferencePicker";
 
 const projectMock = vi.hoisted(() => ({
-  activeProject: "D:/demo" as string | null,
   pickAndOpenProject: vi.fn(),
 }));
 
 vi.mock("../../services/project-manager", () => ({
   projectManager: { pickAndOpenProject: projectMock.pickAndOpenProject },
-  useProjectState: () => ({ activeProject: projectMock.activeProject, recentProjects: [] }),
 }));
 
 describe("FileReferencePicker", () => {
   beforeEach(() => {
-    projectMock.activeProject = "D:/demo";
     projectMock.pickAndOpenProject.mockReset();
   });
 
@@ -33,6 +30,7 @@ describe("FileReferencePicker", () => {
         items={sampleItems}
         onSelect={vi.fn()}
         onClose={vi.fn()}
+        workspace="D:/demo"
       />,
     );
 
@@ -49,6 +47,7 @@ describe("FileReferencePicker", () => {
         items={sampleItems}
         onSelect={vi.fn()}
         onClose={vi.fn()}
+        workspace="D:/demo"
       />,
     );
 
@@ -66,6 +65,7 @@ describe("FileReferencePicker", () => {
         items={sampleItems}
         onSelect={handleSelect}
         onClose={vi.fn()}
+        workspace="D:/demo"
       />,
     );
 
@@ -82,6 +82,7 @@ describe("FileReferencePicker", () => {
         items={sampleItems}
         onSelect={vi.fn()}
         onClose={vi.fn()}
+        workspace="D:/demo"
       />,
     );
 
@@ -89,13 +90,13 @@ describe("FileReferencePicker", () => {
   });
 
   it("没有选择项目时说明原因并提供选择项目入口", () => {
-    projectMock.activeProject = null;
     render(
       <FileReferencePicker
         query=""
         items={[]}
         onSelect={vi.fn()}
         onClose={vi.fn()}
+        workspace={null}
       />,
     );
 
@@ -103,5 +104,22 @@ describe("FileReferencePicker", () => {
     expect(screen.queryByText("未找到匹配的工作区文件")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "选择项目文件夹" }));
     expect(projectMock.pickAndOpenProject).toHaveBeenCalledTimes(1);
+  });
+
+  it("未绑定项目的任务由调用方决定选择项目后的绑定方式", () => {
+    const onSelectProject = vi.fn();
+    render(
+      <FileReferencePicker
+        query=""
+        items={[]}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+        workspace={null}
+        onSelectProject={onSelectProject}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "选择项目文件夹" }));
+    expect(onSelectProject).toHaveBeenCalledTimes(1);
+    expect(projectMock.pickAndOpenProject).not.toHaveBeenCalled();
   });
 });

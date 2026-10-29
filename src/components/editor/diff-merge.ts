@@ -1,4 +1,4 @@
-import { structuredPatch } from "diff";
+import { applyPatch, reversePatch, structuredPatch } from "diff";
 
 /* ── git status --short 解析 ─────────────────────────────── */
 
@@ -74,8 +74,10 @@ export interface ReviewHunk {
   lines: DiffHunkLine[];
 }
 
+const HUNK_CONTEXT = 3;
+
 export function toReviewHunks(original: string, modified: string): ReviewHunk[] {
-  const patch = structuredPatch("", "", original, modified, "", "", { context: 3 });
+  const patch = structuredPatch("", "", original, modified, "", "", { context: HUNK_CONTEXT });
   return patch.hunks.map((hunk) => ({
     oldStart: hunk.oldStart,
     newStart: hunk.newStart,
@@ -89,39 +91,17 @@ export function toReviewHunks(original: string, modified: string): ReviewHunk[] 
   }));
 }
 
-/* ── 逐块采纳合并 ─────────────────────────────────────────── */
+/* ── 按块撤销 ─────────────────────────────────────────── */
 
 /**
- * 将「被采纳」的 hunk 应用到原文：采纳段取 new 侧内容，未采纳段保持原样。
- * hunk 间不重叠（jsdiff 保证），按序消费原文件行游标即可。
+ * 撤销所选块：从当前内容出发，把所选块还原为基线一侧，未选择的块保持现状。
+ * 块的编号与 toReviewHunks(baseline, current) 一致；补丁无法套用（内容已变化）时返回 undefined，
+ * 调用方不得退回整体覆盖
  */
-export function applySelectedHunks(
-  original: string,
-  hunks: ReviewHunk[],
-  accepted: boolean[],
-): string {
-  const originalLines = original.split("\n");
-  const result: string[] = [];
-  let cursor = 1; // 原文件行游标（1-based，result 已消费到该行之前）
-
-  hunks.forEach((hunk, index) => {
-    if (!accepted[index]) return;
-
-    // hunk 起点之前的未消费原行原样保留
-    while (cursor < hunk.oldStart && cursor <= originalLines.length) {
-      result.push(originalLines[cursor - 1]);
-      cursor += 1;
-    }
-    // 替换 hunk 覆盖段：ctx+del 为原跨度，输出 ctx+add
-    for (const line of hunk.lines) {
-      if (line.type !== "add") cursor += 1;
-      if (line.type !== "del") result.push(line.text);
-    }
-  });
-
-  while (cursor <= originalLines.length) {
-    result.push(originalLines[cursor - 1]);
-    cursor += 1;
-  }
-  return result.join("\n");
+export function revertSelectedHunks(baseline: string, current: string, selected: readonly boolean[]): string | undefined {
+  const patch = structuredPatch("", "", baseline, current, "", "", { context: HUNK_CONTEXT });
+  const chosen = { ...patch, hunks: patch.hunks.filter((_, index) => selected[index] === true) };
+  if (chosen.hunks.length === 0) return current;
+  const result = applyPatch(current, reversePatch(chosen));
+  return result === false ? undefined : result;
 }

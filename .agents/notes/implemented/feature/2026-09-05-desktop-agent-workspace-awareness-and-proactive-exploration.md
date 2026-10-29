@@ -21,9 +21,9 @@ Status: implemented
    - 严禁在未读取项目前凭空捏造事实（杜绝将代码库臆想为直播后台、聊天应用等幻觉）；面对关于项目概括、功能或这是什么的疑问，必须**首先主动调用工具（`list_directory` 或 `read_file`）**查阅实际代码与说明文件，基于真实查阅结果给出专业解答。
 3. **前后端工作区请求同步与持久化修复**：
    - `src/services/chat-client.ts` 与 `src-tauri/src/types.rs`：在 `StreamChatRequest.agent` 中增加 `workspace?: string` 契约字段。
-   - `src/app/use-chat-controller.ts`：桌面端开启 Agent 模式时将 `projectManager.getState().activeProject` 填入请求体。
-   - `src-tauri/src/gateway/agent/runtime.rs`：后端接收到 `agent.workspace` 且路径有效时强行对齐 `workspace_manager.set_workspace_root(...)`，保证前后端强一致。
-   - `src/services/project-manager.ts`：修复 `init()` 逻辑，优先使用本地已持久化的 `activeProject` 同步至后端，避免启动时被后端默认工作目录覆盖。
+   - `src/app/use-chat-controller.ts`：请求体的 `workspace` 取自会话绑定的项目（空白会话在提交时绑定当时选中的项目），不在请求发出时读取界面当前项目。
+   - `src-tauri/src/gateway/agent/runtime.rs`：运行只使用请求给出的工作区，不改写、也不回退到网关记录的界面当前项目；详见 [运行身份与工作区归属](../architecture/2026-10-28-agent-run-identity-and-workspace-ownership.md)。
+   - `src/services/project-manager.ts`：`init()` 优先使用本地已持久化的 `activeProject`，经原生层校验成功后才生效，避免启动时被后端默认工作目录覆盖。
 4. **工具 Schema 强化（`src-tauri/src/tools/mod.rs`）**：
    - 为 `read_file`、`list_directory`、`write_file`、`run_command` 等补充详细的中英双语调用时机与使用场景说明。
 

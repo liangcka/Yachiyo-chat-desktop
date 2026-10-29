@@ -20,8 +20,7 @@ export function SidebarProjects({ locale, onNewChat, onOpenWorkspace }: SidebarP
 
   const handleSelect = async (path: string) => {
     if (path === activeProject) return;
-    await projectManager.switchProject(path);
-    await onNewChat();
+    if (await projectManager.switchProject(path)) await onNewChat();
   };
 
   return (
@@ -89,7 +88,7 @@ export function SidebarProjects({ locale, onNewChat, onOpenWorkspace }: SidebarP
                     <button
                       type="button"
                       className="desktop-sidebar__history-action"
-                      onClick={() => void projectManager.switchProject(null).then(onNewChat)}
+                      onClick={() => void projectManager.switchProject(null).then((switched) => (switched ? onNewChat() : undefined))}
                       title={ja ? "プロジェクトを閉じる" : "关闭项目"}
                       aria-label={ja ? "プロジェクトを閉じる" : "关闭项目"}
                     >

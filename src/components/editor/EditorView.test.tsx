@@ -28,7 +28,7 @@ vi.mock("./monaco-loader", () => ({
 
 vi.mock("../../services/desktop-bridge", () => ({
   getDesktopWorkspaceRoot: vi.fn().mockResolvedValue("D:/test/my-workspace"),
-  setDesktopWorkspaceRoot: vi.fn().mockResolvedValue(true),
+  setDesktopWorkspaceRoot: vi.fn(async (path: string) => ({ ok: true, path: path.trim() || null })),
   listWorkspaceEntries: vi.fn().mockResolvedValue([
     { name: "index.ts", isDir: false },
     { name: "src", isDir: true },
@@ -51,6 +51,7 @@ describe("EditorView", () => {
     setActive: vi.fn(),
     updateContent: vi.fn(),
     saveTab: vi.fn().mockResolvedValue(true),
+    reloadTab: vi.fn().mockResolvedValue(undefined),
     isDirty: vi.fn().mockReturnValue(false),
     ...override,
   });
@@ -101,9 +102,13 @@ describe("EditorView", () => {
       tabs: [
         {
           kind: "file",
+          key: "D:/demo\u0000src/index.ts",
+          workspace: "D:/demo",
           path: "src/index.ts",
           content: "console.log('hello');",
           savedContent: "console.log('hello');",
+          bom: false,
+          revision: 0,
           readOnly: false,
         },
       ],

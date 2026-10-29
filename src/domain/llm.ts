@@ -214,7 +214,7 @@ export interface CustomModelSettings {
   readonly fullUrl?: boolean;
   readonly displayName?: string;
   readonly family?: ModelFamily;
-  /** 输入上下文窗口（Token），用于界面上下文用量估算 */
+  /** 输入上下文窗口（Token），用于界面上下文用量估算与桌面网关的运行内上下文预算 */
   readonly contextWindow?: number;
   readonly maxOutputTokens?: number;
   readonly maxToolRounds?: number;

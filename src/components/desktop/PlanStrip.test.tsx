@@ -18,8 +18,22 @@ describe("PlanStrip", () => {
 
     render(<PlanStrip todos={todos} />);
 
-    expect(screen.getByText("任务进度 1/3")).toBeInTheDocument();
+    expect(screen.getByText("计划进度 1/3")).toBeInTheDocument();
     expect(screen.getByText("第 2 步：实现修剪器")).toBeInTheDocument();
+  });
+
+  it("运行结束后计划里的进行中只表示停下的位置，不显示为正在执行", () => {
+    const todos: TodoItem[] = [
+      { content: "第 1 步", status: "completed" },
+      { content: "第 2 步：实现修剪器", status: "in_progress" },
+    ];
+    const { container } = render(<PlanStrip todos={todos} running={false} />);
+    expect(screen.getByText("停在：第 2 步：实现修剪器")).toBeInTheDocument();
+    expect(container.querySelector(".plan-strip__spinner")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /展开任务清单/i }));
+    expect(screen.getByText("未完成")).toBeInTheDocument();
+    expect(screen.queryByText("进行中")).toBeNull();
+    expect(screen.getByText("计划由 Agent 自行更新；是否通过验证以命令执行记录为准。")).toBeInTheDocument();
   });
 
   it("toggles expanded task list on click", () => {
@@ -54,8 +68,8 @@ describe("PlanStrip", () => {
     ];
 
     render(<PlanStrip todos={todos} />);
-    expect(screen.getByText("任务进度 2/2")).toBeInTheDocument();
-    expect(screen.getByText("所有计划步骤已完成")).toBeInTheDocument();
+    expect(screen.getByText("计划进度 2/2")).toBeInTheDocument();
+    expect(screen.getByText("计划步骤均已标记完成")).toBeInTheDocument();
   });
 });
 

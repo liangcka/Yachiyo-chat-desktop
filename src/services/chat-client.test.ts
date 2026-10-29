@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { KEYSTORE_MANAGED_API_KEY } from "../domain/llm";
-import { ChatClientError, isRetryableChatErrorCode, streamChat, type StreamChatRequest } from "./chat-client";
+import {
+  ChatClientError,
+  isRetryableChatErrorCode,
+  isStreamDisconnect,
+  resumeAgentRun,
+  streamChat,
+  type StreamChatRequest,
+} from "./chat-client";
 
 const sampleRequest: StreamChatRequest = {
   locale: "zh-CN",
@@ -461,4 +468,138 @@ describe("agent 事件解析", () => {
       }),
     );
   });
+
+  it("解析运行身份、命令增量输出、结构化命令记录与取消收尾", async () => {
+    const command = {
+      executionId: "exec-1", command: "npm test", cwd: "D:/demo", exitCode: 1, durationMs: 3200,
+      endReason: "exited", exitConfirmed: true, outputBytes: 42, truncated: false,
+    };
+    serverFetch.mockResolvedValue(
+      sseResponse(
+        sse("run_started", { runId: "run-1", conversationId: "c1", workspace: "D:/demo", executionMode: "confirm", provider: "openai", model: "m", startedAt: 5 }) +
+          sse("tool_call", { id: "t1", name: "run_command", arguments: { command: "npm test" } }) +
+          sse("tool_output", { id: "t1", stream: "stdout", text: "running…\n" }) +
+          sse("tool_result", { id: "t1", name: "run_command", output: "[结果] 失败：退出码 1", isError: true, durationMs: 3200, command }) +
+          sse("permission_request", { requestId: "run-1-t2", toolName: "write_file", arguments: {}, callId: "t2" }) +
+          sse("permission_resolved", { requestId: "run-1-t2", approved: false, reason: "timeout" }) +
+          sse("run_status", { runId: "run-1", status: "cancelling", pending: [{ callId: "m1", name: "mcp__x__y", detail: "等待返回" }] }) +
+          sse("done", { truncated: false, reason: "cancelled", unknown: [{ callId: "m1", name: "mcp__x__y", detail: "未返回" }] }),
+      ),
+    );
+    const events: unknown[] = [];
+    const result = await streamChat(
+      { locale: "zh-CN", messages: [{ role: "user", text: "hi" }], agent: { enabled: true, runId: "run-1" } },
+      {
+        fetcher: serverFetch,
+        onDelta: () => undefined,
+        onRunStarted: (run) => events.push({ kind: "run", run }),
+        onToolOutput: (output) => events.push({ kind: "output", output }),
+        onToolResult: (toolResult) => events.push({ kind: "result", toolResult }),
+        onPermissionRequest: (request) => events.push({ kind: "permission", request }),
+        onPermissionResolved: (resolved) => events.push({ kind: "resolved", resolved }),
+        onRunStatus: (status) => events.push({ kind: "status", status }),
+      },
+    );
+    expect(result).toEqual({ truncated: false, stopReason: "cancelled", unknownOperations: [{ callId: "m1", name: "mcp__x__y", detail: "未返回" }] });
+    expect(events).toEqual([
+      { kind: "run", run: { runId: "run-1", conversationId: "c1", workspace: "D:/demo", executionMode: "confirm", startedAt: 5 } },
+      { kind: "output", output: { id: "t1", stream: "stdout", text: "running…\n" } },
+      { kind: "result", toolResult: { id: "t1", name: "run_command", output: "[结果] 失败：退出码 1", isError: true, durationMs: 3200, command } },
+      { kind: "permission", request: { requestId: "run-1-t2", toolName: "write_file", arguments: {}, callId: "t2" } },
+      { kind: "resolved", resolved: { requestId: "run-1-t2", approved: false, reason: "timeout" } },
+      { kind: "status", status: { runId: "run-1", status: "cancelling", pending: [{ callId: "m1", name: "mcp__x__y", detail: "等待返回" }] } },
+    ]);
+  });
+
+  it("同一项目的其他任务正在写入时，解析等待状态而不是判为流损坏", async () => {
+    serverFetch.mockResolvedValue(
+      sseResponse(
+        sse("run_status", { runId: "run-2", status: "waiting_for_workspace", pending: [{ callId: "w1", name: "write_file", detail: "等待同一项目中的其他任务完成写入" }] }) +
+          sse("run_status", { runId: "run-2", status: "running", pending: [] }) +
+          sse("done", { truncated: false }),
+      ),
+    );
+    const statuses: unknown[] = [];
+    await streamChat(
+      { locale: "zh-CN", messages: [{ role: "user", text: "hi" }], agent: { enabled: true, runId: "run-2" } },
+      { fetcher: serverFetch, onDelta: () => undefined, onRunStatus: (status) => statuses.push(status) },
+    );
+    expect(statuses).toEqual([
+      { runId: "run-2", status: "waiting_for_workspace", pending: [{ callId: "w1", name: "write_file", detail: "等待同一项目中的其他任务完成写入" }] },
+      { runId: "run-2", status: "running", pending: [] },
+    ]);
+  });
+
+  it("残缺的命令执行记录视为流损坏，不能作为验证证据", async () => {
+    serverFetch.mockResolvedValue(
+      sseResponse(sse("tool_result", { id: "t1", name: "run_command", output: "ok", isError: false, durationMs: 1, command: { executionId: "e", exitCode: 0 } })),
+    );
+    await expect(
+      streamChat({ locale: "zh-CN", messages: [{ role: "user", text: "hi" }] }, { fetcher: serverFetch, onDelta: () => undefined }),
+    ).rejects.toMatchObject({ code: "STREAM_ERROR" });
+  });
+
+  it("事件序号：处理后回报序号，重复事件跳过，缺口单独通知", async () => {
+    const seqs: number[] = [];
+    const text: string[] = [];
+    const gaps: unknown[] = [];
+    serverFetch.mockResolvedValue(sseResponse(
+      `event: gap\ndata: {"from":3,"to":4}\n\n`
+        + `id: 2\n${sse("delta", { text: "重复" })}`
+        + `id: 5\n${sse("delta", { text: "新的" })}`
+        + `id: 6\n${sse("done", { truncated: false })}`,
+    ));
+    const result = await resumeAgentRun("run-1", 2, {
+      fetcher: serverFetch,
+      onDelta: (delta) => text.push(delta),
+      onEventSeq: (seq) => seqs.push(seq),
+      onEventGap: (gap) => gaps.push(gap),
+    });
+    expect(result).toEqual({ kind: "resumed", result: { truncated: false } });
+    expect(String(serverFetch.mock.calls[0]![0])).toContain("/api/agent/runs/run-1/events?after=2");
+    expect(text).toEqual(["新的"]);
+    expect(seqs).toEqual([5, 6]);
+    expect(gaps).toEqual([{ from: 3, to: 4 }]);
+  });
+
+  it("事件日志不可用时返回运行状态，不重放", async () => {
+    serverFetch.mockResolvedValue(new Response(
+      JSON.stringify({ error: "RUN_EVENTS_UNAVAILABLE", state: { kind: "finished", status: "interrupted", lastSeq: 9, retained: false } }),
+      { status: 404, headers: { "content-type": "application/json" } },
+    ));
+    const result = await resumeAgentRun("run-1", 3, { fetcher: serverFetch, onDelta: () => undefined });
+    expect(result).toEqual({ kind: "unavailable", state: { kind: "finished", status: "interrupted", lastSeq: 9, retained: false } });
+  });
+
+  it("连接在终止事件之前结束视为断线，可按序号重连；网关下发的错误不是断线", async () => {
+    serverFetch.mockResolvedValueOnce(sseResponse(`id: 1\n${sse("delta", { text: "一半" })}`));
+    const disconnected = await streamChat(sampleRequest, { fetcher: serverFetch, onDelta: () => undefined }).catch((error: unknown) => error);
+    expect(isStreamDisconnect(disconnected)).toBe(true);
+
+    serverFetch.mockResolvedValueOnce(sseResponse(sse("error", { code: "PROVIDER_STREAM_ERROR" })));
+    const failed = await streamChat(sampleRequest, { fetcher: serverFetch, onDelta: () => undefined }).catch((error: unknown) => error);
+    expect(failed).toBeInstanceOf(ChatClientError);
+    expect(isStreamDisconnect(failed)).toBe(false);
+  });
+
+  it("解析运行提示与上下文超限的结束原因，不认识的提示忽略", async () => {
+    const notes: unknown[] = [];
+    serverFetch.mockResolvedValue(sseResponse(
+      sse("run_note", { kind: "context_compacted", detail: { foldedTurns: 2, beforeTokens: 9000, afterTokens: 4000, budgetTokens: 5000 } })
+        + sse("run_note", { kind: "verification_reminder", detail: { reason: "not_verified", files: ["src/a.ts"] } })
+        + sse("run_note", { kind: "verification_reminder", detail: { reason: "verification_failed", command: "npm test" } })
+        + sse("run_note", { kind: "future_kind", detail: {} })
+        + sse("run_note", { kind: "context_overflow", detail: { tokens: 7000, budgetTokens: 5000 } })
+        + sse("done", { truncated: false, reason: "context_overflow" }),
+    ));
+    const result = await streamChat(sampleRequest, { fetcher: serverFetch, onDelta: () => undefined, onRunNote: (note) => notes.push(note) });
+    expect(result.stopReason).toBe("context_overflow");
+    expect(notes).toEqual([
+      { kind: "context_compacted", foldedTurns: 2, beforeTokens: 9000, afterTokens: 4000 },
+      { kind: "verification_reminder", reason: "not_verified", files: ["src/a.ts"] },
+      { kind: "verification_reminder", reason: "verification_failed", command: "npm test" },
+      { kind: "context_overflow", tokens: 7000, budgetTokens: 5000 },
+    ]);
+  });
 });
+

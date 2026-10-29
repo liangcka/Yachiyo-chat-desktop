@@ -825,7 +825,7 @@ async fn test_loop_cancel_between_turns() {
     )
     .await
     .unwrap();
-    assert!(matches!(outcome, LoopOutcome::Cancelled));
+    assert!(matches!(outcome, LoopOutcome::Cancelled { .. }));
 }
 
 #[tokio::test]
@@ -1420,7 +1420,7 @@ async fn test_cancel_drops_in_flight_upstream_turn() {
     .await
     .expect("取消后应立即结束，而不是等上游这一轮跑完")
     .unwrap();
-    assert!(matches!(outcome, LoopOutcome::Cancelled));
+    assert!(matches!(outcome, LoopOutcome::Cancelled { .. }));
     assert!(dropped.load(std::sync::atomic::Ordering::SeqCst), "进行中的上游请求 Future 必须被丢弃以断开连接");
 }
 
@@ -1466,29 +1466,6 @@ fn test_repetition_detector_flags_degenerate_output_only() {
     let mut short_period = RepetitionDetector::default();
     assert!(!(0..300).any(|_| short_period.push("好的")));
     assert!((0..2000).any(|_| short_period.push("好的")));
-}
-
-#[tokio::test]
-async fn test_idle_agent_stream_emits_heartbeats_without_dropping_events() {
-    use yachiyo_desktop_lib::gateway::agent::runtime::next_emit_or_heartbeat;
-
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LoopEmit>();
-    let mut heartbeat = tokio::time::interval(std::time::Duration::from_millis(20));
-    heartbeat.tick().await;
-
-    // 没有事件时按周期下发心跳
-    assert!(matches!(next_emit_or_heartbeat(&mut rx, &mut heartbeat).await, Some(LoopEmit::Ping)));
-
-    // 事件先于心跳取出，且不丢失
-    tx.send(LoopEmit::Event(ClientStreamEvent::Delta { text: "你好".to_string() })).unwrap();
-    match next_emit_or_heartbeat(&mut rx, &mut heartbeat).await {
-        Some(LoopEmit::Event(ClientStreamEvent::Delta { text })) => assert_eq!(text, "你好"),
-        _ => panic!("应先取出已排队的事件"),
-    }
-
-    // 发送端全部关闭且队列清空后结束
-    drop(tx);
-    assert!(next_emit_or_heartbeat(&mut rx, &mut heartbeat).await.is_none());
 }
 
 #[test]
