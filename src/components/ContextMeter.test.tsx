@@ -18,3 +18,13 @@ it("未过半时隐藏，用量过半后悬停可查看估计百分比", () => {
   rerender(<ContextMeter messages={[message]} compressedUpTo={1} summary="压缩摘要" />);
   expect(screen.queryByRole("button")).toBeNull();
 });
+
+it("厂商上报缓存时显示最近一次请求的命中率，未上报时不显示", () => {
+  const reply = (usage: ChatMessage["usage"]): ChatMessage =>
+    ({ id: "a", conversationId: "c", role: "assistant", text: "好", createdAt: 2, status: "complete", usage });
+  const { rerender } = render(<ContextMeter messages={[message, reply({ promptTokens: 20_000, cacheReadTokens: 15_000 })]} />);
+  fireEvent.mouseEnter(screen.getByRole("button").parentElement!);
+  expect(screen.getByRole("dialog")).toHaveTextContent("上次请求缓存命中75% · 15k");
+  rerender(<ContextMeter messages={[message, reply({ promptTokens: 20_000 })]} />);
+  expect(screen.getByRole("dialog")).not.toHaveTextContent("缓存命中");
+});

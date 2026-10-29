@@ -329,7 +329,9 @@ function isUsagePayload(value: unknown): value is TokenUsage {
   return (
     isOptionalInt(usage.promptTokens) &&
     isOptionalInt(usage.completionTokens) &&
-    isOptionalInt(usage.totalTokens)
+    isOptionalInt(usage.totalTokens) &&
+    isOptionalInt(usage.cacheReadTokens) &&
+    isOptionalInt(usage.cacheWriteTokens)
   );
 }
 

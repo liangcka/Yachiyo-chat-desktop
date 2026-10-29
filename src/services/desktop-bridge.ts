@@ -370,7 +370,48 @@ export async function onEmergencyStopControl(callback: () => void): Promise<() =
   }
 }
 
+/** 已放行到 asset 协议的本地文件 */
+export interface AssetFile {
+  path: string;
+  name: string;
+  size: number;
+}
 
+/** 放行本地文件到 asset 协议；目录、相对路径与不存在的文件不会出现在结果里 */
+export async function allowAssetFiles(paths: string[]): Promise<AssetFile[]> {
+  if (!isDesktopApp() || paths.length === 0) return [];
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return await invoke<AssetFile[]>("allow_asset_files", { paths });
+  } catch {
+    return [];
+  }
+}
+
+/** 本地文件对应的 asset 协议地址，需先经 allowAssetFiles 放行才能读取 */
+export async function assetUrl(path: string): Promise<string> {
+  const { convertFileSrc } = await import("@tauri-apps/api/core");
+  return convertFileSrc(path);
+}
+
+export type DesktopFileDropEvent = { type: "enter"; paths: string[] } | { type: "leave" } | { type: "drop"; paths: string[] };
+
+/**
+ * 订阅系统文件拖入窗口。webview 的原生拖放默认开启，HTML5 drop 收不到系统文件，
+ * 只能从这里拿到文件路径
+ */
+export async function onDesktopFileDrop(callback: (event: DesktopFileDropEvent) => void): Promise<() => void> {
+  if (!isDesktopApp()) return () => {};
+  try {
+    const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+    return await getCurrentWebview().onDragDropEvent(({ payload }) => {
+      if (payload.type === "enter" || payload.type === "drop") callback({ type: payload.type, paths: payload.paths });
+      else if (payload.type === "leave") callback({ type: "leave" });
+    });
+  } catch {
+    return () => {};
+  }
+}
 
 /** 界面读取的文件版本：完整原文与版本摘要；lossless 为 false 时不是 UTF-8，只能只读查看或整体替换 */
 export interface WorkspaceFileView {

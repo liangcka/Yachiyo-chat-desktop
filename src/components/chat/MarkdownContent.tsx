@@ -1,6 +1,8 @@
 import { Check, Copy } from "lucide-react";
 import React, { memo, useState } from "react";
+import { parseVideoLine } from "../../features/file-reference/video-links";
 import { useLocale } from "../../i18n/locale-context";
+import { ChatVideo } from "./ChatVideo";
 
 export interface MarkdownContentProps {
   text: string;
@@ -193,6 +195,7 @@ export const MarkdownContent = memo(function MarkdownContent({
             <span className="markdown-li__bullet" aria-hidden="true" />
             <div className="markdown-li__content">
               {renderInlineFormatting(unorderedMatch[1], isAssistant, emoteTitle)}
+              {parseVideoLine(unorderedMatch[1]).links.map((link) => <ChatVideo key={link} link={link} />)}
             </div>
           </li>,
         );
@@ -209,6 +212,7 @@ export const MarkdownContent = memo(function MarkdownContent({
             <span className="markdown-ol-li__num">{orderedMatch[1]}.</span>
             <div className="markdown-li__content">
               {renderInlineFormatting(orderedMatch[2], isAssistant, emoteTitle)}
+              {parseVideoLine(orderedMatch[2]).links.map((link) => <ChatVideo key={link} link={link} />)}
             </div>
           </li>,
         );
@@ -302,12 +306,18 @@ export const MarkdownContent = memo(function MarkdownContent({
         continue;
       }
 
-      // 普通段落行
-      renderedNodes.push(
-        <p key={`p-${keyPrefix}-${lineIdx}`} className="markdown-p">
-          {renderInlineFormatting(line, isAssistant, emoteTitle)}
-        </p>,
-      );
+      // 普通段落行；行内的视频链接在段落后接播放器，整行只有链接时不再重复显示路径
+      const video = parseVideoLine(line);
+      if (!video.sole) {
+        renderedNodes.push(
+          <p key={`p-${keyPrefix}-${lineIdx}`} className="markdown-p">
+            {renderInlineFormatting(line, isAssistant, emoteTitle)}
+          </p>,
+        );
+      }
+      for (const link of video.links) {
+        renderedNodes.push(<ChatVideo key={`v-${keyPrefix}-${lineIdx}-${link}`} link={link} />);
+      }
     }
 
     flushList();

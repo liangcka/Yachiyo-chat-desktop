@@ -64,6 +64,7 @@ fn turn(text: &str, calls: Vec<ToolInvocation>, completion_tokens: Option<u32>) 
             prompt_tokens: Some(100),
             completion_tokens: Some(tokens),
             total_tokens: Some(100 + tokens),
+            ..Default::default()
         }),
     }
 }

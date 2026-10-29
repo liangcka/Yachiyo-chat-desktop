@@ -136,6 +136,10 @@ export interface TokenUsage {
   readonly promptTokens?: number;
   readonly completionTokens?: number;
   readonly totalTokens?: number;
+  /** 提示词中命中前缀缓存的部分，已含在 promptTokens 内 */
+  readonly cacheReadTokens?: number;
+  /** 提示词中本次写入缓存的部分，已含在 promptTokens 内；目前只有 Anthropic 上报 */
+  readonly cacheWriteTokens?: number;
 }
 
 export type CommandEndReason = "exited" | "timed_out" | "cancelled" | "spawn_failed" | "blocked";

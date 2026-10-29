@@ -17,10 +17,7 @@ Status: implemented
    - 在 `anthropic_tools` 的最后一个工具定义上追加 `cache_control: { "type": "ephemeral" }`，使系统提示词与全部工具集作为一个稳定前缀被 Anthropic 永久缓存，各轮次共享 100% Cache Hit；
    - 在 `mapped` 消息列表中，定位到倒数第二条 user 消息（上一轮的末尾），为其最后一个 block 追加 `cache_control: { "type": "ephemeral" }`，使得已完成的历史轮次全部命中缓存，大幅降低 TTFT 与 API 成本；
    - 保持顶层字段兼容现有测试断言。
-2. **多轮历史只读工具结果 Micro-Compaction**：
-   - 在 `pruner.rs` 中引入轮次感知：将最近 1~2 个 Assistant 之后的工具输出视为活跃窗口，保留其完整输出或正常截断；
-   - 对早于活跃窗口的历史只读工具结果（`read_file`、`grep`、`glob`、`list_directory`、`git_diff` 等），若长度超过 300 字符且未报错，微压缩为紧凑的单行语义标记，上下文节省 60%~80%；
-   - 错误报错与写操作结果始终完整保留，确保纠错线索不丢失。
+2. **多轮历史只读工具结果 Micro-Compaction**：早期只读工具结果折叠为单行标记，错误与写操作结果始终保留。触发条件改为上下文压力 + 滞回，见 [2026-10-27-cache-aware-micro-compaction.md](./2026-10-27-cache-aware-micro-compaction.md)。
 3. **`read_file` 行号与分页（Offset/Limit）支持**：
    - 工具 Schema 新增可选的 `offset`（1-based 起始行）与 `limit`（行数上限）参数；
    - 引入 `format_file_content_with_lines`，为分页或大文件输出标准行号对齐（`{:width$} | {}`）与清晰的分页指引；

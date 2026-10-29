@@ -1,3 +1,4 @@
+pub mod asset_files;
 pub mod computer;
 pub mod control_overlay;
 pub mod crypto;
@@ -408,6 +409,17 @@ fn is_window_maximized(window: tauri::Window) -> Result<bool, String> {
     window.is_maximized().map_err(|e| e.to_string())
 }
 
+/// 把拖入的文件或消息里引用的本地视频加入 asset 协议 scope，只返回成功放行的普通文件
+#[tauri::command]
+fn allow_asset_files(app: tauri::AppHandle, paths: Vec<String>) -> Vec<asset_files::AssetFile> {
+    let scope = app.asset_protocol_scope();
+    paths
+        .iter()
+        .filter_map(|path| asset_files::inspect_asset_file(path))
+        .filter(|file| scope.allow_file(&file.path).is_ok())
+        .collect()
+}
+
 /// 在系统默认外部独立浏览器中打开指定链接（避免在 IDE 内置视图或应用内打开）
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
@@ -713,6 +725,7 @@ pub fn run() {
             minimize_window,
             toggle_maximize_window,
             is_window_maximized,
+            allow_asset_files,
             search_workspace_files,
             list_mcp_servers,
             get_mcp_server,

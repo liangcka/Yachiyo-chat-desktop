@@ -82,6 +82,7 @@ fn test_client_event_encoding() {
             prompt_tokens: Some(10),
             completion_tokens: Some(20),
             total_tokens: Some(30),
+            ..Default::default()
         }),
         reason: None,
         unknown: Vec::new(),
@@ -534,8 +535,31 @@ fn test_anthropic_chat_body_caches_role_prompt_and_tunes_thinking() {
 #[test]
 fn test_anthropic_usage_counts_cached_prompt_tokens() {
     let start = r#"{"type":"message_start","message":{"usage":{"input_tokens":12,"cache_creation_input_tokens":300,"cache_read_input_tokens":15000}}}"#;
-    let delta = extract_anthropic_delta(start).expect("usage delta");
-    assert_eq!(delta.usage.and_then(|u| u.prompt_tokens), Some(15312));
+    let usage = extract_anthropic_delta(start).and_then(|d| d.usage).expect("usage delta");
+    assert_eq!(usage.prompt_tokens, Some(15312));
+    assert_eq!(usage.cache_read_tokens, Some(15000));
+    assert_eq!(usage.cache_write_tokens, Some(300));
+}
+
+#[test]
+fn test_openai_compatible_usage_reports_cache_hits() {
+    for chunk in [
+        r#"{"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":10,"prompt_tokens_details":{"cached_tokens":800}}}"#,
+        r#"{"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":10,"prompt_cache_hit_tokens":800,"prompt_cache_miss_tokens":200}}"#,
+        r#"{"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":10,"cached_tokens":800}}"#,
+    ] {
+        let usage = extract_openai_delta(chunk).and_then(|d| d.usage).expect("usage delta");
+        assert_eq!((usage.prompt_tokens, usage.cache_read_tokens, usage.cache_write_tokens), (Some(1000), Some(800), None), "{chunk}");
+    }
+    let plain = r#"{"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":10}}"#;
+    assert_eq!(extract_openai_delta(plain).and_then(|d| d.usage).unwrap().cache_read_tokens, None);
+}
+
+#[test]
+fn test_usage_serializes_cache_fields_only_when_reported() {
+    let usage = TokenUsage { prompt_tokens: Some(100), cache_read_tokens: Some(80), ..Default::default() };
+    let json = serde_json::to_value(&usage).unwrap();
+    assert_eq!(json, serde_json::json!({ "promptTokens": 100, "cacheReadTokens": 80 }));
 }
 
 #[test]

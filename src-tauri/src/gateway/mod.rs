@@ -345,17 +345,7 @@ pub fn handle_chat_stream(
                     }
 
                     if let Some(usage) = delta.usage {
-                        let mut acc = accumulated_usage.unwrap_or_default();
-                        if let Some(p) = usage.prompt_tokens {
-                            acc.prompt_tokens = Some(p);
-                        }
-                        if let Some(c) = usage.completion_tokens {
-                            acc.completion_tokens = Some(c);
-                        }
-                        if let Some(t) = usage.total_tokens {
-                            acc.total_tokens = Some(t);
-                        }
-                        accumulated_usage = Some(acc);
+                        accumulated_usage.get_or_insert_with(TokenUsage::default).merge_from(&usage);
                     }
 
                     if let Some(thought) = delta.thought {

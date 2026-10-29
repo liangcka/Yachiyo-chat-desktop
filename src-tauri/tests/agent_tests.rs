@@ -839,6 +839,7 @@ async fn test_loop_usage_accumulates() {
             prompt_tokens: Some(10),
             completion_tokens: Some(5),
             total_tokens: Some(15),
+            ..Default::default()
         }),
     }]);
     let (sink, _events) = collector();
@@ -878,6 +879,7 @@ async fn test_loop_without_workspace_plain_completion() {
             prompt_tokens: Some(20),
             completion_tokens: Some(15),
             total_tokens: Some(35),
+            ..Default::default()
         }),
     }]);
     let (sink, events) = collector();
@@ -1727,6 +1729,9 @@ async fn test_custom_model_agent_turn_uses_selected_anthropic_format() {
 
     let outcome = executor.execute(&messages, &sink).await.expect("自定义 Anthropic 格式应按 Messages 协议解析");
     assert_eq!(outcome.text, "好的");
+    // message_start 只带输入、message_delta 只带输出，合并后两者都在
+    let usage = outcome.usage.expect("应汇总本轮用量");
+    assert_eq!((usage.prompt_tokens, usage.completion_tokens), (Some(5), Some(2)));
     let requests = seen.lock().unwrap();
     let (path, key, body) = &requests[0];
     assert_eq!(path, "/v1/messages");

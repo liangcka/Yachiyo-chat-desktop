@@ -44,7 +44,7 @@ const allowedTypes = new Set<StoredImageMimeType>([
   "image/png",
   "image/webp",
 ]);
-const maximumSourceBytes = 15 * 1024 * 1024;
+export const maximumSourceBytes = 15 * 1024 * 1024;
 const maximumOutputBytes = 2 * 1024 * 1024;
 const maximumLongEdge = 1600;
 const maximumDecodedDimension = 32_768;

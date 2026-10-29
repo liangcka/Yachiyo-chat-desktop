@@ -141,6 +141,17 @@ fn reasoning_details_text(delta_obj: &serde_json::Value) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
+/// Chat Completions 各家上报缓存命中的字段不统一：OpenAI、智谱、通义等放在 prompt_tokens_details，
+/// DeepSeek 用 prompt_cache_hit_tokens，Moonshot 用顶层 cached_tokens
+fn openai_cached_tokens(usage: &serde_json::Value) -> Option<u32> {
+    usage
+        .pointer("/prompt_tokens_details/cached_tokens")
+        .or_else(|| usage.get("prompt_cache_hit_tokens"))
+        .or_else(|| usage.get("cached_tokens"))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32)
+}
+
 /// 无状态解析：reasoning_details 按增量处理，正文原样透传
 pub fn extract_openai_delta(data: &str) -> Option<crate::types::ExtractedDelta> {
     let parsed: serde_json::Value = serde_json::from_str(data).ok()?;
@@ -159,6 +170,8 @@ fn extract_openai_delta_value(parsed: &serde_json::Value) -> Option<crate::types
                 prompt_tokens: p,
                 completion_tokens: c,
                 total_tokens: t,
+                cache_read_tokens: openai_cached_tokens(usage),
+                cache_write_tokens: None,
             });
         }
     }
