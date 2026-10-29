@@ -64,6 +64,14 @@ pub struct AgentRequestConfig {
     /// 当前模型能接收图片；为真时才下发 look 截图工具，否则截图会让上游直接报错
     #[serde(default)]
     pub vision: bool,
+    /// 客户端在提交任务时生成的运行编号，同一编号同时只允许一个运行；缺省时由网关生成
+    #[serde(rename = "runId", default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(rename = "conversationId", default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
+    /// 模型的上下文窗口（token）；缺省时网关按保守默认值预算
+    #[serde(rename = "contextWindow", default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -245,9 +253,12 @@ pub enum ClientStreamEvent {
         truncated: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         usage: Option<TokenUsage>,
-        /// 非正常结束的原因（如 loop_detected），正常完成时省略
+        /// 非正常结束的原因（如 loop_detected、cancelled），正常完成时省略
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
+        /// 取消时结果无法确认的外部操作（如取消后仍未返回的 MCP 调用）
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        unknown: Vec<UnknownOperation>,
     },
     #[serde(rename = "error")]
     Error { code: String },
@@ -263,6 +274,13 @@ pub enum ClientStreamEvent {
         name: String,
         arguments: serde_json::Value,
     },
+    /// 运行中命令的增量输出（已节流），只用于实时展示，最终结果仍以 tool_result 为准
+    #[serde(rename = "tool_output")]
+    ToolOutput {
+        id: String,
+        stream: crate::tools::process::OutputStream,
+        text: String,
+    },
     #[serde(rename = "tool_result")]
     ToolResult {
         id: String,
@@ -272,6 +290,9 @@ pub enum ClientStreamEvent {
         is_error: bool,
         #[serde(rename = "durationMs")]
         duration_ms: u64,
+        /// run_command 的结构化执行记录（退出码、结束原因、是否确认退出等）
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<serde_json::Value>,
     },
     #[serde(rename = "permission_request")]
     PermissionRequest {
@@ -280,12 +301,51 @@ pub enum ClientStreamEvent {
         #[serde(rename = "toolName")]
         tool_name: String,
         arguments: serde_json::Value,
+        /// 申请审批的工具调用，界面据此精确定位对应步骤
+        #[serde(rename = "callId", default)]
+        call_id: String,
     },
     #[serde(rename = "permission_resolved")]
     PermissionResolved {
         #[serde(rename = "requestId")]
         request_id: String,
         approved: bool,
+        /// approved / denied / timeout
+        #[serde(default)]
+        reason: PermissionOutcome,
+    },
+    /// 运行进入取消收尾：列出仍在等待结束的操作
+    #[serde(rename = "run_status")]
+    RunStatus {
+        #[serde(rename = "runId")]
+        run_id: String,
+        status: crate::gateway::agent::run_registry::RunStatus,
+        pending: Vec<PendingOperation>,
+    },
+    /// 运行过程中的说明：上下文已压缩、交付前的执行反馈等
+    #[serde(rename = "run_note")]
+    RunNote { kind: String, detail: serde_json::Value },
+    /// 运行中追加的补充要求已交给模型
+    #[serde(rename = "supplement_delivered")]
+    SupplementDelivered {
+        #[serde(rename = "runId")]
+        run_id: String,
+        ids: Vec<String>,
+    },
+    /// 运行开始：回报网关实际采用的运行身份与规范化工作区，界面据此记录任务归属
+    #[serde(rename = "run_started")]
+    RunStarted {
+        #[serde(rename = "runId")]
+        run_id: String,
+        #[serde(rename = "conversationId", skip_serializing_if = "Option::is_none")]
+        conversation_id: Option<String>,
+        workspace: Option<String>,
+        #[serde(rename = "executionMode")]
+        execution_mode: AgentExecutionMode,
+        provider: ProviderId,
+        model: String,
+        #[serde(rename = "startedAt")]
+        started_at: u64,
     },
     #[serde(rename = "turn")]
     Turn {
@@ -293,6 +353,33 @@ pub enum ClientStreamEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         usage: Option<TokenUsage>,
     },
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionOutcome {
+    #[default]
+    Approved,
+    Denied,
+    Timeout,
+}
+
+/// 取消收尾期间仍在执行的操作
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingOperation {
+    pub call_id: String,
+    pub name: String,
+    pub detail: String,
+}
+
+/// 结果无法确认的操作：界面如实提示，恢复时不自动重放
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnknownOperation {
+    pub call_id: String,
+    pub name: String,
+    pub detail: String,
 }
 
 /// provider 流式工具调用增量（跨 chunk 聚合前的原始形态）

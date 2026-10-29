@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AtSign, File, FileCode, FileJson, FileText, FolderOpen, Image as ImageIcon, X } from "lucide-react";
 import { useLocale } from "../../i18n/locale-context";
 import { searchWorkspaceFiles } from "../../services/desktop-bridge";
-import { projectManager, useProjectState } from "../../services/project-manager";
+import { projectManager } from "../../services/project-manager";
 
 export interface FileReferencePickerProps {
   /** 当前 @ 之后的检索关键词（空字符串表示已输入 @ 但未输入后续字符） */
@@ -17,6 +17,10 @@ export interface FileReferencePickerProps {
   selectedIndex?: number;
   /** 索引变更回调 */
   onSelectedIndexChange?: (index: number) => void;
+  /** 检索的项目：已有任务用它绑定的项目，空白任务用当前选中的项目；null 表示未绑定 */
+  workspace: string | null;
+  /** 未绑定时“选择项目”的处理；缺省只切换界面当前项目 */
+  onSelectProject?: () => void;
 }
 
 /** 依据文件扩展名匹配适宜的 Lucide 图标 */
@@ -84,9 +88,10 @@ export function FileReferencePicker({
   items: externalItems,
   selectedIndex: controlledIndex,
   onSelectedIndexChange,
+  workspace,
+  onSelectProject,
 }: FileReferencePickerProps) {
   const ja = useLocale() === "ja-JP";
-  const { activeProject } = useProjectState();
   const [internalItems, setInternalItems] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [uncontrolledIndex, setUncontrolledIndex] = useState(0);
@@ -117,7 +122,7 @@ export function FileReferencePicker({
 
     const timer = setTimeout(() => {
       setLoading(true);
-      void searchWorkspaceFiles(query, 25).then((results) => {
+      void searchWorkspaceFiles(workspace, query, 25).then((results) => {
         if (cancelled) return;
         setInternalItems(results ?? []);
         setLoading(false);
@@ -128,7 +133,7 @@ export function FileReferencePicker({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, externalItems]);
+  }, [query, externalItems, workspace]);
 
   const rawList = externalItems !== undefined ? externalItems : internalItems;
 
@@ -186,7 +191,7 @@ export function FileReferencePicker({
       </div>
 
       <ul className="file-ref-picker__list" ref={listRef}>
-        {activeProject === null && !loading && displayList.length === 0 ? (
+        {workspace === null && !loading && displayList.length === 0 ? (
           // 没有项目时工作区为空：说明原因并直接给出选择项目的入口，而不是笼统的“未找到”
           <li className="file-ref-picker__empty file-ref-picker__empty--no-project">
             <span>{ja ? "プロジェクトが選択されていないため、参照できるファイルがありません。" : "当前没有选择项目，@ 只能引用项目文件夹里的文件。"}</span>
@@ -194,7 +199,7 @@ export function FileReferencePicker({
               type="button"
               className="file-ref-picker__pick-project"
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => void projectManager.pickAndOpenProject("Open workspace")}
+              onClick={() => (onSelectProject !== undefined ? onSelectProject() : void projectManager.pickAndOpenProject("Open workspace"))}
             >
               <FolderOpen size={13} />
               {ja ? "プロジェクトフォルダを選ぶ" : "选择项目文件夹"}

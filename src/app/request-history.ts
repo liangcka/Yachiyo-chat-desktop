@@ -79,12 +79,21 @@ export function requestHistory(
   );
   const selected: Array<{ message: ChatMessage; text: string }> = [];
   let totalCharacters = reserveCharacters;
+  // 运行中送达模型的补充要求属于用户的话，并入触发该运行的用户消息，保持用户/助手交替
+  const supplementNotes = new Map<number, string>();
+  eligible.forEach((message, index) => {
+    const delivered = message.role === "assistant" ? (message.supplements ?? []).filter((item) => item.state === "delivered") : [];
+    const previous = eligible[index - 1];
+    if (delivered.length > 0 && previous?.role === "user") {
+      supplementNotes.set(index - 1, `\n\n[任务进行中补充的要求]\n${delivered.map((item) => item.text).join("\n\n")}`);
+    }
+  });
 
   for (let offset = 0; offset < eligible.length && selected.length < maxMessages; offset += 1) {
     const index = oldestFirst ? offset : eligible.length - 1 - offset;
     const message = eligible[index];
     if (message === undefined) continue;
-    const text = truncateUnicode(message.text, maximumRequestMessageCharacters);
+    const text = truncateUnicode(message.text + (supplementNotes.get(index) ?? ""), maximumRequestMessageCharacters);
     const isLastMessage = index === eligible.length - 1;
     // 只发了图的消息正文为空，仍要留在上下文里，否则模型回看不到这张图
     if (!isLastMessage && text.trim().length === 0 && message.imageId === undefined) continue;

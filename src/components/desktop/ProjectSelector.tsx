@@ -66,10 +66,11 @@ export function ProjectSelector({
     setIsOpen((prev) => !prev);
   };
 
+  // 原生切换失败时不新建对话：否则新对话会在提交时绑定到仍未变化的旧项目
   const handleSelectProject = async (path: string) => {
     setIsOpen(false);
-    await projectManager.switchProject(path);
-    onSelectProject?.(path);
+    if (!(await projectManager.switchProject(path))) return;
+    onSelectProject?.(projectManager.getState().activeProject);
     if (onNewChat) {
       await onNewChat();
     }
@@ -77,7 +78,7 @@ export function ProjectSelector({
 
   const handleSelectNoProject = async () => {
     setIsOpen(false);
-    await projectManager.switchProject(null);
+    if (!(await projectManager.switchProject(null))) return;
     onSelectProject?.(null);
     if (onNewChat) {
       await onNewChat();

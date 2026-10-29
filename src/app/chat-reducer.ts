@@ -1,4 +1,19 @@
-import type { ChatMessage, ChatSource, Conversation, Locale, MessageContentSegment, StoredImage, TokenUsage, ToolStep } from "../domain/chat";
+import type {
+  AgentRunRecord,
+  CancellationRecord,
+  ChatMessage,
+  ChatSource,
+  Conversation,
+  Locale,
+  MessageContentSegment,
+  PendingOperationRecord,
+  RunNoteRecord,
+  RunRecoveryRecord,
+  StoredImage,
+  SupplementRecord,
+  TokenUsage,
+  ToolStep,
+} from "../domain/chat";
 
 export type ChatPhase = "loading" | "idle" | "streaming" | "offline" | "error" | "compressing";
 
@@ -26,6 +41,8 @@ export interface ChatState {
     requestId: string;
     toolName: string;
     argumentsJson: string;
+    /** 申请审批的工具调用；旧网关缺省时按工具名与参数匹配步骤 */
+    callId?: string;
   };
 }
 
@@ -44,7 +61,7 @@ export type ChatAction =
   | { type: "thought-delta"; messageId: string; text: string; contentSegments?: ReadonlyArray<MessageContentSegment> }
   | { type: "sources-received"; messageId: string; sources: ReadonlyArray<ChatSource> }
   | { type: "completed"; messageId: string; usage?: TokenUsage; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment>; contentStartedAtMs?: number; loopStopped?: boolean }
-  | { type: "stopped"; messageId: string; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment> }
+  | { type: "stopped"; messageId: string; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment>; cancellation?: CancellationRecord }
   | { type: "failed"; messageId: string; errorCode: string; errorDetail?: string; latencyMs?: number; contentSegments?: ReadonlyArray<MessageContentSegment> }
   | { type: "connectivity-changed"; online: boolean }
   | {
@@ -88,9 +105,23 @@ export type ChatAction =
       requestId: string;
       toolName: string;
       argumentsJson: string;
+      callId?: string;
     }
+  | { type: "tool-output"; messageId: string; callId: string; liveOutput: string }
+  | { type: "run-cancelling"; messageId: string; pending?: ReadonlyArray<PendingOperationRecord> }
+  | { type: "run-waiting"; messageId: string; pending: ReadonlyArray<PendingOperationRecord> }
+  | { type: "supplements-changed"; messageId: string; supplements: ReadonlyArray<SupplementRecord> }
+  | { type: "run-reconnecting"; messageId: string; reconnecting: boolean }
+  | { type: "run-notes-changed"; messageId: string; runNotes: ReadonlyArray<RunNoteRecord> }
+  | { type: "recovery-changed"; messageId: string; recovery: RunRecoveryRecord }
+  /** 接回网关中仍在执行（或刚结束、事件仍可回填）的运行：消息回到运行中，由回填的事件重建 */
+  | { type: "run-reattached"; message: ChatMessage }
+  /** 应用重启后发现的运行结局：替换残留的运行中消息 */
+  | { type: "run-recovered"; message: ChatMessage }
   | { type: "permission-resolved"; requestId: string; approved: boolean }
-  | { type: "conversation-renamed"; conversationId: string; title: string };
+  | { type: "conversation-renamed"; conversationId: string; title: string }
+  | { type: "conversation-workspace-bound"; conversationId: string; workspace: string | null }
+  | { type: "run-started"; messageId: string; run: AgentRunRecord };
 
 export const initialChatState: ChatState = {
   locale: "zh-CN",
@@ -164,6 +195,12 @@ function appendStreamDelta(
   };
 }
 
+function withoutWaiting(message: ChatMessage): ChatMessage {
+  const rest = { ...message };
+  delete rest.waitingFor;
+  return rest;
+}
+
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case "loaded":
@@ -207,7 +244,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return {
         ...state,
         messages: updateMessage(state.messages, action.messageId, (message) => ({
-          ...message,
+          ...withoutWaiting(message),
           ...streamedFields(folded),
           ...(action.contentSegments !== undefined ? { contentSegments: action.contentSegments } : {}),
           status: "complete" as const,
@@ -226,14 +263,20 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...state,
         // 流程终止后 Rust 侧 gate 已取消 pending，前端同步丢弃权限卡片避免残留死卡
         pendingPermission: undefined,
-        messages: updateMessage(state.messages, action.messageId, (message) => ({
-          ...message,
-          ...streamedFields(folded),
-          ...(action.contentSegments !== undefined ? { contentSegments: action.contentSegments } : {}),
-          status: "stopped" as const,
-          interrupted: true,
-          ...(action.latencyMs !== undefined ? { latencyMs: action.latencyMs } : {}),
-        })),
+        messages: updateMessage(state.messages, action.messageId, (message) => {
+          const rest = withoutWaiting(message);
+          delete rest.cancelRequested;
+          delete rest.cancelPending;
+          return {
+            ...rest,
+            ...streamedFields(folded),
+            ...(action.contentSegments !== undefined ? { contentSegments: action.contentSegments } : {}),
+            status: "stopped" as const,
+            interrupted: true,
+            ...(action.latencyMs !== undefined ? { latencyMs: action.latencyMs } : {}),
+            ...(action.cancellation !== undefined ? { cancellation: action.cancellation } : {}),
+          };
+        }),
         streaming: folded.streaming,
         phase: state.phase === "offline" ? "offline" : "idle",
       };
@@ -247,7 +290,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         // 运行失败即终态，权限审批不可能再有回填，卡片随之失效须清除
         pendingPermission: undefined,
         messages: updateMessage(state.messages, action.messageId, (message) => ({
-          ...message,
+          ...withoutWaiting(message),
           ...streamedFields(folded),
           ...(action.contentSegments !== undefined ? { contentSegments: action.contentSegments } : {}),
           status: "failed" as const,
@@ -376,9 +419,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...state,
         messages: updateMessage(state.messages, action.messageId, (message) => ({
           ...message,
-          toolSteps: (message.toolSteps ?? []).map((step) =>
-            step.id === action.callId ? { ...step, result: action.result } : step,
-          ),
+          toolSteps: (message.toolSteps ?? []).map((step) => {
+            if (step.id !== action.callId) return step;
+            const rest: { -readonly [K in keyof ToolStep]: ToolStep[K] } = { ...step };
+            delete rest.liveOutput;
+            return { ...rest, result: action.result };
+          }),
         })),
       };
     case "permission-requested":
@@ -390,11 +436,92 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           requestId: action.requestId,
           toolName: action.toolName,
           argumentsJson: action.argumentsJson,
+          ...(action.callId !== undefined ? { callId: action.callId } : {}),
         },
+      };
+    case "tool-output":
+      if (!state.messages.some((message) => message.id === action.messageId)) return state;
+      return {
+        ...state,
+        messages: updateMessage(state.messages, action.messageId, (message) => ({
+          ...message,
+          toolSteps: (message.toolSteps ?? []).map((step) =>
+            step.id === action.callId && step.result === undefined ? { ...step, liveOutput: action.liveOutput } : step,
+          ),
+        })),
+      };
+    case "run-cancelling":
+      if (!state.messages.some((message) => message.id === action.messageId)) return state;
+      return {
+        ...state,
+        // 取消后审批不再有效，权限卡随之移除
+        pendingPermission: undefined,
+        messages: updateMessage(state.messages, action.messageId, (message) => ({
+          ...message,
+          cancelRequested: true,
+          ...(action.pending !== undefined ? { cancelPending: action.pending } : {}),
+        })),
+      };
+    case "run-reconnecting":
+      if (!state.messages.some((message) => message.id === action.messageId)) return state;
+      return {
+        ...state,
+        messages: updateMessage(state.messages, action.messageId, (message) => {
+          if (action.reconnecting) return { ...message, reconnecting: true };
+          const rest = { ...message };
+          delete rest.reconnecting;
+          return rest;
+        }),
+      };
+    case "run-notes-changed":
+      if (!state.messages.some((message) => message.id === action.messageId)) return state;
+      return {
+        ...state,
+        messages: updateMessage(state.messages, action.messageId, (message) => ({ ...message, runNotes: action.runNotes })),
+      };
+    case "recovery-changed":
+      if (!state.messages.some((message) => message.id === action.messageId)) return state;
+      return {
+        ...state,
+        messages: updateMessage(state.messages, action.messageId, (message) => ({ ...message, recovery: action.recovery })),
+      };
+    case "run-reattached":
+      if (!state.messages.some((message) => message.id === action.message.id)) return state;
+      return {
+        ...state,
+        phase: "streaming",
+        streaming: undefined,
+        messages: updateMessage(state.messages, action.message.id, () => action.message),
+      };
+    case "run-recovered":
+      if (!state.messages.some((message) => message.id === action.message.id)) return state;
+      return { ...state, messages: updateMessage(state.messages, action.message.id, () => action.message) };
+    case "supplements-changed":
+      if (!state.messages.some((message) => message.id === action.messageId)) return state;
+      return {
+        ...state,
+        messages: updateMessage(state.messages, action.messageId, (message) => ({ ...message, supplements: action.supplements })),
+      };
+    case "run-waiting":
+      if (!state.messages.some((message) => message.id === action.messageId)) return state;
+      return {
+        ...state,
+        messages: updateMessage(state.messages, action.messageId, (message) =>
+          action.pending.length > 0 ? { ...message, waitingFor: action.pending } : withoutWaiting(message),
+        ),
       };
     case "permission-resolved":
       return state.pendingPermission?.requestId === action.requestId
         ? { ...state, pendingPermission: undefined }
         : state;
+    case "conversation-workspace-bound":
+      if (state.activeConversation?.id !== action.conversationId) return state;
+      return { ...state, activeConversation: { ...state.activeConversation, workspace: action.workspace } };
+    case "run-started":
+      if (!state.messages.some((message) => message.id === action.messageId)) return state;
+      return {
+        ...state,
+        messages: updateMessage(state.messages, action.messageId, (message) => ({ ...message, run: action.run })),
+      };
   }
 }

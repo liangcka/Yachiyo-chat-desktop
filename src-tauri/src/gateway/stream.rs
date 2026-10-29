@@ -12,13 +12,16 @@ pub fn encode_client_event(event: &ClientStreamEvent) -> String {
         ClientStreamEvent::Sources { sources } => {
             format!("event: sources\ndata: {}\n\n", json!({ "sources": sources }))
         }
-        ClientStreamEvent::Done { truncated, usage, reason } => {
+        ClientStreamEvent::Done { truncated, usage, reason, unknown } => {
             let mut payload = json!({ "truncated": truncated });
             if let Some(u) = usage {
                 payload["usage"] = json!(u);
             }
             if let Some(reason) = reason {
                 payload["reason"] = json!(reason);
+            }
+            if !unknown.is_empty() {
+                payload["unknown"] = json!(unknown);
             }
             format!("event: done\ndata: {}\n\n", payload)
         }
@@ -34,22 +37,49 @@ pub fn encode_client_event(event: &ClientStreamEvent) -> String {
         ClientStreamEvent::ToolCall { id, name, arguments } => {
             format!("event: tool_call\ndata: {}\n\n", json!({ "id": id, "name": name, "arguments": arguments }))
         }
-        ClientStreamEvent::ToolResult { id, name, output, is_error, duration_ms } => {
-            format!(
-                "event: tool_result\ndata: {}\n\n",
-                json!({ "id": id, "name": name, "output": output, "isError": is_error, "durationMs": duration_ms })
-            )
+        ClientStreamEvent::ToolOutput { id, stream, text } => {
+            format!("event: tool_output\ndata: {}\n\n", json!({ "id": id, "stream": stream, "text": text }))
         }
-        ClientStreamEvent::PermissionRequest { request_id, tool_name, arguments } => {
+        ClientStreamEvent::ToolResult { id, name, output, is_error, duration_ms, command } => {
+            let mut payload = json!({ "id": id, "name": name, "output": output, "isError": is_error, "durationMs": duration_ms });
+            if let Some(command) = command {
+                payload["command"] = command.clone();
+            }
+            format!("event: tool_result\ndata: {}\n\n", payload)
+        }
+        ClientStreamEvent::PermissionRequest { request_id, tool_name, arguments, call_id } => {
             format!(
                 "event: permission_request\ndata: {}\n\n",
-                json!({ "requestId": request_id, "toolName": tool_name, "arguments": arguments })
+                json!({ "requestId": request_id, "toolName": tool_name, "arguments": arguments, "callId": call_id })
             )
         }
-        ClientStreamEvent::PermissionResolved { request_id, approved } => {
+        ClientStreamEvent::PermissionResolved { request_id, approved, reason } => {
             format!(
                 "event: permission_resolved\ndata: {}\n\n",
-                json!({ "requestId": request_id, "approved": approved })
+                json!({ "requestId": request_id, "approved": approved, "reason": reason })
+            )
+        }
+        ClientStreamEvent::RunStatus { run_id, status, pending } => {
+            format!("event: run_status\ndata: {}\n\n", json!({ "runId": run_id, "status": status, "pending": pending }))
+        }
+        ClientStreamEvent::RunNote { kind, detail } => {
+            format!("event: run_note\ndata: {}\n\n", json!({ "kind": kind, "detail": detail }))
+        }
+        ClientStreamEvent::SupplementDelivered { run_id, ids } => {
+            format!("event: supplement_delivered\ndata: {}\n\n", json!({ "runId": run_id, "ids": ids }))
+        }
+        ClientStreamEvent::RunStarted { run_id, conversation_id, workspace, execution_mode, provider, model, started_at } => {
+            format!(
+                "event: run_started\ndata: {}\n\n",
+                json!({
+                    "runId": run_id,
+                    "conversationId": conversation_id,
+                    "workspace": workspace,
+                    "executionMode": execution_mode,
+                    "provider": provider,
+                    "model": model,
+                    "startedAt": started_at,
+                })
             )
         }
         ClientStreamEvent::Turn { index, usage } => {

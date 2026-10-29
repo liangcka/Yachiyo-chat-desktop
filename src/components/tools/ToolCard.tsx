@@ -1,10 +1,12 @@
-import { useState } from "react";
-import { BookOpen, Bot, Check, ChevronDown, ChevronRight, Copy, FileCode, Globe, Play, Search, Server, Terminal } from "lucide-react";
-import type { Locale } from "../../domain/chat";
+import { useContext, useState } from "react";
+import { BookOpen, Bot, Check, ChevronDown, ChevronRight, Copy, FileCode, Globe, Play, Search, Server, Square, Terminal } from "lucide-react";
+import type { CommandRecord, Locale } from "../../domain/chat";
+import { commandStatusLabel } from "./command-status";
 import { formatToolDescription } from "./tool-description";
 import { projectManager } from "../../services/project-manager";
 import { copyFor } from "../../i18n/messages";
 import { EditFileDiff } from "./EditFileDiff";
+import { BindProjectContext } from "../chat/review-context";
 
 export interface ToolCardProps {
   toolName: string;
@@ -14,11 +16,22 @@ export interface ToolCardProps {
   isRunning?: boolean;
   isWaitingForApproval?: boolean;
   locale?: Locale;
+  /** 命令的结构化执行记录（退出码、结束原因、是否确认退出） */
+  command?: CommandRecord;
+  /** 运行中命令输出的末尾片段 */
+  liveOutput?: string;
+  /** 运行中的命令可单独停止；缺省时不显示停止按钮 */
+  onStop?: () => Promise<boolean>;
 }
 
-export function ToolCard({ toolName, args, output, isError, isRunning, isWaitingForApproval, locale = "zh-CN" }: ToolCardProps) {
+/** 折叠状态下展示的输出末尾行数 */
+const LIVE_TAIL_LINES = 6;
+
+export function ToolCard({ toolName, args, output, isError, isRunning, isWaitingForApproval, locale = "zh-CN", command, liveOutput, onStop }: ToolCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const bindProject = useContext(BindProjectContext);
 
   const getToolIcon = () => {
     if (toolName.startsWith("mcp__")) {
@@ -49,8 +62,11 @@ export function ToolCard({ toolName, args, output, isError, isRunning, isWaiting
 
   const description = formatToolDescription(toolName, args, locale);
   const hasArgs = Boolean(args && Object.keys(args).length > 0);
-  const needsProject = isError && output !== undefined && /未选择(?:工作区)?项目|未打开项目工作区/u.test(output);
+  const needsProject = isError && output !== undefined && /未(?:选择|绑定)(?:工作区)?项目|未打开项目工作区/u.test(output);
   const selectProject = copyFor(locale).selectProject;
+  const status = command !== undefined ? commandStatusLabel(command, locale) : undefined;
+  const liveTail = isRunning && liveOutput ? liveOutput.split("\n").filter((line, index, lines) => line.length > 0 || index < lines.length - 1).slice(-LIVE_TAIL_LINES).join("\n") : undefined;
+  const ja = locale === "ja-JP";
 
   return (
     <div className={`tool-card ${isError ? "tool-card--error" : ""}`}>
@@ -71,17 +87,45 @@ export function ToolCard({ toolName, args, output, isError, isRunning, isWaiting
           <span className="tool-card__waiting" role="status">{locale === "ja-JP" ? "承認待ち" : "等待批准"}</span>
         ) : isRunning ? (
           <span className="tool-card__spinner" aria-hidden="true" />
+        ) : status !== undefined ? (
+          <span className={`tool-card__status tool-card__status--${status.tone}`}>{status.text}</span>
         ) : null}
       </button>
 
+      {isRunning && onStop !== undefined && !isWaitingForApproval ? (
+        <button
+          type="button"
+          className="tool-card__stop"
+          disabled={stopping}
+          onClick={() => {
+            setStopping(true);
+            void onStop().then((stopped) => { if (!stopped) setStopping(false); });
+          }}
+          title={ja ? "このコマンドだけを停止（タスクは続行）" : "只停止这条命令，任务继续"}
+        >
+          <Square size={10} fill="currentColor" aria-hidden="true" />
+          {stopping ? (ja ? "停止中…" : "正在停止…") : (ja ? "コマンドを停止" : "停止命令")}
+        </button>
+      ) : null}
+
+      {liveTail !== undefined && !expanded ? (
+        <pre className="tool-card__code tool-card__live" aria-live="polite">{liveTail}</pre>
+      ) : null}
+
       {needsProject ? <button type="button" className="tool-card__select-project"
-        onClick={() => { void projectManager.pickAndOpenProject(selectProject); }}>
+        onClick={() => { if (bindProject !== undefined) bindProject(); else void projectManager.pickAndOpenProject(selectProject); }}>
         {selectProject}
       </button> : null}
 
       {expanded ? (
         <div className="tool-card__content">
           {toolName === "edit_file" ? <EditFileDiff args={args} locale={locale} /> : null}
+          {isRunning && liveOutput ? (
+            <pre className="tool-card__code tool-card__output" aria-live="polite">{liveOutput}</pre>
+          ) : null}
+          {command?.logPath !== undefined ? (
+            <p className="tool-card__log-path">{ja ? `完全なログ：${command.logPath}` : `完整日志：${command.logPath}`}</p>
+          ) : null}
           {output ? (
             <div className="tool-card__section">
               <div className="tool-card__section-header">

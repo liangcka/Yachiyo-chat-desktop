@@ -1,23 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Clock, GitCompareArrows, Loader2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, GitCompareArrows, Info, Loader2 } from "lucide-react";
 import type { UiCopy } from "../../i18n/messages";
-import { executeDesktopAgentTool, readHeadFile } from "../../services/desktop-bridge";
-import {
-  applySelectedHunks,
-  parseGitStatusShort,
-  toReviewHunks,
-  type GitChangeEntry,
-  type ReviewHunk,
-} from "./diff-merge";
+import { executeDesktopAgentTool, readHeadFile, readWorkspaceFile } from "../../services/desktop-bridge";
+import { subscribeWorkspaceFilesChanged } from "../../services/workspace-events";
+import { parseGitStatusShort, toReviewHunks, type GitChangeEntry, type ReviewHunk } from "./diff-merge";
 import { languageForPath } from "./editor-language";
 import { editorThemeFor, loadMonaco } from "./monaco-loader";
 
 type DiffEditor = import("monaco-editor").editor.IStandaloneDiffEditor;
 type DiffModelPair = { original: import("monaco-editor").editor.ITextModel; modified: import("monaco-editor").editor.ITextModel };
 
-type HunkDecision = "pending" | "accepted" | "rejected";
-
 export interface DiffReviewPanelProps {
+  /** 审阅的项目；切换项目时由父组件以 key 重挂载，避免同名相对路径串到另一个项目 */
+  workspace: string;
   copy?: UiCopy;
   resolvedTheme: "light" | "dark";
   refreshKey?: number;
@@ -35,16 +30,18 @@ function statusBadgeText(status: GitChangeEntry["status"]): string {
   return "M";
 }
 
-export function DiffReviewPanel({ copy, resolvedTheme, refreshKey: externalRefreshKey }: DiffReviewPanelProps) {
+/**
+ * 工作区相对 Git HEAD 的全部未提交改动，只读。
+ * 其中可能混有任务开始前用户自己的改动，所以这里不提供写回；撤销 Agent 的改动走“本次任务”审阅。
+ */
+export function DiffReviewPanel({ workspace, copy, resolvedTheme, refreshKey: externalRefreshKey }: DiffReviewPanelProps) {
   const [changes, setChanges] = useState<GitChangeEntry[] | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [original, setOriginal] = useState("");
   const [modified, setModified] = useState("");
   const [hunks, setHunks] = useState<ReviewHunk[]>([]);
-  const [decisions, setDecisions] = useState<HunkDecision[]>([]);
   const [mode, setMode] = useState<"cards" | "compare">("cards");
   const [loadingFile, setLoadingFile] = useState(false);
-  const [applying, setApplying] = useState(false);
   const [internalRefreshKey, setInternalRefreshKey] = useState(0);
   const refreshKey = (externalRefreshKey ?? 0) + internalRefreshKey;
 
@@ -65,35 +62,38 @@ export function DiffReviewPanel({ copy, resolvedTheme, refreshKey: externalRefre
   }, []);
 
   const selected = changes?.find((c) => c.path === selectedPath) ?? null;
-  const anyAccepted = decisions.some((d) => d === "accepted");
+
+  // 保存、撤销任务改动或恢复检查点后重新读取
+  useEffect(() => subscribeWorkspaceFilesChanged((event) => {
+    if (event.workspace === workspace) setInternalRefreshKey((key) => key + 1);
+  }), [workspace]);
 
   /* ── 变更列表：git status → 结构化条目 ── */
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const res = await executeDesktopAgentTool("git_status", {});
+      const res = await executeDesktopAgentTool("git_status", {}, workspace);
       if (cancelled) return;
       const parsed = res.isError ? [] : parseGitStatusShort(res.output);
       setChanges(parsed);
       setSelectedPath((prev) => {
         if (prev !== null && parsed.some((c) => c.path === prev)) return prev;
-        return parsed.find((c) => c.status !== "deleted")?.path ?? null;
+        return parsed[0]?.path ?? null;
       });
     })();
     return () => {
       cancelled = true;
     };
-  }, [refreshKey]);
+  }, [refreshKey, workspace]);
 
-  /* ── 选中文件：HEAD 基线 + 工作区内容 → hunks ── */
+  /* ── 选中文件：HEAD 基线 + 工作区原文 → hunks ── */
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      if (selectedPath === null || selected?.status === "deleted") {
+      if (selectedPath === null) {
         setOriginal("");
         setModified("");
         setHunks([]);
-        setDecisions([]);
         setLoadingFile(false);
         return;
       }
@@ -102,23 +102,21 @@ export function DiffReviewPanel({ copy, resolvedTheme, refreshKey: externalRefre
       const head =
         selected?.status === "added"
           ? { present: false, content: "" }
-          : await readHeadFile(selectedPath);
-      const work = await executeDesktopAgentTool("read_file", { path: selectedPath });
+          : await readHeadFile(workspace, selectedPath);
+      const work = selected?.status === "deleted" ? undefined : await readWorkspaceFile(workspace, selectedPath);
       if (cancelled) return;
 
       const orig = head?.present === true ? head.content : "";
-      const mod = work.isError ? "" : work.output;
+      const mod = work !== undefined && !("error" in work) && work.present ? work.content : "";
       setOriginal(orig);
       setModified(mod);
-      const next = toReviewHunks(orig, mod);
-      setHunks(next);
-      setDecisions(next.map(() => "pending" as HunkDecision));
+      setHunks(toReviewHunks(orig, mod));
       setLoadingFile(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [selectedPath, selected?.status, refreshKey]);
+  }, [selectedPath, selected?.status, refreshKey, workspace]);
 
   /* ── 对比模式：Monaco DiffEditor（只读并排） ── */
   const diffContainerRef = useRef<HTMLDivElement>(null);
@@ -174,40 +172,9 @@ export function DiffReviewPanel({ copy, resolvedTheme, refreshKey: externalRefre
     };
   }, []);
 
-  const setDecision = useCallback((index: number, decision: HunkDecision) => {
-    setDecisions((current) =>
-      current.map((d, i) => (i === index ? (d === decision ? "pending" : decision) : d)),
-    );
-  }, []);
-
-  const resetDecisions = useCallback(() => {
-    setDecisions((current) => current.map(() => "pending" as HunkDecision));
-  }, []);
-
-  /** 应用采纳：仅 modified 文件可写回（added 仅查看、deleted 不可恢复）；写回走 write_file 自动 checkpoint */
-  const handleApply = useCallback(async () => {
-    if (selectedPath === null || selected?.status !== "modified" || !anyAccepted || applying) return;
-    setApplying(true);
-    try {
-      const merged = applySelectedHunks(
-        original,
-        hunks,
-        decisions.map((d) => d === "accepted"),
-      );
-      const res = await executeDesktopAgentTool("write_file", { path: selectedPath, content: merged });
-      if (!res.isError) {
-        setInternalRefreshKey((key) => key + 1);
-      }
-    } finally {
-      setApplying(false);
-    }
-  }, [selectedPath, selected?.status, anyAccepted, applying, original, hunks, decisions]);
-
-  const isModifiable = selected?.status === "modified";
-
   if (changes?.length === 0) {
     return (
-      <section className="review-panel review-panel--empty" aria-label="变更审阅">
+      <section className="review-panel review-panel--empty" aria-label={copy?.reviewGitTitle ?? "工作区差异（相对 HEAD）"}>
         <div className="review-empty-state">
           <GitCompareArrows size={36} className="review-empty-icon" />
           <h3 className="review-empty-title">{copy?.reviewEmptyTitle ?? "没有未提交的改动"}</h3>
@@ -220,11 +187,11 @@ export function DiffReviewPanel({ copy, resolvedTheme, refreshKey: externalRefre
   }
 
   return (
-    <section ref={panelRef} className={`review-panel ${isCompact ? "review-panel--compact" : ""}`} aria-label="变更审阅">
+    <section ref={panelRef} className={`review-panel ${isCompact ? "review-panel--compact" : ""}`} aria-label={copy?.reviewGitTitle ?? "工作区差异（相对 HEAD）"}>
       <div className="review-panel__toolbar">
         <span className="review-panel__title">
           <GitCompareArrows size={15} />
-          {copy?.reviewTitle ?? "变更审阅"}
+          {copy?.reviewGitTitle ?? "工作区差异（相对 HEAD）"}
           {changes !== null ? (
             <span className="review-panel__count">{changes.length}</span>
           ) : null}
@@ -247,26 +214,12 @@ export function DiffReviewPanel({ copy, resolvedTheme, refreshKey: externalRefre
           </button>
         </div>
 
-        <div className="review-panel__actions">
-          <button
-            type="button"
-            className="review-ghost-btn"
-            onClick={resetDecisions}
-            disabled={decisions.length === 0 || decisions.every((d) => d === "pending")}
-          >
-            {copy?.reviewResetAll ?? "全部重置"}
-          </button>
-          <button
-            type="button"
-            className="review-primary-btn"
-            onClick={() => void handleApply()}
-            disabled={!isModifiable || !anyAccepted || applying}
-          >
-            {applying ? <Loader2 size={12} className="review-spin" /> : <Check size={12} />}
-            {copy?.reviewApply ?? "应用采纳"}
-          </button>
-        </div>
       </div>
+
+      <p className="task-review__notice task-review__notice--info">
+        <Info size={12} />
+        <span>{copy?.reviewGitReadOnlyNote ?? "只读：包含任务开始前就有的改动。要撤销 Agent 的改动，请在“本次任务”中操作。"}</span>
+      </p>
 
       <div className="review-panel__body">
         {/* 变更文件列表 */}
@@ -304,11 +257,8 @@ export function DiffReviewPanel({ copy, resolvedTheme, refreshKey: externalRefre
                     <button
                       key={change.path}
                       type="button"
-                      className={`review-file ${change.path === selectedPath ? "review-file--active" : ""} ${
-                        change.status === "deleted" ? "review-file--disabled" : ""
-                      }`}
+                      className={`review-file ${change.path === selectedPath ? "review-file--active" : ""}`}
                       onClick={() => setSelectedPath(change.path)}
-                      disabled={change.status === "deleted"}
                       title={change.path}
                     >
                       <span className={`review-file__badge ${statusBadgeClass(change.status)}`}>
@@ -318,8 +268,8 @@ export function DiffReviewPanel({ copy, resolvedTheme, refreshKey: externalRefre
                       {change.status !== "modified" ? (
                         <span className="review-file__note">
                           {change.status === "added"
-                            ? copy?.reviewAddedNote ?? "新文件 · 仅查看"
-                            : copy?.reviewDeletedNote ?? "删除 · 不支持恢复"}
+                            ? copy?.reviewAddedNote ?? "未跟踪的新文件"
+                            : copy?.reviewDeletedNote ?? "已删除"}
                         </span>
                       ) : null}
                     </button>
@@ -342,11 +292,8 @@ export function DiffReviewPanel({ copy, resolvedTheme, refreshKey: externalRefre
                 <button
                   key={change.path}
                   type="button"
-                  className={`review-file ${change.path === selectedPath ? "review-file--active" : ""} ${
-                    change.status === "deleted" ? "review-file--disabled" : ""
-                  }`}
+                  className={`review-file ${change.path === selectedPath ? "review-file--active" : ""}`}
                   onClick={() => setSelectedPath(change.path)}
-                  disabled={change.status === "deleted"}
                   title={change.path}
                 >
                   <span className={`review-file__badge ${statusBadgeClass(change.status)}`}>
@@ -356,8 +303,8 @@ export function DiffReviewPanel({ copy, resolvedTheme, refreshKey: externalRefre
                   {change.status !== "modified" ? (
                     <span className="review-file__note">
                       {change.status === "added"
-                        ? copy?.reviewAddedNote ?? "新文件 · 仅查看"
-                        : copy?.reviewDeletedNote ?? "删除 · 不支持恢复"}
+                        ? copy?.reviewAddedNote ?? "未跟踪的新文件"
+                        : copy?.reviewDeletedNote ?? "已删除"}
                     </span>
                   ) : null}
                 </button>
@@ -372,7 +319,7 @@ export function DiffReviewPanel({ copy, resolvedTheme, refreshKey: externalRefre
             <div className="review-content__loading">
               <Loader2 size={16} className="review-spin" />
             </div>
-          ) : selectedPath === null || selected?.status === "deleted" ? (
+          ) : selectedPath === null ? (
             <div className="review-content__placeholder">
               {copy?.reviewNoSelection ?? "选择左侧变更文件查看差异"}
             </div>
@@ -382,25 +329,14 @@ export function DiffReviewPanel({ copy, resolvedTheme, refreshKey: externalRefre
             </div>
           ) : mode === "cards" ? (
             <div className="review-hunks">
-              {hunks.map((hunk, hunkIndex) => {
-                const decision = decisions[hunkIndex] ?? "pending";
+              {hunks.map((hunk) => {
                 let oldLine = hunk.oldStart;
                 let newLine = hunk.newStart;
                 return (
-                  <article
-                    key={`${hunk.oldStart}-${hunk.newStart}`}
-                    className={`review-hunk review-hunk--${decision}`}
-                  >
+                  <article key={`${hunk.oldStart}-${hunk.newStart}`} className="review-hunk">
                     <header className="review-hunk__head">
                       <span className="review-hunk__range">
                         @@ -{hunk.oldStart} +{hunk.newStart} @@
-                      </span>
-                      <span className={`review-hunk__state review-hunk__state--${decision}`}>
-                        {decision === "accepted"
-                          ? copy?.reviewAccepted ?? "已采纳"
-                          : decision === "rejected"
-                            ? copy?.reviewRejected ?? "已拒绝"
-                            : copy?.reviewPending ?? "待处理"}
                       </span>
                     </header>
                     <div className="review-hunk__lines">
@@ -418,28 +354,6 @@ export function DiffReviewPanel({ copy, resolvedTheme, refreshKey: externalRefre
                         );
                       })}
                     </div>
-                    {isModifiable ? (
-                      <footer className="review-hunk__ops">
-                        <button
-                          type="button"
-                          className={`review-ghost-btn review-ghost-btn--ok ${decision === "accepted" ? "review-ghost-btn--on" : ""}`}
-                          onClick={() => setDecision(hunkIndex, "accepted")}
-                        >
-                          <Check size={11} /> {copy?.reviewAccept ?? "采纳"}
-                        </button>
-                        <button
-                          type="button"
-                          className={`review-ghost-btn review-ghost-btn--danger ${decision === "rejected" ? "review-ghost-btn--danger-on" : ""}`}
-                          onClick={() => setDecision(hunkIndex, "rejected")}
-                        >
-                          <X size={11} /> {copy?.reviewReject ?? "拒绝"}
-                        </button>
-                      </footer>
-                    ) : (
-                      <footer className="review-hunk__ops review-hunk__ops--readonly">
-                        <Clock size={11} /> {copy?.reviewAddedNote ?? "新文件 · 仅查看"}
-                      </footer>
-                    )}
                   </article>
                 );
               })}

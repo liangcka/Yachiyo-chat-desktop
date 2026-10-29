@@ -185,12 +185,13 @@ pub fn handle_chat_stream(
     workspace_manager: Arc<WorkspaceManager>,
     approvals: Arc<crate::gateway::agent::permission::ApprovalRegistry>,
     mcp_manager: Arc<crate::mcp::McpManager>,
+    runs: Arc<crate::gateway::agent::run_registry::RunRegistry>,
 ) -> impl Stream<Item = Result<String, axum::Error>> {
     stream! {
         // Agent 模式分流：多步循环由专用运行时承载，本函数只保留纯聊天路径
         if request.agent.as_ref().map(|a| a.enabled).unwrap_or(false) {
             let mut inner = Box::pin(agent::runtime::run_agent_chat_stream(
-                client, fallback_client, request, key_store, workspace_manager, approvals, mcp_manager,
+                client, fallback_client, request, key_store, workspace_manager, approvals, mcp_manager, runs,
             ));
             while let Some(item) = inner.next().await {
                 yield item;
@@ -362,6 +363,7 @@ pub fn handle_chat_stream(
                                     truncated: true,
                                     usage: accumulated_usage,
                                     reason: None,
+                                    unknown: Vec::new(),
                                 }));
                                 return;
                             }
@@ -375,6 +377,7 @@ pub fn handle_chat_stream(
             truncated: false,
             usage: accumulated_usage,
             reason: None,
+            unknown: Vec::new(),
         }));
     }
 }

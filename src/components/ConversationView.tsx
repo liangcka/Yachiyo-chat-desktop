@@ -71,7 +71,7 @@ export interface ConversationViewProps {
   onScrolledFromTopChange?: (scrolledFromTop: boolean) => void;
   /** 当前激活的技能定义列表 */
   activeSkills?: readonly SkillDefinition[];
-  pendingPermission?: { toolName: string; argumentsJson: string };
+  pendingPermission?: { toolName: string; argumentsJson: string; callId?: string };
   pendingToolName?: string;
 }
 

@@ -138,11 +138,8 @@ pub async fn run_subagent(
         LoopEmit::Event(_) => {}
     });
 
-    let child_config = AgentLoopConfig {
-        max_turns: Some(SUBAGENT_MAX_TURNS),
-        permission_timeout_secs: config.permission_timeout_secs,
-        execution_mode: config.execution_mode,
-    };
+    // 子循环沿用运行编号与进程表：子任务的审批属于同一运行，命令同样可查询与停止
+    let child_config = AgentLoopConfig { max_turns: Some(SUBAGENT_MAX_TURNS), ..config.clone() };
     let outcome = run_nested_loop(
         vec![AgentMessage::User { text: prompt.to_string(), image_data_url: None }],
         tools_schema,
@@ -162,7 +159,8 @@ pub async fn run_subagent(
         LoopOutcome::MaxTurnsReached { usage } => (usage, Some("子任务达到轮次上限，以下为截至目前的结果")),
         LoopOutcome::LoopDetected { usage } => (usage, Some("子任务陷入重复操作被提前结束，以下为截至目前的结果")),
         LoopOutcome::Truncated { usage } => (usage, Some("子任务输出被截断，以下为截至目前的结果")),
-        LoopOutcome::Cancelled => return Err("子任务已取消".to_string()),
+        LoopOutcome::ContextOverflow { usage } => (usage, Some("子任务上下文超出模型窗口被停止，以下为截至目前的结果")),
+        LoopOutcome::Cancelled { .. } => return Err("子任务已取消".to_string()),
     };
     let report = report.lock().unwrap().trim().to_string();
     let tool_names = tool_names.lock().unwrap();

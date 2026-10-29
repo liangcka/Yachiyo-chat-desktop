@@ -40,6 +40,8 @@ url = "2"
 rfd = "0.15"
 encoding_rs = "0.8"
 regex = "1"
+# 规范化路径返回给界面时去掉 Windows 的 \\?\ 前缀
+dunce = "1"
 tauri-plugin-updater = "~2.12"
 tauri-plugin-process = "~2.3"
 
@@ -48,6 +50,7 @@ windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Security_Cryptography",
+    "Win32_System_JobObjects",
     "Win32_System_Threading",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
@@ -55,6 +58,10 @@ windows-sys = { version = "0.60", features = [
 ] }
 # UI Automation：枚举前台窗口的可点击元素，避免模型靠猜坐标点击
 uiautomation = "0.25"
+
+# 受管命令以独立进程组启动，取消与超时时整组终止
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

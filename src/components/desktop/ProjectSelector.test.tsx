@@ -5,6 +5,11 @@ import { ProjectSelector } from "./ProjectSelector";
 import { projectManager } from "../../services/project-manager";
 import * as desktopBridge from "../../services/desktop-bridge";
 
+/** 模拟原生层校验成功：返回规范路径（测试中即原路径） */
+async function acceptWorkspace(path: string): Promise<desktopBridge.WorkspaceSwitchResult> {
+  return { ok: true, path: path.trim() || null };
+}
+
 describe("ProjectSelector", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -52,7 +57,7 @@ describe("ProjectSelector", () => {
     const onSelectProject = vi.fn();
 
     vi.spyOn(desktopBridge, "pickDesktopFolder").mockResolvedValue("D:\\projects\\demo");
-    vi.spyOn(desktopBridge, "setDesktopWorkspaceRoot").mockResolvedValue(true);
+    vi.spyOn(desktopBridge, "setDesktopWorkspaceRoot").mockImplementation(acceptWorkspace);
 
     render(
       <ProjectSelector
@@ -79,7 +84,7 @@ describe("ProjectSelector", () => {
     const onNewChat = vi.fn();
     const onSelectProject = vi.fn();
 
-    vi.spyOn(desktopBridge, "setDesktopWorkspaceRoot").mockResolvedValue(true);
+    vi.spyOn(desktopBridge, "setDesktopWorkspaceRoot").mockImplementation(acceptWorkspace);
 
     render(
       <ProjectSelector
@@ -98,6 +103,22 @@ describe("ProjectSelector", () => {
     expect(onSelectProject).toHaveBeenCalledWith(null);
     expect(onNewChat).toHaveBeenCalled();
     expect(projectManager.getState().activeProject).toBeNull();
+  });
+
+  it("原生切换失败时不新建对话，前端项目保持不变", async () => {
+    const user = userEvent.setup();
+    const onNewChat = vi.fn();
+    vi.spyOn(desktopBridge, "setDesktopWorkspaceRoot").mockImplementation(acceptWorkspace);
+    await projectManager.switchProject("D:\\projects\\alpha");
+    vi.spyOn(desktopBridge, "pickDesktopFolder").mockResolvedValue("D:\\projects\\missing");
+    vi.spyOn(desktopBridge, "setDesktopWorkspaceRoot").mockResolvedValue({ ok: false, error: "工作区不可用" });
+
+    render(<ProjectSelector label="新建对话" onNewChat={onNewChat} />);
+    await user.click(screen.getByRole("button", { name: /项目选择/i }));
+    await user.click(screen.getByRole("menuitem", { name: "新建项目" }));
+
+    expect(onNewChat).not.toHaveBeenCalled();
+    expect(projectManager.getState().activeProject).toBe("D:\\projects\\alpha");
   });
 
   it("closes dropdown on Escape key", async () => {

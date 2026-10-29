@@ -53,6 +53,39 @@ describe("DesktopSidebar & Submodules", () => {
     expect(ordered.map((c) => c.id)).toEqual(["conv-older-1", "conv-today-1", "conv-yesterday-1"]);
   });
 
+  it("绑定了项目的任务按项目分组，显示实时状态与最近一次运行的结局", () => {
+    const run = (status: "streaming" | "failed" | "stopped" | "complete") => ({ runId: "r", messageId: "m", messageCreatedAt: now, status });
+    const conversations: Conversation[] = [
+      { ...mockConversations[0]!, id: "a1", title: "修复登录", workspace: "D:/work/alpha" },
+      { ...mockConversations[0]!, id: "b1", title: "升级依赖", workspace: "D:/work/beta", lastRun: run("failed") },
+      { ...mockConversations[0]!, id: "a2", title: "整理日志", workspace: "D:/work/alpha", lastRun: run("streaming") },
+      { ...mockConversations[0]!, id: "n1", title: "随便聊聊", workspace: null },
+      { ...mockConversations[0]!, id: "a3", title: "写测试", workspace: "D:/work/alpha", lastRun: run("stopped") },
+    ];
+    render(
+      <DesktopSidebar
+        activeConversationId="a1"
+        activeRightTab="none"
+        conversations={conversations}
+        copy={copy}
+        locale="zh-CN"
+        onDeleteConversation={vi.fn()}
+        onNewChat={vi.fn()}
+        onRenameConversation={vi.fn()}
+        onSelectConversation={vi.fn()}
+        onSelectRightTab={vi.fn()}
+        runningConversations={new Map([["a1", "waiting" as const]])}
+      />,
+    );
+    const history = screen.getByRole("region", { name: "对话" });
+    const groups = within(history).getAllByRole("group");
+    expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual(["alpha", "beta", "未绑定项目"]);
+    expect(within(groups[0]!).getByText("1 个运行中")).toBeInTheDocument();
+    expect(within(groups[0]!).getAllByRole("listitem").map((item) => item.textContent?.replace(/\d+(m|h|天)|刚刚/u, ""))).toEqual(["修复登录", "整理日志已中断", "写测试已停止"]);
+    expect(within(groups[0]!).getByRole("status", { name: "等待写入" })).toBeInTheDocument();
+    expect(within(groups[1]!).getByText("失败")).toBeInTheDocument();
+  });
+
   it("renders a flat conversation list with relative times", () => {
     render(
       <DesktopSidebar

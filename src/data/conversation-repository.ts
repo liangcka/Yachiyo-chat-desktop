@@ -1,5 +1,5 @@
 import Dexie from "dexie";
-import type { ChatMessage, Conversation, Locale, StoredImage } from "../domain/chat";
+import { latestRunState, runStateOf, type ChatMessage, type Conversation, type Locale, type StoredImage } from "../domain/chat";
 import type { YachiyoDatabase } from "./db";
 
 function defaultTitle(locale: Locale): string {
@@ -23,7 +23,11 @@ export class ConversationRepository {
       if (!(await this.db.conversations.get(conversation.id))) throw new Error("会话不存在");
       await this.db.messages.where("conversationId").equals(conversation.id).delete();
       await this.db.messages.bulkPut(messages);
-      await this.db.conversations.put(conversation);
+      const next: Conversation = { ...conversation };
+      const lastRun = latestRunState(messages);
+      if (lastRun === undefined) delete next.lastRun;
+      else next.lastRun = lastRun;
+      await this.db.conversations.put(next);
     });
   }
 
@@ -51,6 +55,21 @@ export class ConversationRepository {
 
   async renameConversation(id: string, title: string): Promise<void> {
     await this.db.conversations.update(id, { title: requireTitle(title) });
+  }
+
+  /**
+   * 记录任务归属的项目。已绑定到某个项目的会话不能改绑到另一个项目，
+   * 否则历史中的工具调用、检查点与审阅会和新项目混在一起。
+   */
+  async setConversationWorkspace(id: string, workspace: string | null): Promise<void> {
+    await this.db.transaction("rw", this.db.conversations, async () => {
+      const conversation = await this.db.conversations.get(id);
+      if (!conversation) throw new Error("会话不存在");
+      if (typeof conversation.workspace === "string" && conversation.workspace !== workspace) {
+        throw new Error("会话已绑定其他项目");
+      }
+      await this.db.conversations.update(id, { workspace });
+    });
   }
 
   /** 归档只是一个可选字段，不需要索引或版本迁移；Dexie 的 update 传 undefined 即删除该字段 */
@@ -117,10 +136,20 @@ export class ConversationRepository {
 
   /** 定点删除指定 createdAt 水位线之后的消息（含边界），用于撤回/重生成时避免全量重写 */
   async deleteMessagesFrom(conversationId: string, fromCreatedAt: number): Promise<void> {
-    await this.db.messages
-      .where("[conversationId+createdAt]")
-      .between([conversationId, fromCreatedAt], [conversationId, Dexie.maxKey], true, true)
-      .delete();
+    await this.db.transaction("rw", [this.db.conversations, this.db.messages], async () => {
+      await this.db.messages
+        .where("[conversationId+createdAt]")
+        .between([conversationId, fromCreatedAt], [conversationId, Dexie.maxKey], true, true)
+        .delete();
+      const conversation = await this.db.conversations.get(conversationId);
+      if (conversation?.lastRun !== undefined && conversation.lastRun.messageCreatedAt >= fromCreatedAt) {
+        const remaining = await this.db.messages
+          .where("[conversationId+createdAt]")
+          .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey])
+          .toArray();
+        await this.db.conversations.update(conversationId, { lastRun: latestRunState(remaining) });
+      }
+    });
   }
 
   async putMessage(message: ChatMessage): Promise<void> {
@@ -131,9 +160,14 @@ export class ConversationRepository {
       }
 
       await this.db.messages.put(message);
-      if (message.createdAt > conversation.updatedAt) {
-        await this.db.conversations.update(conversation.id, { updatedAt: message.createdAt });
+      const changes: Partial<Conversation> = {};
+      if (message.createdAt > conversation.updatedAt) changes.updatedAt = message.createdAt;
+      const runState = runStateOf(message);
+      const previous = conversation.lastRun;
+      if (runState !== undefined && (previous === undefined || previous.messageId === message.id || message.createdAt >= previous.messageCreatedAt)) {
+        changes.lastRun = runState;
       }
+      if (Object.keys(changes).length > 0) await this.db.conversations.update(conversation.id, changes);
     });
   }
 
@@ -159,6 +193,10 @@ export class ConversationRepository {
         .delete();
       if (messages.length > 0) {
         await this.db.messages.bulkPut(messages);
+      }
+      // 撤回或重新生成删掉了最近一次运行的消息时，运行状态回落到保留部分中最近的一次
+      if (conversation.lastRun !== undefined && !messages.some((message) => message.id === conversation.lastRun?.messageId)) {
+        await this.db.conversations.update(conversationId, { lastRun: latestRunState(messages) });
       }
     });
   }

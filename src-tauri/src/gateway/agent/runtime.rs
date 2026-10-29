@@ -1,4 +1,5 @@
 use crate::crypto::keys::KeyStore;
+use crate::gateway::agent::changes::{changed_paths, fingerprint, read_before_write, tool_target, ChangeLedger, Fingerprint};
 use crate::gateway::agent::checkpoint::CheckpointStore;
 use crate::gateway::providers::compat_vendor::CompatVendor;
 use crate::gateway::agent::loop_guard::{
@@ -7,6 +8,13 @@ use crate::gateway::agent::loop_guard::{
 };
 use crate::gateway::agent::messages::{history_to_agent_messages, AgentMessage};
 use crate::gateway::agent::permission::{approval_key, ApprovalRegistry};
+use crate::gateway::agent::context_budget::{compact_to_budget, estimate_messages, estimate_tokens, ContextBudget, RunProgress};
+use crate::gateway::agent::delivery_check::{DeliveryCheck, DeliveryReminder};
+use crate::gateway::agent::run_records::RunEndStatus;
+use crate::gateway::agent::run_registry::{
+    approval_request_id, generate_run_id, RunInfo, RunRegistry, RunStatus, Supplement, SupplementQueue,
+};
+use crate::tools::process::{clamp_timeout, execute_command, format_for_model, CommandControl, CommandOutcome, OutputStream, ProcessTable};
 use crate::gateway::agent::subagent::{run_subagent, SUBAGENT_TOOL};
 use crate::gateway::agent::pruner::{
     compact_agent_messages, DEFAULT_PRUNE_HEAD_CHARS, DEFAULT_PRUNE_TAIL_CHARS,
@@ -14,13 +22,17 @@ use crate::gateway::agent::pruner::{
 };
 use crate::gateway::prompt::{build_agent_system_prompt, build_time_note};
 use crate::gateway::providers::registry::get_provider_config;
-use crate::gateway::stream::{encode_client_event, encode_ping};
+use crate::gateway::stream::encode_client_event;
 use crate::tools::{
-    authorize_tool, execute_tool_with_context, preview_tool_output, process_tool_output, tool_risk,
+    authorize_tool, execute_tool_with_context, preview_command_output, preview_tool_output, process_tool_output, tool_risk,
     is_unbound_file_read, FsObservationTracker, ToolAuthorization, ToolRisk, WorkspaceManager,
     PROJECT_REQUIRED_FOR_WRITE,
 };
-use crate::types::{AgentExecutionMode, ClientChatRequest, ClientStreamEvent, ProviderId, TokenUsage, ToolInvocation};
+use crate::types::{
+    ChatLocale,
+    AgentExecutionMode, ClientChatRequest, ClientStreamEvent, PendingOperation, PermissionOutcome, ProviderId, TokenUsage,
+    ToolInvocation, UnknownOperation,
+};
 
 use async_stream::stream;
 use futures::Stream;
@@ -43,11 +55,36 @@ pub struct AgentLoopConfig {
     pub max_turns: Option<u32>,
     pub permission_timeout_secs: u64,
     pub execution_mode: AgentExecutionMode,
+    /// 运行编号：审批编号以它为前缀，只对所属运行有效；缺省时取检查点的运行编号
+    pub run_id: Option<String>,
+    /// 运行内的受管命令表，供查询与单独停止；缺省时命令不登记
+    pub processes: Option<Arc<ProcessTable>>,
+    /// 工作区写入锁：同一项目中的运行轮流执行有副作用的工具
+    pub workspace_lock: Option<Arc<tokio::sync::Mutex<()>>>,
+    /// 运行改动账本：记录本次运行改动的文件与改动前后的版本
+    pub ledger: Option<Arc<std::sync::Mutex<ChangeLedger>>>,
+    /// 用户在运行中追加的要求；每次调用模型前送达，缺省时不接受补充
+    pub supplements: Option<Arc<SupplementQueue>>,
+    /// 本次运行消息的上下文预算；超出时折叠较早的轮次，缺省时不做预算
+    pub context_budget: Option<ContextBudget>,
+    /// 交付前执行反馈的语言
+    pub locale: ChatLocale,
 }
 
 impl Default for AgentLoopConfig {
     fn default() -> Self {
-        Self { max_turns: None, permission_timeout_secs: 300, execution_mode: AgentExecutionMode::Confirm }
+        Self {
+            max_turns: None,
+            permission_timeout_secs: 300,
+            execution_mode: AgentExecutionMode::Confirm,
+            run_id: None,
+            processes: None,
+            workspace_lock: None,
+            ledger: None,
+            supplements: None,
+            context_budget: None,
+            locale: ChatLocale::ZhCn,
+        }
     }
 }
 
@@ -81,7 +118,10 @@ pub enum LoopOutcome {
     LoopDetected { usage: TokenUsage },
     /// 某一轮输出因输出 token 预算耗尽被截断，提前结束并如实告知，而不是当作正常完成
     Truncated { usage: TokenUsage },
-    Cancelled,
+    /// 已取消；unknown 为收尾期间未能确认结果的外部操作
+    Cancelled { unknown: Vec<UnknownOperation> },
+    /// 折叠到不能再折叠，消息仍超出模型窗口：如实停止，不让上游报错或静默截断
+    ContextOverflow { usage: TokenUsage },
 }
 
 fn accumulate_usage(acc: &mut TokenUsage, inc: &Option<TokenUsage>) {
@@ -118,6 +158,87 @@ async fn wait_cancelled(cancelled: &AtomicBool) {
 
 /// 工具被用户拒绝时回填给模型的说明
 const DENIED_TOOL_RESULT: &str = "用户拒绝了本次操作。不要立即重试同一动作；请改用其他方案，或向用户说明需要该操作的理由。";
+
+/// 取消后等待 MCP 调用返回的时长：外部副作用无法撤回，超时后只能如实标记结果未知
+const MCP_CANCEL_GRACE: Duration = Duration::from_secs(10);
+
+fn cancelled_outcome() -> Result<LoopOutcome, String> {
+    Ok(LoopOutcome::Cancelled { unknown: Vec::new() })
+}
+
+/// 获取工作区写入锁；需要等待时告知界面在等哪个工具，等待期间被取消则返回 None
+async fn acquire_write_lock(
+    lock: &Arc<tokio::sync::Mutex<()>>,
+    cancelled: &AtomicBool,
+    sink: &EventSink,
+    run_id: &str,
+    call: &ToolInvocation,
+) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+    if let Ok(guard) = Arc::clone(lock).try_lock_owned() {
+        return Some(guard);
+    }
+    sink(LoopEmit::Event(ClientStreamEvent::RunStatus {
+        run_id: run_id.to_string(),
+        status: RunStatus::WaitingForWorkspace,
+        pending: vec![PendingOperation {
+            call_id: call.id.clone(),
+            name: call.name.clone(),
+            detail: "等待同一项目中的其他任务完成写入".to_string(),
+        }],
+    }));
+    let guard = tokio::select! {
+        guard = Arc::clone(lock).lock_owned() => Some(guard),
+        _ = wait_cancelled(cancelled) => None,
+    };
+    if guard.is_some() {
+        sink(LoopEmit::Event(ClientStreamEvent::RunStatus { run_id: run_id.to_string(), status: RunStatus::Running, pending: Vec::new() }));
+    }
+    guard
+}
+
+/// 执行前为改动账本准备的信息：文件工具记录写前内容，其余工具记录文件指纹
+enum ChangeProbe {
+    FileTool { target: String, baseline: Result<Option<Vec<u8>>, String> },
+    Observed(Result<Fingerprint, String>),
+}
+
+fn probe_changes(root: &Path, call: &ToolInvocation) -> ChangeProbe {
+    if matches!(call.name.as_str(), "write_file" | "edit_file") {
+        if let Some(target) = tool_target(root, &call.arguments) {
+            let baseline = read_before_write(root, &target);
+            return ChangeProbe::FileTool { target, baseline };
+        }
+    }
+    ChangeProbe::Observed(fingerprint(root))
+}
+
+/// 工具执行后把改动写入账本；失败时返回原因，由调用方附在工具结果里而不是静默丢弃
+fn record_changes(
+    ledger: &std::sync::Mutex<ChangeLedger>,
+    root: &Path,
+    call: &ToolInvocation,
+    probe: ChangeProbe,
+    failed: bool,
+    checkpoint: Option<&CheckpointStore>,
+) -> Result<(), String> {
+    let mut ledger = ledger.lock().map_err(|_| "改动账本不可用".to_string())?;
+    match probe {
+        ChangeProbe::FileTool { target, baseline } => {
+            if failed {
+                return Ok(());
+            }
+            ledger.record_file_tool(&target, baseline?.as_deref(), &call.id)
+        }
+        ChangeProbe::Observed(before) => {
+            let changed = changed_paths(&before?, &fingerprint(root)?);
+            if changed.is_empty() {
+                return Ok(());
+            }
+            let turn_checkpoint = checkpoint.and_then(|store| store.entries().last().map(|entry| (store, entry.id.as_str())));
+            ledger.record_observed(&changed, turn_checkpoint, &call.id)
+        }
+    }
+}
 
 pub async fn run_agent_loop(
     messages: Vec<AgentMessage>,
@@ -163,12 +284,21 @@ pub async fn run_agent_loop_ext(
 ) -> Result<LoopOutcome, String> {
     let mut usage = TokenUsage::default();
     let fs_tracker = FsObservationTracker::new();
-    let run_id = checkpoint
-        .as_ref()
-        .map(|c| c.run_id().to_string())
-        .unwrap_or_else(|| format!("no-workspace-{:016x}", rand::random::<u64>()));
+    let run_id = config
+        .run_id
+        .clone()
+        .or_else(|| checkpoint.as_ref().map(|c| c.run_id().to_string()))
+        .unwrap_or_else(generate_run_id);
 
     let mut loop_detector = ToolLoopDetector::default();
+    // 本次运行从最后一条用户消息开始；之前的对话历史由客户端按自己的预算裁剪
+    let run_start = messages.iter().rposition(|message| matches!(message, AgentMessage::User { .. })).unwrap_or(0);
+    let goal = match messages.get(run_start) {
+        Some(AgentMessage::User { text, .. }) => text.clone(),
+        _ => String::new(),
+    };
+    let mut progress = RunProgress::default();
+    let mut delivery = DeliveryCheck::default();
     let mut turn: u32 = 0;
     loop {
         turn += 1;
@@ -177,7 +307,37 @@ pub async fn run_agent_loop_ext(
         }
         let mut turn_checkpoint_created = false;
         if cancelled.load(Ordering::Relaxed) {
-            return Ok(LoopOutcome::Cancelled);
+            return cancelled_outcome();
+        }
+        if let Some(queue) = config.supplements.as_deref() {
+            deliver_supplements(&mut messages, queue.drain(), &run_id, sink, &mut progress);
+        }
+        if let Some(budget) = config.context_budget {
+            let measure = |candidate: &[AgentMessage]| {
+                let mut sent = candidate.to_vec();
+                compact_agent_messages(&mut sent, DEFAULT_PRUNE_THRESHOLD_CHARS, DEFAULT_PRUNE_HEAD_CHARS, DEFAULT_PRUNE_TAIL_CHARS);
+                estimate_messages(&sent)
+            };
+            match compact_to_budget(&mut messages, run_start, &goal, &mut progress, budget, measure) {
+                Ok(Some(compaction)) => sink(LoopEmit::Event(ClientStreamEvent::RunNote {
+                    kind: RUN_NOTE_CONTEXT_COMPACTED.to_string(),
+                    detail: serde_json::json!({
+                        "foldedTurns": compaction.folded_turns,
+                        "totalFoldedTurns": progress.folded_turns(),
+                        "beforeTokens": compaction.before_tokens,
+                        "afterTokens": compaction.after_tokens,
+                        "budgetTokens": budget.input_tokens,
+                    }),
+                })),
+                Ok(None) => {}
+                Err(overflow) => {
+                    sink(LoopEmit::Event(ClientStreamEvent::RunNote {
+                        kind: RUN_NOTE_CONTEXT_OVERFLOW.to_string(),
+                        detail: serde_json::json!({ "tokens": overflow.tokens, "budgetTokens": overflow.budget }),
+                    }));
+                    return Ok(LoopOutcome::ContextOverflow { usage });
+                }
+            }
         }
         sink(LoopEmit::Event(ClientStreamEvent::Turn { index: turn, usage: None }));
 
@@ -194,7 +354,7 @@ pub async fn run_agent_loop_ext(
         // 而不是等这一轮（可能是长时间思考或数万 token 的输出）完整跑完
         let outcome = tokio::select! {
             outcome = executor.execute(&messages, sink) => outcome,
-            _ = wait_cancelled(cancelled) => return Ok(LoopOutcome::Cancelled),
+            _ = wait_cancelled(cancelled) => return cancelled_outcome(),
         };
         let outcome = match outcome {
             Err(error) if error == REPETITION_LOOP_DETECTED => return Ok(LoopOutcome::LoopDetected { usage }),
@@ -213,7 +373,35 @@ pub async fn run_agent_loop_ext(
         }
 
         if outcome.tool_calls.is_empty() {
-            return Ok(LoopOutcome::Completed { usage });
+            // 交付前检查执行记录：修改了代码却没验证，或最近一次验证失败，提醒一次后继续
+            if let Some(reminder) = delivery.before_finish() {
+                sink(LoopEmit::Event(ClientStreamEvent::RunNote {
+                    kind: RUN_NOTE_VERIFICATION_REMINDER.to_string(),
+                    detail: match &reminder {
+                        DeliveryReminder::NotVerified { files } => serde_json::json!({ "reason": reminder.kind(), "files": files }),
+                        DeliveryReminder::VerificationFailed { command } => serde_json::json!({ "reason": reminder.kind(), "command": command }),
+                    },
+                }));
+                messages.push(AgentMessage::Assistant {
+                    text: outcome.text.clone(),
+                    reasoning: outcome.reasoning.clone(),
+                    tool_calls: Vec::new(),
+                    native: outcome.native.clone(),
+                });
+                messages.push(AgentMessage::User { text: reminder.message(config.locale == ChatLocale::JaJp), image_data_url: None });
+                continue;
+            }
+            // 模型给出最终回复时仍有未送达的补充要求：保留这轮回复，带着补充继续下一轮
+            if config.supplements.as_deref().is_none_or(SupplementQueue::close_if_empty) {
+                return Ok(LoopOutcome::Completed { usage });
+            }
+            messages.push(AgentMessage::Assistant {
+                text: outcome.text.clone(),
+                reasoning: outcome.reasoning.clone(),
+                tool_calls: Vec::new(),
+                native: outcome.native.clone(),
+            });
+            continue;
         }
 
         messages.push(AgentMessage::Assistant {
@@ -227,15 +415,19 @@ pub async fn run_agent_loop_ext(
         // look 截图：工具结果只回填文字，图片在本轮工具结果之后作为一条带图消息交给模型
         let mut turn_image: Option<String> = None;
         let spill_root = if config.execution_mode == AgentExecutionMode::Readonly { None } else { workspace_root };
-        let mut record_result = |call: &ToolInvocation, output: String, is_error: bool, duration_ms: u64| {
-            let model_output = if is_error { output } else { process_tool_output(&call.name, &output, spill_root) };
+        let mut record_result = |call: &ToolInvocation, output: String, is_error: bool, duration_ms: u64, command: Option<&CommandOutcome>| {
+            // 失败命令的输出同样可能很长，统一按上限落盘，避免撑爆上下文
+            let model_output = process_tool_output(&call.name, &output, spill_root);
             sink(LoopEmit::Event(ClientStreamEvent::ToolResult {
                 id: call.id.clone(),
                 name: call.name.clone(),
-                output: preview_tool_output(&model_output),
+                output: if command.is_some() { preview_command_output(&model_output) } else { preview_tool_output(&model_output) },
                 is_error,
                 duration_ms,
+                command: command.and_then(|outcome| serde_json::to_value(outcome).ok()),
             }));
+            progress.record_result(&call.id, is_error, &model_output);
+            delivery.observe(call, is_error, command);
             turn_outputs.push(model_output.clone());
             messages.push(AgentMessage::ToolResult {
                 tool_call_id: call.id.clone(),
@@ -246,7 +438,7 @@ pub async fn run_agent_loop_ext(
         let calls = &outcome.tool_calls;
         let mut index = 0;
         while index < calls.len() {
-            if cancelled.load(Ordering::Relaxed) { return Ok(LoopOutcome::Cancelled); }
+            if cancelled.load(Ordering::Relaxed) { return cancelled_outcome(); }
             // 连续的免审批只读调用互不依赖，整段并发执行，结果仍按调用顺序回填
             let concurrent = calls[index..].iter().take_while(|call| runs_concurrently(&call.name, workspace_root)).count();
             if concurrent > 1 {
@@ -260,12 +452,13 @@ pub async fn run_agent_loop_ext(
                     }));
                 }
                 let auth = ToolAuthorization::Agent { mode: config.execution_mode, approved: true };
+                // 只读调用没有副作用，取消时直接放弃等待
                 let results = tokio::select! {
                     results = execute_concurrently(batch, workspace_root, http_client, &fs_tracker, auth) => results,
-                    _ = wait_cancelled(cancelled) => return Ok(LoopOutcome::Cancelled),
+                    _ = wait_cancelled(cancelled) => return cancelled_outcome(),
                 };
                 for (call, (output, is_error, duration_ms)) in batch.iter().zip(results) {
-                    record_result(call, output, is_error, duration_ms);
+                    record_result(call, output, is_error, duration_ms, None);
                 }
                 continue;
             }
@@ -285,6 +478,7 @@ pub async fn run_agent_loop_ext(
             } else {
                 None
             };
+            let mut approval_timed_out = false;
             let approved = match tool_risk(&call.name) {
                 _ if read_path_error.is_some() => false,
                 Some(ToolRisk::Read) if !is_unbound_file_read(&call.name, workspace_root) => true,
@@ -297,12 +491,13 @@ pub async fn run_agent_loop_ext(
                     if gate.is_allowed(&key) {
                         true
                     } else {
-                        let request_id = format!("{}-{}", run_id, call.id);
+                        let request_id = approval_request_id(&run_id, &call.id);
                         let mut rx = gate.register(&request_id);
                         sink(LoopEmit::Event(ClientStreamEvent::PermissionRequest {
                             request_id: request_id.clone(),
                             tool_name: call.name.clone(),
                             arguments: call.arguments.clone(),
+                            call_id: call.id.clone(),
                         }));
                         let deadline = Instant::now() + Duration::from_secs(config.permission_timeout_secs);
                         let mut last_ping = Instant::now();
@@ -317,7 +512,7 @@ pub async fn run_agent_loop_ext(
                                 _ = tokio::time::sleep(Duration::from_millis(500)) => {
                                     if cancelled.load(Ordering::Relaxed) {
                                         gate.cancel(&request_id);
-                                        return Ok(LoopOutcome::Cancelled);
+                                        return cancelled_outcome();
                                     }
                                     if last_ping.elapsed() >= Duration::from_secs(5) {
                                         sink(LoopEmit::Ping);
@@ -328,9 +523,22 @@ pub async fn run_agent_loop_ext(
                         };
                         let approved = decision.as_ref().map(|d| d.approved).unwrap_or(false);
                         gate.cancel(&request_id);
+                        // 审批期间运行被取消：即使批准与取消几乎同时到达，也不执行
+                        if cancelled.load(Ordering::Relaxed) {
+                            return cancelled_outcome();
+                        }
+                        let reason = match decision {
+                            None => PermissionOutcome::Timeout,
+                            Some(d) if d.approved => PermissionOutcome::Approved,
+                            Some(_) => PermissionOutcome::Denied,
+                        };
+                        if reason == PermissionOutcome::Timeout {
+                            approval_timed_out = true;
+                        }
                         sink(LoopEmit::Event(ClientStreamEvent::PermissionResolved {
                             request_id,
                             approved,
+                            reason,
                         }));
                         if approved {
                             if let Some(d) = decision {
@@ -346,9 +554,22 @@ pub async fn run_agent_loop_ext(
                 }
             };
 
-            if cancelled.load(Ordering::Relaxed) { return Ok(LoopOutcome::Cancelled); }
+            if cancelled.load(Ordering::Relaxed) { return cancelled_outcome(); }
 
             let started = Instant::now();
+            let mut command_outcome: Option<CommandOutcome> = None;
+            // 有副作用的工具在工作区写入锁内执行：检查点、写前基线、执行与改动记录在同一窗口内完成，
+            // 同一项目中的其他运行不会在窗口内写入，命令观察到的改动因此只属于本次调用
+            let side_effect = approved && tool_risk(&call.name) == Some(ToolRisk::Write) && workspace_root.is_some();
+            let _write_guard = match (side_effect, config.workspace_lock.as_ref()) {
+                (true, Some(lock)) => match acquire_write_lock(lock, cancelled, sink, &run_id, call).await {
+                    Some(guard) => Some(guard),
+                    None => return cancelled_outcome(),
+                },
+                _ => None,
+            };
+            let tracking = config.ledger.as_ref().zip(workspace_root).filter(|_| side_effect);
+            let probe = tracking.map(|(_, root)| probe_changes(root, call));
             let (output, is_error) = if approved {
                 let auth = ToolAuthorization::Agent { mode: config.execution_mode, approved };
                 let preparation = authorize_tool(&call.name, auth).and_then(|_| {
@@ -377,18 +598,77 @@ pub async fn run_agent_loop_ext(
                     }
                 } else if call.name.starts_with("mcp__") {
                     if let Some(mcp) = mcp_manager {
-                        match mcp.execute_tool(&call.name, &call.arguments).await {
-                            Ok(out) => {
+                        // MCP 调用的外部副作用无法撤回：取消时不直接丢弃，给它一段收尾时间，
+                        // 仍未返回才放弃等待并如实标记结果未知
+                        let call_future = mcp.execute_tool(&call.name, &call.arguments);
+                        tokio::pin!(call_future);
+                        let finished = tokio::select! {
+                            result = &mut call_future => Some(result),
+                            _ = wait_cancelled(cancelled) => {
+                                sink(LoopEmit::Event(ClientStreamEvent::RunStatus {
+                                    run_id: run_id.clone(),
+                                    status: RunStatus::Cancelling,
+                                    pending: vec![PendingOperation {
+                                        call_id: call.id.clone(),
+                                        name: call.name.clone(),
+                                        detail: format!("等待 MCP 工具返回（最多 {} 秒）", MCP_CANCEL_GRACE.as_secs()),
+                                    }],
+                                }));
+                                tokio::time::timeout(MCP_CANCEL_GRACE, &mut call_future).await.ok()
+                            }
+                        };
+                        match finished {
+                            Some(Ok(out)) => {
                                 let (text, image) = crate::computer::vision::split_image_output(out);
                                 if image.is_some() {
                                     turn_image = image;
                                 }
                                 (text, false)
                             }
-                            Err(err) => (err, true),
+                            Some(Err(err)) => (err, true),
+                            None => {
+                                let detail = format!("取消后 {} 秒内未返回，外部操作是否完成未知", MCP_CANCEL_GRACE.as_secs());
+                                record_result(call, format!("已取消：MCP 工具{detail}。"), true, started.elapsed().as_millis() as u64, None);
+                                return Ok(LoopOutcome::Cancelled {
+                                    unknown: vec![UnknownOperation { call_id: call.id.clone(), name: call.name.clone(), detail }],
+                                });
+                            }
                         }
                     } else {
                         ("未配置或不可用的 MCP 管理器".to_string(), true)
+                    }
+                } else if call.name == "run_command" {
+                    match call.arguments.get("command").and_then(|v| v.as_str()) {
+                        None => ("Missing 'command' argument".to_string(), true),
+                        Some(command) => {
+                            let timeout = clamp_timeout(call.arguments.get("timeout_secs").and_then(|v| v.as_u64()));
+                            let fallback_cwd;
+                            let cwd = match workspace_root {
+                                Some(root) => root,
+                                None => {
+                                    fallback_cwd = crate::tools::get_fallback_cwd();
+                                    fallback_cwd.as_path()
+                                }
+                            };
+                            let call_id = call.id.clone();
+                            let output_sink = Arc::clone(sink);
+                            let observer = move |stream: OutputStream, text: &str| {
+                                output_sink(LoopEmit::Event(ClientStreamEvent::ToolOutput { id: call_id.clone(), stream, text: text.to_string() }));
+                            };
+                            // 取消在命令内部处理：终止整棵进程树并确认退出后才返回，不丢弃仍在运行的进程
+                            let outcome = execute_command(command, cwd, timeout, CommandControl {
+                                cancelled: Some(cancelled),
+                                processes: config.processes.as_deref(),
+                                call_id: Some(&call.id),
+                                observer: Some(&observer),
+                                log_root: spill_root,
+                            })
+                            .await;
+                            let text = format_for_model(&outcome, Some(timeout));
+                            let failed = !outcome.succeeded();
+                            command_outcome = Some(outcome);
+                            (text, failed)
+                        }
                     }
                 } else {
                     match execute_tool_with_context(
@@ -409,16 +689,29 @@ pub async fn run_agent_loop_ext(
                 }
             } else {
                 (if let Some(error) = read_path_error.as_deref() {
-                    error
+                    error.to_string()
                 } else if matches!(call.name.as_str(), "write_file" | "edit_file") && workspace_root.is_none() {
-                    PROJECT_REQUIRED_FOR_WRITE
+                    PROJECT_REQUIRED_FOR_WRITE.to_string()
                 } else if config.execution_mode == AgentExecutionMode::Readonly && tool_risk(&call.name) == Some(ToolRisk::Write) {
-                    "当前为只读模式，该操作不会执行。请用户显式切换执行模式后再操作。"
+                    "当前为只读模式，该操作不会执行。请用户显式切换执行模式后再操作。".to_string()
+                } else if approval_timed_out {
+                    format!("审批等待超时（{} 秒内没有回应），本次操作未执行。需要时请向用户说明理由后重新申请。", config.permission_timeout_secs)
                 } else {
-                    DENIED_TOOL_RESULT
-                }.to_string(), true)
+                    DENIED_TOOL_RESULT.to_string()
+                }, true)
             };
-            record_result(call, output, is_error, started.elapsed().as_millis() as u64);
+            let output = match (tracking, probe) {
+                (Some((ledger, root)), Some(probe)) => match record_changes(ledger, root, call, probe, is_error, checkpoint.as_ref()) {
+                    Ok(()) => output,
+                    Err(error) => format!("{output}\n[改动跟踪失败：{error}。任务审阅中可能缺少本次改动。]"),
+                },
+                _ => output,
+            };
+            record_result(call, output, is_error, started.elapsed().as_millis() as u64, command_outcome.as_ref());
+            // 命令在取消时已终止并记录结果，随后结束运行
+            if cancelled.load(Ordering::Relaxed) {
+                return cancelled_outcome();
+            }
         }
 
         if let Some(image) = turn_image {
@@ -436,6 +729,29 @@ pub async fn run_agent_loop_ext(
             ToolLoopVerdict::Stop => return Ok(LoopOutcome::LoopDetected { usage }),
         }
     }
+}
+
+/// 把补充要求交给模型：接在最后一条工具结果或用户消息之后，不另起一条用户消息，
+/// 各家协议的消息交替约束都不受影响；上一条是助手回复时才新增用户消息
+fn deliver_supplements(messages: &mut Vec<AgentMessage>, supplements: Vec<Supplement>, run_id: &str, sink: &EventSink, progress: &mut RunProgress) {
+    if supplements.is_empty() {
+        return;
+    }
+    // 补充要求属于约束：上下文折叠时写进运行进展摘要，不会随较早的轮次丢失
+    for item in &supplements {
+        progress.record_constraint(&item.text);
+    }
+    let body = supplements.iter().map(|item| item.text.trim()).collect::<Vec<_>>().join("\n\n");
+    let note = format!("\n\n[用户在任务进行中补充的要求]\n{body}");
+    match messages.last_mut() {
+        Some(AgentMessage::ToolResult { content, .. }) => content.push_str(&note),
+        Some(AgentMessage::User { text, .. }) => text.push_str(&note),
+        _ => messages.push(AgentMessage::User { text: note.trim_start().to_string(), image_data_url: None }),
+    }
+    sink(LoopEmit::Event(ClientStreamEvent::SupplementDelivered {
+        run_id: run_id.to_string(),
+        ids: supplements.into_iter().map(|item| item.id).collect(),
+    }));
 }
 
 /// 同一轮里可以并发执行的工具：无副作用、无需审批，也不依赖本轮其他调用的结果。
@@ -901,22 +1217,6 @@ fn upstream_retry_delay(attempt: u32) -> Duration {
     Duration::from_millis(1_500 * u64::from(attempt))
 }
 
-/// 下发心跳的周期，需明显小于客户端的流空闲超时（45 秒）
-const HEARTBEAT_PERIOD: Duration = Duration::from_secs(5);
-
-/// 取下一个待下发的事件；周期内没有事件时以 Ping 作为心跳，通道关闭时返回 None
-pub async fn next_emit_or_heartbeat(
-    rx: &mut tokio::sync::mpsc::UnboundedReceiver<LoopEmit>,
-    heartbeat: &mut tokio::time::Interval,
-) -> Option<LoopEmit> {
-    tokio::select! {
-        // 已排队的事件优先于心跳，保证事件顺序和及时性
-        biased;
-        emit = rx.recv() => emit,
-        _ = heartbeat.tick() => Some(LoopEmit::Ping),
-    }
-}
-
 /// Agent 模式的 /api/chat 入口：SSE 流承载完整多轮运行
 pub fn run_agent_chat_stream(
     client: reqwest::Client,
@@ -926,6 +1226,7 @@ pub fn run_agent_chat_stream(
     workspace_manager: Arc<WorkspaceManager>,
     approvals: Arc<ApprovalRegistry>,
     mcp_manager: Arc<crate::mcp::McpManager>,
+    runs: Arc<RunRegistry>,
 ) -> impl Stream<Item = Result<String, axum::Error>> {
     stream! {
         let provider_id = request.provider.unwrap_or(ProviderId::Stepfun);
@@ -957,29 +1258,15 @@ pub fn run_agent_chat_stream(
             }
         };
 
-        // 取消哨兵：SSE 流 Drop（客户端断开）时置位
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let _guard = CancelOnDrop(Arc::clone(&cancelled));
-
-        // 若客户端显式传递了当前活跃工作区路径，强行对齐 workspace_manager
-        let root = if let Some(ws) = request.agent.as_ref().and_then(|a| a.workspace.as_deref()) {
-            let ws_path = std::path::Path::new(ws);
-            let requested = ws_path.canonicalize().and_then(|path| if path.is_dir() { Ok(path) } else { Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "工作区不是目录")) });
-            let requested = match requested {
-                Ok(path) => path,
-                Err(error) => {
+        // 运行的工作区只取自请求：界面随后切换项目不会改变它，也不回退到界面当前浏览的项目
+        let root = match resolve_run_workspace(request.agent.as_ref().and_then(|a| a.workspace.as_deref())) {
+            Ok(root) => root,
+            Err(error) => {
                 tracing::warn!("Agent 工作区无效: {}", error);
-                yield Ok(encode_client_event(&ClientStreamEvent::Error { code: "INVALID_REQUEST".to_string() }));
-                return;
-                }
-            };
-            if let Err(error) = workspace_manager.set_workspace_root(requested.clone()) {
-                tracing::warn!("Agent 工作区无效: {}", error);
-                yield Ok(encode_client_event(&ClientStreamEvent::Error { code: "INVALID_REQUEST".to_string() }));
+                yield Ok(encode_client_event(&ClientStreamEvent::Error { code: "WORKSPACE_UNAVAILABLE".to_string() }));
                 return;
             }
-            Some(requested)
-        } else { workspace_manager.get_workspace_root() };
+        };
 
         let workspace_lease = match root.as_deref().map(|root| workspace_manager.acquire_shared_workspace(root)).transpose() {
             Ok(lease) => lease,
@@ -1037,18 +1324,73 @@ pub fn run_agent_chat_stream(
             custom_model,
         };
 
-        let agent_config = request.agent.as_ref()
-            .map(|a| AgentLoopConfig { max_turns: a.max_turns, permission_timeout_secs: 300, execution_mode: a.execution_mode })
-            .unwrap_or_default();
-        let run_id = format!(
-            "{}-{}",
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis(),
-            rand::random::<u32>()
+        let context_budget = ContextBudget::for_window(
+            request.agent.as_ref().and_then(|a| a.context_window),
+            estimate_tokens(&executor.system_prompt) + estimate_tokens(&serde_json::Value::from(executor.tools_schema.clone()).to_string()),
         );
+        let run_id = request.agent.as_ref().and_then(|a| a.run_id.clone()).unwrap_or_else(generate_run_id);
+        let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+        let run_info = RunInfo {
+            run_id: run_id.clone(),
+            conversation_id: request.agent.as_ref().and_then(|a| a.conversation_id.clone()),
+            workspace: root.clone(),
+            provider: provider_id,
+            model: executor.model.clone(),
+            execution_mode,
+            started_at,
+        };
+        let run_handle = match runs.begin(run_info.clone()) {
+            Ok(handle) => handle,
+            Err(code) => {
+                tracing::warn!("Agent 运行登记失败: {}", code);
+                yield Ok(encode_client_event(&ClientStreamEvent::Error { code }));
+                return;
+            }
+        };
+        // 取消标志归运行登记所有，只由显式取消接口置位：SSE 断开只是订阅者离开，运行继续，客户端可重新连接
+        let cancelled = Arc::clone(&run_handle.control().cancelled);
+        let events = Arc::clone(&run_handle.control().events);
+        let ledger = match root.as_deref() {
+            Some(root) => match ChangeLedger::open(root, &crate::gateway::agent::checkpoint::default_storage_base(), &run_id) {
+                Ok(ledger) => Some(Arc::new(std::sync::Mutex::new(ledger))),
+                Err(error) => {
+                    tracing::warn!("改动账本不可用: {}", error);
+                    None
+                }
+            },
+            None => None,
+        };
+        let agent_config = AgentLoopConfig {
+            max_turns: request.agent.as_ref().and_then(|a| a.max_turns),
+            permission_timeout_secs: 300,
+            execution_mode,
+            run_id: Some(run_id.clone()),
+            processes: Some(Arc::clone(&run_handle.control().processes)),
+            workspace_lock: root.as_deref().map(|root| workspace_manager.write_lock(root)),
+            ledger,
+            supplements: Some(Arc::clone(&run_handle.control().supplements)),
+            context_budget: Some(context_budget),
+            locale: request.locale,
+        };
+        let supplements = Arc::clone(&run_handle.control().supplements);
+        events.push(encode_client_event(&ClientStreamEvent::RunStarted {
+            run_id: run_id.clone(),
+            conversation_id: run_info.conversation_id.clone(),
+            workspace: root.as_deref().map(crate::tools::display_path),
+            execution_mode,
+            provider: provider_id,
+            model: run_info.model.clone(),
+            started_at,
+        }));
         let mut checkpoint = root.as_deref().map(|r| CheckpointStore::new(r, &run_id));
 
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LoopEmit>();
-        let sink: EventSink = Arc::new(move |emit| { let _ = tx.send(emit); });
+        // 运行产生的事件按序写入事件日志；心跳由订阅者在空闲时补发，不进日志
+        let log_for_sink = Arc::clone(&events);
+        let sink: EventSink = Arc::new(move |emit| {
+            if let LoopEmit::Event(event) = emit {
+                log_for_sink.push(encode_client_event(&event));
+            }
+        });
 
         let mut loop_messages = history_to_agent_messages(&request.messages);
         if let Some(current_time) = request.current_time.as_deref() {
@@ -1059,10 +1401,12 @@ pub fn run_agent_chat_stream(
         let exec = executor;
         let root_for_task = root.clone();
         let mcp_for_loop = Arc::clone(&mcp_manager);
-        let handle = tokio::spawn(async move {
-            // 租约归执行任务持有，SSE 断开后也不能提前允许恢复。
+        let log_for_task = Arc::clone(&events);
+        tokio::spawn(async move {
+            // 租约与运行登记归执行任务持有，SSE 断开后也不能提前允许恢复或复用同一运行编号。
             let _workspace_lease = workspace_lease;
-            run_agent_loop_ext(
+            let run_handle = run_handle;
+            let outcome = run_agent_loop_ext(
                 loop_messages,
                 exec.tools_schema.clone(),
                 agent_config,
@@ -1075,54 +1419,73 @@ pub fn run_agent_chat_stream(
                 &exec.client,
                 Some(&mcp_for_loop),
             )
-            .await
+            .await;
+            // 运行结束后不再接受补充；未送达的补充由界面以“未送达”呈现
+            supplements.close();
+            let (event, status, reason) = terminal_event(outcome);
+            log_for_task.push(encode_client_event(&event));
+            run_handle.complete(status, reason);
+            // 注销运行登记：事件日志随之结束并写入运行记录
+            drop(run_handle);
         });
 
-        // 工具执行与上游长时间思考期间没有事件，定时心跳避免客户端按空闲超时误判断流
-        let mut heartbeat = tokio::time::interval_at(tokio::time::Instant::now() + HEARTBEAT_PERIOD, HEARTBEAT_PERIOD);
-        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        while let Some(emit) = next_emit_or_heartbeat(&mut rx, &mut heartbeat).await {
-            match emit {
-                LoopEmit::Event(ev) => yield Ok(encode_client_event(&ev)),
-                LoopEmit::Ping => yield Ok(encode_ping().to_string()),
-            }
-        }
-
-        match handle.await {
-            Ok(Ok(outcome)) => match outcome {
-                LoopOutcome::Completed { usage } => {
-                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: false, usage: Some(usage), reason: None }));
-                }
-                LoopOutcome::MaxTurnsReached { usage } => {
-                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: true, usage: Some(usage), reason: None }));
-                }
-                LoopOutcome::Truncated { usage } => {
-                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: true, usage: Some(usage), reason: None }));
-                }
-                LoopOutcome::LoopDetected { usage } => {
-                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: false, usage: Some(usage), reason: Some(DONE_REASON_LOOP_DETECTED.to_string()) }));
-                }
-                LoopOutcome::Cancelled => {
-                    yield Ok(encode_client_event(&ClientStreamEvent::Done { truncated: true, usage: None, reason: None }));
-                }
-            },
-            Ok(Err(e)) => {
-                tracing::error!("Agent loop error: {}", e);
-                yield Ok(encode_client_event(&ClientStreamEvent::UpstreamError { message: upstream_error_summary(&e) }));
-            }
-            Err(e) => {
-                tracing::error!("Agent loop task join error: {}", e);
-                yield Ok(encode_client_event(&ClientStreamEvent::Error { code: "PROVIDER_STREAM_ERROR".to_string() }));
-            }
+        // SSE 连接只是事件日志的订阅者：从头读取并实时推送，断开不影响运行
+        for await frame in crate::gateway::agent::run_events::subscribe(events, 0) {
+            yield frame;
         }
     }
 }
 
-/// Drop 时置位取消标志
-struct CancelOnDrop(Arc<AtomicBool>);
-
-impl Drop for CancelOnDrop {
-    fn drop(&mut self) {
-        self.0.store(true, Ordering::SeqCst);
+/// 运行的终止事件与记录中的结局
+fn terminal_event(outcome: Result<LoopOutcome, String>) -> (ClientStreamEvent, RunEndStatus, Option<String>) {
+    match outcome {
+        Ok(LoopOutcome::Completed { usage }) => {
+            (ClientStreamEvent::Done { truncated: false, usage: Some(usage), reason: None, unknown: Vec::new() }, RunEndStatus::Completed, None)
+        }
+        Ok(LoopOutcome::MaxTurnsReached { usage }) => (
+            ClientStreamEvent::Done { truncated: true, usage: Some(usage), reason: None, unknown: Vec::new() },
+            RunEndStatus::Completed,
+            Some("max_turns".to_string()),
+        ),
+        Ok(LoopOutcome::Truncated { usage }) => (
+            ClientStreamEvent::Done { truncated: true, usage: Some(usage), reason: None, unknown: Vec::new() },
+            RunEndStatus::Completed,
+            Some("truncated".to_string()),
+        ),
+        Ok(LoopOutcome::LoopDetected { usage }) => (
+            ClientStreamEvent::Done { truncated: false, usage: Some(usage), reason: Some(DONE_REASON_LOOP_DETECTED.to_string()), unknown: Vec::new() },
+            RunEndStatus::Completed,
+            Some(DONE_REASON_LOOP_DETECTED.to_string()),
+        ),
+        Ok(LoopOutcome::ContextOverflow { usage }) => (
+            ClientStreamEvent::Done { truncated: false, usage: Some(usage), reason: Some(DONE_REASON_CONTEXT_OVERFLOW.to_string()), unknown: Vec::new() },
+            RunEndStatus::Completed,
+            Some(DONE_REASON_CONTEXT_OVERFLOW.to_string()),
+        ),
+        // 运行到这里时命令已终止并确认，MCP 等无法确认的操作列在 unknown 中
+        Ok(LoopOutcome::Cancelled { unknown }) => (
+            ClientStreamEvent::Done { truncated: false, usage: None, reason: Some(DONE_REASON_CANCELLED.to_string()), unknown },
+            RunEndStatus::Cancelled,
+            Some(DONE_REASON_CANCELLED.to_string()),
+        ),
+        Err(error) => {
+            tracing::error!("Agent loop error: {}", error);
+            (ClientStreamEvent::UpstreamError { message: upstream_error_summary(&error) }, RunEndStatus::Failed, Some("upstream_error".to_string()))
+        }
     }
 }
+
+/// done 事件中表示运行已按请求取消并完成收尾
+pub const DONE_REASON_CANCELLED: &str = "cancelled";
+/// done 事件中表示消息超出模型窗口、折叠后仍放不下而停止
+pub const DONE_REASON_CONTEXT_OVERFLOW: &str = "context_overflow";
+/// run_note 事件的种类
+pub const RUN_NOTE_CONTEXT_COMPACTED: &str = "context_compacted";
+pub const RUN_NOTE_CONTEXT_OVERFLOW: &str = "context_overflow";
+pub const RUN_NOTE_VERIFICATION_REMINDER: &str = "verification_reminder";
+
+/// 解析请求携带的运行工作区；缺省表示该运行不绑定项目
+pub fn resolve_run_workspace(workspace: Option<&str>) -> Result<Option<std::path::PathBuf>, String> {
+    workspace.map(crate::tools::resolve_workspace_dir).transpose()
+}
+

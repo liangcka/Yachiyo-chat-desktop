@@ -42,6 +42,7 @@ src/
 
 ### 2.2 Codex 风格代码逐块审阅 (`DiffReviewPanel`)
 - 整合既有 `DiffReviewPanel`，在右侧面板的“代码审阅”Tab 中提供逐行差异对比与按块 Accept / Reject 决策，使 AI 生成的代码改动在入库前完全可控。
+- **2026-10-28 更新**：以 HEAD 为基线的“应用采纳”会回退未处理的块与用户原有改动，已移除。“代码审阅”改为“本次任务”（运行改动账本，保留/撤销）与“工作区 Git”（相对 HEAD 只读）两个视图，见 `architecture/2026-10-28-agent-run-change-review-and-safe-revert.md`。
 
 ### 2.3 状态管理与布局自适应
 - **右侧面板宽度与展开状态**：

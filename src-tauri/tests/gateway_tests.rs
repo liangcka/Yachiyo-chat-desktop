@@ -85,14 +85,29 @@ fn test_client_event_encoding() {
             ..Default::default()
         }),
         reason: None,
+        unknown: Vec::new(),
     };
     let encoded_done = encode_client_event(&done_event);
     assert!(encoded_done.starts_with("event: done\ndata: "));
     assert!(encoded_done.contains("\"truncated\":false"));
     assert!(!encoded_done.contains("reason"));
 
-    let loop_done = ClientStreamEvent::Done { truncated: false, usage: None, reason: Some("loop_detected".to_string()) };
+    let loop_done = ClientStreamEvent::Done { truncated: false, usage: None, reason: Some("loop_detected".to_string()), unknown: Vec::new() };
     assert_eq!(encode_client_event(&loop_done), "event: done\ndata: {\"truncated\":false,\"reason\":\"loop_detected\"}\n\n");
+
+    let cancelled = ClientStreamEvent::Done {
+        truncated: false,
+        usage: None,
+        reason: Some("cancelled".to_string()),
+        unknown: vec![yachiyo_desktop_lib::types::UnknownOperation {
+            call_id: "m1".to_string(),
+            name: "mcp__fs__write".to_string(),
+            detail: "取消后 10 秒内未返回".to_string(),
+        }],
+    };
+    let encoded = encode_client_event(&cancelled);
+    assert!(encoded.contains("\"reason\":\"cancelled\""));
+    assert!(encoded.contains("\"unknown\":[{\"callId\":\"m1\""));
 }
 
 #[test]
@@ -126,29 +141,44 @@ fn test_agent_event_encoding() {
         output: "fn main() {}".to_string(),
         is_error: false,
         duration_ms: 42,
+        command: None,
     };
     let encoded = encode_client_event(&tool_result);
     assert!(encoded.starts_with("event: tool_result\ndata: "));
     assert!(encoded.contains("\"isError\":false"));
     assert!(encoded.contains("\"durationMs\":42"));
+    assert!(!encoded.contains("command"));
+
+    let output = ClientStreamEvent::ToolOutput {
+        id: "call-2".to_string(),
+        stream: yachiyo_desktop_lib::tools::process::OutputStream::Stderr,
+        text: "warning".to_string(),
+    };
+    assert_eq!(
+        encode_client_event(&output),
+        "event: tool_output\ndata: {\"id\":\"call-2\",\"stream\":\"stderr\",\"text\":\"warning\"}\n\n"
+    );
 
     let perm_req = ClientStreamEvent::PermissionRequest {
         request_id: "req-9".to_string(),
         tool_name: "write_file".to_string(),
         arguments: serde_json::json!({"path": "b.rs"}),
+        call_id: "call-9".to_string(),
     };
     let encoded = encode_client_event(&perm_req);
     assert!(encoded.starts_with("event: permission_request\ndata: "));
     assert!(encoded.contains("\"requestId\":\"req-9\""));
+    assert!(encoded.contains("\"callId\":\"call-9\""));
 
     let perm_res = ClientStreamEvent::PermissionResolved {
         request_id: "req-9".to_string(),
-        approved: true,
+        approved: false,
+        reason: yachiyo_desktop_lib::types::PermissionOutcome::Timeout,
     };
     let encoded = encode_client_event(&perm_res);
     assert_eq!(
         encoded,
-        "event: permission_resolved\ndata: {\"requestId\":\"req-9\",\"approved\":true}\n\n"
+        "event: permission_resolved\ndata: {\"requestId\":\"req-9\",\"approved\":false,\"reason\":\"timeout\"}\n\n"
     );
 
     let turn = ClientStreamEvent::Turn { index: 3, usage: None };

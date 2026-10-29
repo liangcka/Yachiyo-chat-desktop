@@ -1,7 +1,9 @@
 pub mod fs;
 pub mod git;
+pub mod process;
 pub mod search;
 pub mod shell;
+pub mod versioned;
 pub mod web;
 
 pub use fs::FsObservationTracker;
@@ -19,7 +21,7 @@ pub enum ToolRisk {
     Write,
 }
 
-pub const PROJECT_REQUIRED_FOR_WRITE: &str = "当前未选择项目，无法写入。请让用户在侧栏选择项目。";
+pub const PROJECT_REQUIRED_FOR_WRITE: &str = "当前任务未绑定项目，无法写入。请让用户在输入框上方为本任务绑定项目。";
 
 pub fn is_unbound_file_read(name: &str, workspace_root: Option<&Path>) -> bool {
     workspace_root.is_none() && matches!(name, "read_file" | "list_directory")
@@ -169,6 +171,23 @@ pub fn preview_tool_output(output: &str) -> String {
     format!("{}…", &output[..cut])
 }
 
+/// 命令结果的界面预览：保留开头的命令与结论，输出取末尾（失败原因通常在最后几行）
+pub fn preview_command_output(output: &str) -> String {
+    const HEAD_LINES: usize = 3;
+    const TAIL_LIMIT: usize = 3 * 1024;
+    if output.len() <= TAIL_LIMIT + 1024 {
+        return output.to_string();
+    }
+    let head_end = output.match_indices('\n').nth(HEAD_LINES - 1).map(|(index, _)| index + 1).unwrap_or(0);
+    let head_end = floor_char_boundary(output, head_end.min(1024));
+    let mut tail_start = output.len() - TAIL_LIMIT;
+    while !output.is_char_boundary(tail_start) {
+        tail_start += 1;
+    }
+    let tail_start = tail_start.max(head_end);
+    format!("{}…（省略 {} 字节）\n{}", &output[..head_end], tail_start - head_end, &output[tail_start..])
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
     pub id: String,
@@ -197,6 +216,9 @@ pub struct WorkspaceManager {
     root_path: RwLock<Option<PathBuf>>,
     active: Arc<Mutex<Vec<LeaseEntry>>>,
     next_lease: AtomicU64,
+    /// 每个工作区一把写入锁：同一项目中并发的运行轮流执行有副作用的工具，
+    /// 改动账本因此能把命令执行窗口内的变化准确归到发起它的运行
+    write_locks: Mutex<std::collections::HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 pub struct WorkspaceLease {
@@ -225,7 +247,14 @@ impl WorkspaceManager {
             root_path: RwLock::new(root),
             active: Arc::new(Mutex::new(Vec::new())),
             next_lease: AtomicU64::new(1),
+            write_locks: Mutex::new(std::collections::HashMap::new()),
         }
+    }
+
+    pub fn write_lock(&self, workspace: &Path) -> Arc<tokio::sync::Mutex<()>> {
+        let key = workspace.canonicalize().unwrap_or_else(|_| workspace.to_path_buf());
+        let mut locks = self.write_locks.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        Arc::clone(locks.entry(key).or_default())
     }
 
     /// 检查点恢复与界面写入独占工作区，避免快照和文件变化交错。
@@ -257,18 +286,36 @@ impl WorkspaceManager {
         self.root_path.read().unwrap().clone()
     }
 
-    pub fn set_workspace_root(&self, path: PathBuf) -> Result<(), String> {
-        if !path.exists() || !path.is_dir() {
-            return Err("Workspace path does not exist or is not a directory".to_string());
-        }
-        let canonical = path.canonicalize().map_err(|e| e.to_string())?;
-        *self.root_path.write().unwrap() = Some(canonical);
-        Ok(())
+    /// 界面当前浏览的项目；工具执行一律使用调用方显式给出的工作区，不读取这里的值
+    pub fn set_workspace_root(&self, path: PathBuf) -> Result<PathBuf, String> {
+        let canonical = resolve_workspace_dir(&path.to_string_lossy())?;
+        *self.root_path.write().unwrap() = Some(canonical.clone());
+        Ok(canonical)
     }
 
     pub fn clear_workspace_root(&self) {
         *self.root_path.write().unwrap() = None;
     }
+}
+
+/// 把调用方给出的工作区解析为规范目录：任务与界面操作都显式携带工作区，不存在隐式的全局目标
+pub fn resolve_workspace_dir(path: &str) -> Result<PathBuf, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("工作区路径为空".to_string());
+    }
+    let canonical = Path::new(trimmed)
+        .canonicalize()
+        .map_err(|error| format!("工作区不可用: {error}"))?;
+    if !canonical.is_dir() {
+        return Err("工作区不是目录".to_string());
+    }
+    Ok(canonical)
+}
+
+/// 返回给界面的路径：Windows 规范化路径带 `\\?\` 前缀，去掉后与用户看到的路径一致
+pub fn display_path(path: &Path) -> String {
+    dunce::simplified(path).to_string_lossy().to_string()
 }
 
 pub fn get_fallback_cwd() -> PathBuf {
@@ -404,7 +451,7 @@ pub fn get_agent_tools_schema() -> Vec<serde_json::Value> {
                     "type": "object",
                     "properties": {
                         "command": { "type": "string", "description": "Command string to execute" },
-                        "timeout_secs": { "type": "integer", "description": "Timeout in seconds (default 30)" }
+                        "timeout_secs": { "type": "integer", "minimum": 1, "maximum": 1800, "description": "超时秒数，默认 120，最大 1800。超时会终止整棵进程树" }
                     },
                     "required": ["command"]
                 }
@@ -610,7 +657,12 @@ pub async fn execute_tool_with_context(
                     &fallback_buf
                 }
             };
-            shell::run_command(command, root, timeout_secs).await
+            let control = process::CommandControl { log_root: workspace_root, ..Default::default() };
+            let timeout = process::clamp_timeout(timeout_secs);
+            let outcome = process::execute_command(command, root, timeout, control).await;
+            let text = process::format_for_model(&outcome, Some(timeout));
+            // 非零退出、超时与取消都是失败：调用方据此标记工具结果，而不是只在文字里注明退出码
+            if outcome.succeeded() { Ok(text) } else { Err(text) }
         }
         "git_status" => {
             let root = workspace_root.ok_or("当前未打开项目工作区，无法获取 Git 状态。若彩叶需要查看仓库差异，请提醒彩叶在界面上方选择或打开工作区文件夹。")?;
@@ -671,6 +723,17 @@ pub async fn execute_tool_with_context(
         }
         unknown => Err(format!("Unknown tool: '{}'", unknown)),
     }
+}
+
+/// 界面读取必须拿到完整原始内容：模型侧对超过 2000 行的文件返回带行号的分页文本，
+/// 编辑器与审阅器若以此为底稿保存，会把行号与截断结果写回磁盘
+pub fn ui_tool_arguments(name: &str, mut arguments: serde_json::Value) -> serde_json::Value {
+    if name == "read_file" {
+        if let Some(object) = arguments.as_object_mut() {
+            object.insert("raw".to_string(), serde_json::Value::Bool(true));
+        }
+    }
+    arguments
 }
 
 pub async fn execute_tool(

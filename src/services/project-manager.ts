@@ -18,9 +18,25 @@ export function getProjectDisplayName(
   return parts[parts.length - 1] || projectPath;
 }
 
+/** 比较两个项目路径是否指向同一项目：统一分隔符与尾部斜杠，按不区分大小写比较（与最近项目去重一致） */
+export function sameWorkspace(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  const normalize = (path: string) => path.trim().replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  return normalize(a) === normalize(b);
+}
+
+export interface ProjectSwitchError {
+  path: string;
+  message: string;
+  /** 递增序号，供界面区分两次相同路径的失败 */
+  sequence: number;
+}
+
 export interface ProjectState {
   activeProject: string | null;
   recentProjects: string[];
+  /** 最近一次原生切换失败；成功切换后清空 */
+  switchError: ProjectSwitchError | null;
 }
 
 type ProjectChangeListener = (state: ProjectState) => void;
@@ -28,9 +44,12 @@ type ProjectChangeListener = (state: ProjectState) => void;
 class ProjectManager {
   private activeProject: string | null = null;
   private recentProjects: string[] = [];
+  private switchError: ProjectSwitchError | null = null;
   private listeners = new Set<ProjectChangeListener>();
   private initialized = false;
-  private snapshot: ProjectState = { activeProject: null, recentProjects: [] };
+  /** 每次切换递增；异步返回时只有最新一次切换可以落地，较早的结果直接丢弃 */
+  private switchSequence = 0;
+  private snapshot: ProjectState = { activeProject: null, recentProjects: [], switchError: null };
 
   constructor() {
     this.loadFromStorage();
@@ -77,6 +96,7 @@ class ProjectManager {
     this.snapshot = {
       activeProject: this.activeProject,
       recentProjects: [...this.recentProjects],
+      switchError: this.switchError,
     };
     this.saveToStorage();
     if (shouldNotify) {
@@ -95,33 +115,26 @@ class ProjectManager {
     });
   }
 
-  /** 初始化与后端工作区根目录对齐 */
+  /** 启动时按上次的项目重新做一次原生切换；用户或会话已经发起过切换时以那次为准 */
   public async init(): Promise<ProjectState> {
     if (!this.initialized) {
       this.initialized = true;
-      try {
-        if (this.activeProject && this.activeProject.trim().length > 0) {
-          const success = await setDesktopWorkspaceRoot(this.activeProject);
-          if (!success) {
-            this.activeProject = null;
-            await setDesktopWorkspaceRoot("");
-          }
-        } else {
-          await setDesktopWorkspaceRoot("");
-          this.activeProject = null;
-        }
-      } catch {
-        // 容错
+      if (this.switchSequence === 0) {
+        const restored = this.activeProject;
+        const switched = await this.switchProject(restored);
+        // 上次的目录已不可用：回到无项目状态，不保留一个原生层不认可的项目
+        if (!switched && restored !== null && this.isLatestSwitch(1)) await this.switchProject(null);
       }
-      this.updateSnapshot();
     }
     return this.getState();
   }
 
   /** 清除所有工作区状态（供重置数据/清空全部本地数据时调用） */
   public async clear(): Promise<void> {
+    this.switchSequence += 1;
     this.activeProject = null;
     this.recentProjects = [];
+    this.switchError = null;
     if (typeof window !== "undefined" && window.localStorage) {
       try {
         window.localStorage.removeItem(STORAGE_ACTIVE_PROJECT);
@@ -158,33 +171,36 @@ class ProjectManager {
     this.recentProjects = [clean, ...filtered].slice(0, 12);
   }
 
-  /** 切换当前项目（设为 null 表示无项目） */
+  private isLatestSwitch(sequence: number): boolean {
+    return this.switchSequence === sequence;
+  }
+
+  /**
+   * 切换当前项目（null 表示无项目）。原生层校验成功后才更新前端状态，项目身份取原生层返回的规范路径；
+   * 快速连续切换时只有最后一次生效。返回 false 表示切换失败或已被更新的切换取代。
+   */
   public async switchProject(projectPath: string | null): Promise<boolean> {
-    if (projectPath === null) {
-      this.activeProject = null;
+    const sequence = ++this.switchSequence;
+    const requested = projectPath?.trim() ?? "";
+    const result = await setDesktopWorkspaceRoot(requested);
+    if (!this.isLatestSwitch(sequence)) return false;
+    if (!result.ok) {
+      this.switchError = { path: requested, message: result.error, sequence };
       this.updateSnapshot();
-      await setDesktopWorkspaceRoot("");
-      return true;
+      return false;
     }
-
-    const clean = projectPath.trim();
-    if (!clean) {
-      return this.switchProject(null);
-    }
-
-    const success = await setDesktopWorkspaceRoot(clean);
-    this.activeProject = clean;
-    this.addRecentProject(clean);
+    this.activeProject = result.path;
+    this.switchError = null;
+    if (result.path !== null) this.addRecentProject(result.path);
     this.updateSnapshot();
-    return success;
+    return true;
   }
 
   /** 弹出系统原生文件夹选择器 (Open workspace) 并切换到所选目录 */
   public async pickAndOpenProject(title = "Open workspace"): Promise<string | undefined> {
     const picked = await pickDesktopFolder(title);
-    if (picked && picked.trim().length > 0) {
-      await this.switchProject(picked);
-      return picked;
+    if (picked && picked.trim().length > 0 && (await this.switchProject(picked))) {
+      return this.activeProject ?? undefined;
     }
     return undefined;
   }
@@ -204,8 +220,7 @@ class ProjectManager {
   /** 快速开始 */
   public async quickStart(defaultFolder?: string): Promise<string | undefined> {
     if (defaultFolder) {
-      await this.switchProject(defaultFolder);
-      return defaultFolder;
+      return (await this.switchProject(defaultFolder)) ? this.activeProject ?? undefined : undefined;
     }
     // 若未指定目录，尝试调起原生选择器
     return await this.pickAndOpenProject("Open workspace");

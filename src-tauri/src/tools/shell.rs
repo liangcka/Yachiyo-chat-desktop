@@ -1,12 +1,5 @@
-use crate::tools::floor_char_boundary;
+use crate::tools::process;
 use std::path::Path;
-use std::process::Stdio;
-use std::time::Duration;
-use tokio::process::Command;
-use tokio::time::timeout;
-
-const MAX_OUTPUT_BYTES: usize = 32 * 1024;
-const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
 /// POSIX 与 PowerShell/CMD 两侧的删除动词（`ri` 为 Remove-Item 别名，`rd`/`rmdir` 为目录删除）
 const DELETE_VERBS: [&str; 7] = ["rm", "del", "erase", "rd", "rmdir", "remove-item", "ri"];
@@ -228,81 +221,16 @@ fn looks_like_base64(token: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '='))
 }
 
+/// 执行命令并返回给模型的文本记录；非零退出、超时与拦截都返回 Err，调用方不会把失败当成成功
 pub async fn run_command(
     command_str: &str,
     cwd: &Path,
     timeout_secs: Option<u64>,
 ) -> Result<String, String> {
-    if is_dangerous_command(command_str) {
-        return Err(format!(
-            "Command '{}' contains potentially destructive operations and was blocked by safety policy",
-            command_str
-        ));
-    }
-
-    let timeout_duration = Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS));
-
-    #[cfg(target_os = "windows")]
-    let mut cmd = {
-        let mut c = Command::new("powershell");
-        // 同时设置管道输入和控制台输出编码，让原生命令与 PowerShell 共用 UTF-8。
-        let script = format!(
-            "[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new($false);\n{}",
-            command_str
-        );
-        c.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
-        c
-    };
-
-    #[cfg(not(target_os = "windows"))]
-    let mut cmd = {
-        let mut c = Command::new("sh");
-        c.args(["-c", command_str]);
-        c
-    };
-
-    cmd.current_dir(cwd);
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-    // 超时分支会丢弃 wait future，若不留杀手机制则子进程会成为挂活进程继续占资源
-    cmd.kill_on_drop(true);
-
-    let child = cmd.spawn().map_err(|e| format!("Failed to spawn command: {}", e))?;
-
-    let output_future = child.wait_with_output();
-    let output = match timeout(timeout_duration, output_future).await {
-        Ok(res) => res.map_err(|e| format!("Command execution failed: {}", e))?,
-        Err(_) => return Err(format!("Command execution timed out after {}s", timeout_duration.as_secs())),
-    };
-
-    let mut stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    if stdout.len() > MAX_OUTPUT_BYTES {
-        stdout.truncate(floor_char_boundary(&stdout, MAX_OUTPUT_BYTES));
-        stdout.push_str("\n... [Output truncated at 32KB]");
-    }
-
-    let mut result = String::new();
-    if !stdout.is_empty() {
-        result.push_str(&stdout);
-    }
-    if !stderr.is_empty() {
-        if !result.is_empty() {
-            result.push('\n');
-        }
-        result.push_str("STDERR:\n");
-        result.push_str(&stderr);
-    }
-
-    if !output.status.success() {
-        let code = output.status.code().unwrap_or(-1);
-        result.push_str(&format!("\n[Process exited with code {}]", code));
-    }
-
-    detect_and_append_host_environment_hints(command_str, &mut result);
-
-    Ok(result)
+    let timeout = process::clamp_timeout(timeout_secs);
+    let outcome = process::execute_command(command_str, cwd, timeout, process::CommandControl::default()).await;
+    let text = process::format_for_model(&outcome, Some(timeout));
+    if outcome.succeeded() { Ok(text) } else { Err(text) }
 }
 
 /// 针对宿主环境探查中的常见系统陷阱（如 Windows WMI 32 位显存截断）追加纠偏提示，

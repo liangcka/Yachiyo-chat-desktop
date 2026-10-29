@@ -64,6 +64,7 @@ function repositoryWith(
     deleteMessagesFrom: vi.fn(async () => undefined),
     saveBranchState: vi.fn(async (next: Conversation, messages: ChatMessage[]) => { storedConversation = next; storedMessages = [...messages]; }),
     renameConversation: vi.fn(async () => undefined),
+    setConversationWorkspace: vi.fn(async (_id: string, workspace: string | null) => { storedConversation = { ...storedConversation, workspace }; }),
     ...overrides,
   };
 }
