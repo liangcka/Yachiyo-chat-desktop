@@ -104,15 +104,40 @@ pub fn resolve_unbound_read_path(path_str: &str) -> Result<PathBuf, String> {
         return Err("当前未打开项目工作区，请使用用户提供的绝对路径读取文件或目录。".to_string());
     }
     let canonical = path.canonicalize().map_err(|error| format!("无法读取路径 '{}': {}", path_str, error))?;
-    let contains_checkpoint = |target: &Path| target.ancestors().any(|ancestor| {
-        ancestor.file_name().is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("checkpoints"))
-            && ancestor.parent().and_then(Path::file_name)
-                .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case(".yachiyo"))
-    });
     if contains_checkpoint(path) || contains_checkpoint(&canonical)
         || crate::gateway::agent::checkpoint::is_private_storage_path(&canonical)
     {
         return Err("Access denied: 检查点存储仅允许通过恢复接口访问".to_string());
+    }
+    Ok(canonical)
+}
+
+fn contains_checkpoint(target: &Path) -> bool {
+    target.ancestors().any(|ancestor| {
+        ancestor.file_name().is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("checkpoints"))
+            && ancestor.parent().and_then(Path::file_name)
+                .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case(".yachiyo"))
+    })
+}
+
+/// 未绑定项目时写入临时项目外的文件：只接受显式绝对路径，以最近的已存在上级目录为写入边界；
+/// 应用自身的数据目录（密钥、审批范围、检查点）不开放写入。
+pub fn unbound_write_root(path_str: &str) -> Result<PathBuf, String> {
+    let path = Path::new(path_str);
+    if !path.is_absolute() || path.components().any(|part| matches!(part, std::path::Component::ParentDir)) {
+        return Err("写入临时项目以外的位置时，请使用不含 .. 的绝对路径。".to_string());
+    }
+    let mut ancestor = path.parent().ok_or("无效文件路径")?;
+    while !ancestor.is_dir() {
+        ancestor = ancestor.parent().ok_or("无效文件路径")?;
+    }
+    let canonical = ancestor.canonicalize().map_err(|error| format!("无法访问路径 '{}': {}", path_str, error))?;
+    let app_storage = crate::crypto::keys::dirs_storage_path();
+    let app_storage = app_storage.canonicalize().unwrap_or(app_storage);
+    if contains_checkpoint(path) || canonical.starts_with(&app_storage)
+        || crate::gateway::agent::checkpoint::is_private_storage_path(&canonical)
+    {
+        return Err("Access denied: 应用数据目录不允许通过文件工具写入".to_string());
     }
     Ok(canonical)
 }

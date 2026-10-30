@@ -42,6 +42,8 @@ encoding_rs = "0.8"
 regex = "1"
 # 规范化路径返回给界面时去掉 Windows 的 \\?\ 前缀
 dunce = "1"
+# 未绑定项目时以系统桌面目录作为写入根，Windows 下可识别 OneDrive 等重定向
+dirs = "6"
 tauri-plugin-updater = "~2.12"
 tauri-plugin-process = "~2.3"
 

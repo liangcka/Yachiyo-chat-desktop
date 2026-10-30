@@ -911,9 +911,9 @@ async fn test_loop_without_workspace_plain_completion() {
 
 #[tokio::test]
 async fn test_loop_without_workspace_tool_interception() {
-    // 无工作区时，若模型尝试调用 read_file，工具应返回安全错误提示，而不是导致系统崩溃
+    // 无工作区时相对路径落在临时项目中，读取不存在的文件应安全返回工具错误，而不是导致系统崩溃
     let executor = ScriptedExecutor::new(vec![
-        read_call("call-no-ws", "package.json"),
+        read_call("call-no-ws", "yachiyo-missing/package.json"),
         TurnOutcome {
             reasoning: String::new(), native: Vec::new(),
             text: "彩叶，请先在上方打开工作区文件夹哦～".to_string(),
@@ -946,11 +946,11 @@ async fn test_loop_without_workspace_tool_interception() {
     let evs = events.lock().unwrap();
     let has_tool_err = evs.iter().any(|ev| match ev {
         ClientStreamEvent::ToolResult { is_error, output, .. } => {
-            *is_error && output.contains("当前未打开项目工作区")
+            *is_error && output.contains("package.json")
         }
         _ => false,
     });
-    assert!(has_tool_err, "无工作区时调用文件工具应安全返回未打开项目提示");
+    assert!(has_tool_err, "无工作区时读取临时项目中不存在的文件应安全返回错误");
 }
 
 #[tokio::test]

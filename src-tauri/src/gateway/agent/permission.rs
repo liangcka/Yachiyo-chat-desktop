@@ -175,9 +175,7 @@ pub fn approval_key(
     args: &serde_json::Value,
     workspace: Option<&Path>,
 ) -> Result<String, String> {
-    let root = workspace
-        .map(Path::to_path_buf)
-        .unwrap_or_else(crate::tools::get_fallback_cwd)
+    let root = crate::tools::working_root(workspace)
         .canonicalize()
         .map_err(|e| e.to_string())?;
     let category = match name {
@@ -193,7 +191,9 @@ pub fn approval_key(
                 .get("path")
                 .and_then(|v| v.as_str())
                 .ok_or("缺少文件路径")?;
-            let target = crate::tools::fs::resolve_tool_path(path, &root)?;
+            // 无项目写入的根随目标而定，批准范围必须与执行时解析出的目标一致
+            let write_root = crate::tools::file_write_root(path, workspace)?;
+            let target = crate::tools::fs::resolve_tool_path(path, &write_root)?;
             format!("file:{}", target.to_string_lossy())
         }
         "read_file" if workspace.is_none() => {

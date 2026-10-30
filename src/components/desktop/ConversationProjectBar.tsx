@@ -43,7 +43,7 @@ export function ConversationProjectBar({ locale, binding, activeProject, disable
       <span className="conversation-project-bar__hint">
         {binding.kind === "legacy"
           ? ja ? "以前の会話です。プロジェクトのファイルを扱うには紐付けてください。" : "这是较早的对话，没有项目记录；需要读写项目文件时请先绑定。"
-          : ja ? "このタスクはプロジェクトのファイルを読み書きしません。" : "本任务不会读写项目文件。"}
+          : ja ? "このタスクは一時プロジェクトで作業し、デスクトップなどのファイルも確認の上で読み書きできます。" : "本任务在临时项目中工作，也可以在确认后读写桌面等位置的文件。"}
       </span>
       {activeProject !== null && activeName !== null ? (
         <button

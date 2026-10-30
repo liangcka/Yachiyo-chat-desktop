@@ -11,8 +11,6 @@ const GLOB_RESULT_LIMIT: usize = 200;
 const GREP_DEFAULT_HEAD_LIMIT: usize = 250;
 const GREP_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 
-pub const PROJECT_REQUIRED_FOR_SEARCH: &str = "当前任务未绑定项目，无法检索工作区。请让用户在输入框上方为本任务绑定项目，或用 read_file / list_directory 读取用户给出的绝对路径。";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GrepOutputMode {
     Content,

@@ -4,7 +4,7 @@ use yachiyo_desktop_lib::gateway::agent::permission::approval_key;
 use yachiyo_desktop_lib::gateway::prompt::build_agent_system_prompt;
 use yachiyo_desktop_lib::tools::{
     execute_tool_with_context, get_agent_tools_schema, tool_risk, FsObservationTracker,
-    ToolAuthorization, ToolRisk, PROJECT_REQUIRED_FOR_WRITE,
+    ToolAuthorization, ToolRisk,
 };
 use yachiyo_desktop_lib::types::{AgentExecutionMode, ChatLocale};
 
@@ -80,8 +80,8 @@ async fn edit_file_uses_write_permissions_and_scope() {
     for auth in [ToolAuthorization::ModelInitiated { approved: false }, ToolAuthorization::Agent { mode: AgentExecutionMode::Readonly, approved: true }] {
         assert!(execute_tool_with_context("edit_file", &args, Some(directory.path()), &client, None, auth).await.is_err());
     }
-    let error = execute_tool_with_context("edit_file", &args, None, &client, None, ToolAuthorization::Agent { mode: AgentExecutionMode::FullAuto, approved: true }).await.unwrap_err();
-    assert_eq!(error, PROJECT_REQUIRED_FOR_WRITE);
+    // 无项目编辑以桌面为根，且必须先读后改：未观测的目标直接拒绝
+    assert!(execute_tool_with_context("edit_file", &args, None, &client, None, ToolAuthorization::Agent { mode: AgentExecutionMode::FullAuto, approved: true }).await.is_err());
     assert_eq!(fs::read_to_string(directory.path().join("test.txt")).unwrap(), "旧值");
     let schemas = get_agent_tools_schema();
     let schema = schemas.iter().find(|s| s["function"]["name"] == "edit_file").unwrap();

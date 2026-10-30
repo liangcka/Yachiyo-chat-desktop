@@ -25,8 +25,7 @@ use crate::gateway::providers::registry::get_provider_config;
 use crate::gateway::stream::encode_client_event;
 use crate::tools::{
     authorize_tool, execute_tool_with_context, preview_command_output, preview_tool_output, process_tool_output, tool_risk,
-    is_unbound_file_read, FsObservationTracker, ToolAuthorization, ToolRisk, WorkspaceManager,
-    PROJECT_REQUIRED_FOR_WRITE,
+    file_write_root, is_unbound_file_read, working_root, FsObservationTracker, ToolAuthorization, ToolRisk, WorkspaceManager,
 };
 use crate::types::{
     ChatLocale,
@@ -440,7 +439,7 @@ pub async fn run_agent_loop_ext(
         while index < calls.len() {
             if cancelled.load(Ordering::Relaxed) { return cancelled_outcome(); }
             // 连续的免审批只读调用互不依赖，整段并发执行，结果仍按调用顺序回填
-            let concurrent = calls[index..].iter().take_while(|call| runs_concurrently(&call.name, workspace_root)).count();
+            let concurrent = calls[index..].iter().take_while(|call| runs_concurrently(call, workspace_root)).count();
             if concurrent > 1 {
                 let batch = &calls[index..index + concurrent];
                 index += concurrent;
@@ -470,21 +469,23 @@ pub async fn run_agent_loop_ext(
                 arguments: call.arguments.clone(),
             }));
 
-            // 无效路径不进入批准等待；执行边界仍会重新校验实际读取的路径。
-            let read_path_error = if is_unbound_file_read(&call.name, workspace_root) {
-                crate::tools::fs::resolve_unbound_read_path(
-                    call.arguments.get("path").and_then(|value| value.as_str()).unwrap_or(".")
-                ).err()
+            // 无项目的无效路径不进入批准等待；执行边界仍会重新校验实际路径。
+            let path_arg = call.arguments.get("path").and_then(|value| value.as_str());
+            let external_read = is_unbound_file_read(&call.name, &call.arguments, workspace_root);
+            let path_error = if external_read {
+                crate::tools::fs::resolve_unbound_read_path(path_arg.unwrap_or(".")).err()
+            } else if workspace_root.is_none() && matches!(call.name.as_str(), "write_file" | "edit_file") {
+                let path = path_arg.unwrap_or("");
+                file_write_root(path, None).and_then(|root| crate::tools::fs::resolve_tool_path(path, &root)).err()
             } else {
                 None
             };
             let mut approval_timed_out = false;
             let approved = match tool_risk(&call.name) {
-                _ if read_path_error.is_some() => false,
-                Some(ToolRisk::Read) if !is_unbound_file_read(&call.name, workspace_root) => true,
+                _ if path_error.is_some() => false,
+                Some(ToolRisk::Read) if !external_read => true,
                 None => true,
                 Some(ToolRisk::Write) if config.execution_mode == AgentExecutionMode::Readonly => false,
-                Some(ToolRisk::Write) if workspace_root.is_none() && matches!(call.name.as_str(), "write_file" | "edit_file") => false,
                 _ if config.execution_mode == AgentExecutionMode::FullAuto => true,
                 _ => {
                     let key = approval_key(&call.name, &call.arguments, workspace_root)?;
@@ -642,21 +643,14 @@ pub async fn run_agent_loop_ext(
                         None => ("Missing 'command' argument".to_string(), true),
                         Some(command) => {
                             let timeout = clamp_timeout(call.arguments.get("timeout_secs").and_then(|v| v.as_u64()));
-                            let fallback_cwd;
-                            let cwd = match workspace_root {
-                                Some(root) => root,
-                                None => {
-                                    fallback_cwd = crate::tools::get_fallback_cwd();
-                                    fallback_cwd.as_path()
-                                }
-                            };
+                            let cwd = working_root(workspace_root);
                             let call_id = call.id.clone();
                             let output_sink = Arc::clone(sink);
                             let observer = move |stream: OutputStream, text: &str| {
                                 output_sink(LoopEmit::Event(ClientStreamEvent::ToolOutput { id: call_id.clone(), stream, text: text.to_string() }));
                             };
                             // 取消在命令内部处理：终止整棵进程树并确认退出后才返回，不丢弃仍在运行的进程
-                            let outcome = execute_command(command, cwd, timeout, CommandControl {
+                            let outcome = execute_command(command, &cwd, timeout, CommandControl {
                                 cancelled: Some(cancelled),
                                 processes: config.processes.as_deref(),
                                 call_id: Some(&call.id),
@@ -688,10 +682,8 @@ pub async fn run_agent_loop_ext(
                     }
                 }
             } else {
-                (if let Some(error) = read_path_error.as_deref() {
+                (if let Some(error) = path_error.as_deref() {
                     error.to_string()
-                } else if matches!(call.name.as_str(), "write_file" | "edit_file") && workspace_root.is_none() {
-                    PROJECT_REQUIRED_FOR_WRITE.to_string()
                 } else if config.execution_mode == AgentExecutionMode::Readonly && tool_risk(&call.name) == Some(ToolRisk::Write) {
                     "当前为只读模式，该操作不会执行。请用户显式切换执行模式后再操作。".to_string()
                 } else if approval_timed_out {
@@ -756,8 +748,9 @@ fn deliver_supplements(messages: &mut Vec<AgentMessage>, supplements: Vec<Supple
 
 /// 同一轮里可以并发执行的工具：无副作用、无需审批，也不依赖本轮其他调用的结果。
 /// 子 Agent 会占用检查点并可能发起审批，仍逐个执行
-fn runs_concurrently(name: &str, workspace_root: Option<&Path>) -> bool {
-    tool_risk(name) == Some(ToolRisk::Read) && name != SUBAGENT_TOOL && !is_unbound_file_read(name, workspace_root)
+fn runs_concurrently(call: &ToolInvocation, workspace_root: Option<&Path>) -> bool {
+    tool_risk(&call.name) == Some(ToolRisk::Read) && call.name != SUBAGENT_TOOL
+        && !is_unbound_file_read(&call.name, &call.arguments, workspace_root)
 }
 
 /// 并发执行一段只读工具调用，按调用顺序返回（输出，是否出错，耗时毫秒）。

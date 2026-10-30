@@ -21,10 +21,49 @@ pub enum ToolRisk {
     Write,
 }
 
-pub const PROJECT_REQUIRED_FOR_WRITE: &str = "当前任务未绑定项目，无法写入。请让用户在输入框上方为本任务绑定项目。";
+pub const PROJECT_REQUIRED_FOR_WRITE: &str = "当前任务未绑定项目，且无法创建临时项目目录，无法写入。请让用户在输入框上方为本任务绑定项目。";
 
-pub fn is_unbound_file_read(name: &str, workspace_root: Option<&Path>) -> bool {
-    workspace_root.is_none() && matches!(name, "read_file" | "list_directory")
+/// 未绑定项目的任务共用的临时项目目录：相对路径、检索与命令都落在这里，项目外的文件用绝对路径操作。
+pub fn scratch_root() -> Result<PathBuf, String> {
+    let dir = dirs::home_dir().ok_or(PROJECT_REQUIRED_FOR_WRITE)?.join(".yachiyo").join("scratch");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建临时项目目录失败: {e}"))?;
+    dir.canonicalize().map_err(|e| e.to_string())
+}
+
+/// 检索与命令的根目录：绑定项目时为项目根，否则为临时项目；临时项目不可用时退回用户主目录
+pub fn working_root(workspace_root: Option<&Path>) -> PathBuf {
+    match workspace_root {
+        Some(root) => root.to_path_buf(),
+        None => scratch_root().unwrap_or_else(|_| get_fallback_cwd()),
+    }
+}
+
+/// 相对路径一律归临时项目，越界由工作区边界拒绝
+fn is_scratch_path(path_str: &str, scratch: &Path) -> bool {
+    let path = Path::new(path_str);
+    path.is_relative() || fs::is_path_inside_workspace(path, scratch)
+}
+
+/// 无项目时读取临时项目之外的文件：需要路径级授权，且不与其他读取并发
+pub fn is_unbound_file_read(name: &str, args: &serde_json::Value, workspace_root: Option<&Path>) -> bool {
+    workspace_root.is_none()
+        && matches!(name, "read_file" | "list_directory")
+        && !scratch_root().is_ok_and(|scratch| {
+            is_scratch_path(args.get("path").and_then(|v| v.as_str()).unwrap_or("."), &scratch)
+        })
+}
+
+/// 文件写入根：绑定项目时为项目根；无项目时临时项目内的路径以临时项目为根，
+/// 项目外的绝对路径以最近的已存在上级目录为根，越界、父级跳转与私有存储仍由边界校验拒绝
+pub fn file_write_root(path_str: &str, workspace_root: Option<&Path>) -> Result<PathBuf, String> {
+    if let Some(root) = workspace_root {
+        return Ok(root.to_path_buf());
+    }
+    let scratch = scratch_root()?;
+    if is_scratch_path(path_str, &scratch) {
+        return Ok(scratch);
+    }
+    fs::unbound_write_root(path_str)
 }
 
 /// 工具执行的授权来源：把「谁授权了这次执行」写成类型上显式的契约，
@@ -560,11 +599,9 @@ pub async fn execute_tool_with_context(
 ) -> Result<String, String> {
     // 执行边界自带授权判定：写类工具须有人类发起凭据或模型侧的获批标记，
     // 调用方漏判也不会落地破坏性动作
-    if matches!(name, "write_file" | "edit_file") && workspace_root.is_none() {
-        return Err(PROJECT_REQUIRED_FOR_WRITE.to_string());
-    }
     authorize_tool(name, auth)?;
-    if is_unbound_file_read(name, workspace_root) {
+    let external_read = is_unbound_file_read(name, args, workspace_root);
+    if external_read {
         let approved = matches!(auth, ToolAuthorization::HumanInitiated
             | ToolAuthorization::ModelInitiated { approved: true }
             | ToolAuthorization::Agent { mode: AgentExecutionMode::FullAuto, .. }
@@ -579,6 +616,8 @@ pub async fn execute_tool_with_context(
             let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path' argument")?;
             let raw_content = if let Some(root) = workspace_root {
                 fs::read_file_guarded(path, root, fs_tracker)?
+            } else if !external_read {
+                fs::read_file_guarded(path, &scratch_root()?, fs_tracker)?
             } else {
                 let target = fs::resolve_unbound_read_path(path)?;
                 let root = target.parent().ok_or("无效文件路径")?;
@@ -598,14 +637,14 @@ pub async fn execute_tool_with_context(
             }
         }
         "write_file" => {
-            let root = workspace_root.ok_or(PROJECT_REQUIRED_FOR_WRITE)?;
             let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing 'path' argument")?;
+            let root = file_write_root(path, workspace_root)?;
             let content = args.get("content").and_then(|v| v.as_str()).ok_or("Missing 'content' argument")?;
-            fs::write_file_guarded(path, content, root, fs_tracker)
+            fs::write_file_guarded(path, content, &root, fs_tracker)
         }
         "edit_file" => {
-            let root = workspace_root.ok_or(PROJECT_REQUIRED_FOR_WRITE)?;
             let path = args.get("path").and_then(|v| v.as_str()).ok_or("缺少 path 参数")?;
+            let root = file_write_root(path, workspace_root)?;
             let old = args.get("old_string").and_then(|v| v.as_str()).ok_or("缺少 old_string 参数")?;
             let new = args.get("new_string").and_then(|v| v.as_str()).ok_or("缺少 new_string 参数")?;
             let replace_all = match args.get("replace_all") {
@@ -613,12 +652,14 @@ pub async fn execute_tool_with_context(
                 Some(value) => value.as_bool().ok_or("replace_all 必须为布尔值")?,
             };
             let tracker = fs_tracker.ok_or("FS_NOT_OBSERVED: 请先用 read_file 读取目标文件后重试。")?;
-            fs::edit_file_guarded(path, old, new, replace_all, root, tracker)
+            fs::edit_file_guarded(path, old, new, replace_all, &root, tracker)
         }
         "list_directory" => {
             let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
             let entries = if let Some(root) = workspace_root {
                 fs::list_directory(path, root)?
+            } else if !external_read {
+                fs::list_directory(path, &scratch_root()?)?
             } else {
                 let target = fs::resolve_unbound_read_path(path)?;
                 fs::list_directory(".", &target)?
@@ -626,13 +667,13 @@ pub async fn execute_tool_with_context(
             serde_json::to_string_pretty(&entries).map_err(|e| e.to_string())
         }
         "glob" => {
-            let root = workspace_root.ok_or(search::PROJECT_REQUIRED_FOR_SEARCH)?;
+            let root = working_root(workspace_root);
             let pattern = args.get("pattern").and_then(|v| v.as_str()).ok_or("缺少 pattern 参数")?;
             let path = args.get("path").and_then(|v| v.as_str());
-            search::glob_files(pattern, path, root)
+            search::glob_files(pattern, path, &root)
         }
         "grep" => {
-            let root = workspace_root.ok_or(search::PROJECT_REQUIRED_FOR_SEARCH)?;
+            let root = working_root(workspace_root);
             let pattern = args.get("pattern").and_then(|v| v.as_str()).ok_or("缺少 pattern 参数")?;
             let usize_arg = |key: &str| args.get(key).and_then(|v| v.as_u64()).map(|n| n as usize);
             let options = search::GrepOptions {
@@ -644,22 +685,15 @@ pub async fn execute_tool_with_context(
                 context: usize_arg("context").unwrap_or(0),
                 head_limit: usize_arg("head_limit"),
             };
-            search::grep_files(&options, root)
+            search::grep_files(&options, &root)
         }
         "run_command" => {
             let command = args.get("command").and_then(|v| v.as_str()).ok_or("Missing 'command' argument")?;
             let timeout_secs = args.get("timeout_secs").and_then(|v| v.as_u64());
-            let fallback_buf;
-            let root = match workspace_root {
-                Some(ws) => ws,
-                None => {
-                    fallback_buf = get_fallback_cwd();
-                    &fallback_buf
-                }
-            };
+            let root = working_root(workspace_root);
             let control = process::CommandControl { log_root: workspace_root, ..Default::default() };
             let timeout = process::clamp_timeout(timeout_secs);
-            let outcome = process::execute_command(command, root, timeout, control).await;
+            let outcome = process::execute_command(command, &root, timeout, control).await;
             let text = process::format_for_model(&outcome, Some(timeout));
             // 非零退出、超时与取消都是失败：调用方据此标记工具结果，而不是只在文字里注明退出码
             if outcome.succeeded() { Ok(text) } else { Err(text) }
